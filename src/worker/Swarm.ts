@@ -1,6 +1,7 @@
 import { DurableObject } from 'cloudflare:workers'
 import type { Address } from 'viem'
-import type { Entry, Hand, Kind, Note, Round } from '../shared/Api.ts'
+import type { Entry, Hand, Kind, Live, Note, Round } from '../shared/Api.ts'
+import * as Answer from '../shared/Answer.ts'
 import * as Memo from '../shared/Memo.ts'
 import * as Gateway from './Gateway.ts'
 import * as Seal from './Seal.ts'
@@ -105,6 +106,19 @@ export class Swarm extends DurableObject<Cloudflare.Env> {
       )
       .toArray()
       .map(entry)
+  }
+
+  override async fetch(request: Request) {
+    const id = this.kv.get<string>('id')
+    const row = id ? await Store.find(this.env, id) : null
+    const current = row ? await this.held(row) : undefined
+    const agent = this.kv.get<string>('agent')
+    const turn = this.kv.get<string>('turn')
+    if (!current || !agent || !turn) return sse(`data: ${JSON.stringify({ type: 'idle' } satisfies Live)}\n\n`)
+
+    const upstream = await Gateway.stream(this.env, current.token, agent, this.kv.get<number>('cursor') ?? 0, request.signal)
+    if (!upstream.ok || !upstream.body) return sse(`data: ${JSON.stringify({ type: 'idle' } satisfies Live)}\n\n`)
+    return sse(upstream.body.pipeThrough(live(turn, this.kv.get<number>('round') ?? 0)))
   }
 
   override async alarm() {
@@ -261,6 +275,8 @@ export class Swarm extends DurableObject<Cloudflare.Env> {
     )
     this.kv.delete('turn')
     this.kv.delete('started')
+    if (status === 'completed' && message)
+      await Store.update(this.env, row.id, { answer: JSON.stringify(Answer.parse(n, message, Date.now())) })
     this.log(
       status === 'completed' ? 'status' : 'error',
       `Round ${n} ${status}, spending ${trim(Memo.decimal(spent))} MACH.`,
@@ -486,6 +502,61 @@ export class Swarm extends DurableObject<Cloudflare.Env> {
       detail ?? null,
     )
   }
+}
+
+function sse(body: BodyInit) {
+  return new Response(body, { headers: { 'cache-control': 'no-store', 'content-type': 'text/event-stream' } })
+}
+
+function live(turn: string, round: number) {
+  const decoder = new TextDecoder()
+  const encoder = new TextEncoder()
+  const send = (event: Live) => encoder.encode(`data: ${JSON.stringify(event)}\n\n`)
+  let buffer = ''
+  return new TransformStream<Uint8Array, Uint8Array>({
+    start(controller) {
+      controller.enqueue(send({ round, type: 'round' }))
+    },
+    transform(chunk, controller) {
+      buffer += decoder.decode(chunk, { stream: true })
+      const blocks = buffer.split('\n\n')
+      buffer = blocks.pop() ?? ''
+      for (const block of blocks) {
+        const data = block
+          .split('\n')
+          .filter((line) => line.startsWith('data:'))
+          .map((line) => line.slice(5).trimStart())
+          .join('\n')
+        if (!data) {
+          controller.enqueue(encoder.encode(': keepalive\n\n'))
+          continue
+        }
+        const translated = translate(JSON.parse(data) as Gateway.Event, turn)
+        if (translated?.type === 'end') {
+          controller.enqueue(send(translated))
+          controller.terminate()
+          return
+        }
+        if (translated) controller.enqueue(send(translated))
+      }
+    },
+  })
+}
+
+function translate(event: Gateway.Event, turn: string): Live | undefined {
+  const outer = event.event
+  if (!outer) return undefined
+  if (outer.source === undefined) return outer.type === 'result' && event.request_id === turn ? { type: 'end' } : undefined
+
+  const inner = outer.event
+  const payload = inner?.payload ?? {}
+  const text = typeof payload['text'] === 'string' ? payload['text'] : ''
+  const offset = typeof payload['offset'] === 'number' ? payload['offset'] : null
+  if (inner?.type === 'assistant.delta') return { delta: text, item: String(payload['item_id'] ?? ''), offset, type: 'text' }
+  if (inner?.type === 'assistant.message') return { item: String(payload['item_id'] ?? ''), text, type: 'message' }
+  if (inner?.type === 'reasoning.summary.delta')
+    return { delta: text, item: `reasoning:${String(payload['model_call_index'] ?? '')}`, offset: null, type: 'thinking' }
+  return undefined
 }
 
 function left(backing: Store.Backing) {

@@ -1,6 +1,7 @@
 import { Hono } from 'hono'
 import { z } from 'zod'
 import type { Config, Detail, Pledged, Problem, Requested } from '../shared/Api.ts'
+import * as Answer from '../shared/Answer.ts'
 import * as Memo from '../shared/Memo.ts'
 import * as Chain from './Chain.ts'
 import * as Gateway from './Gateway.ts'
@@ -82,6 +83,11 @@ app.get('/api/swarms/:id', async (c) => {
   if (!row) return problem(404, 'not_found', 'No swarm has this id.')
 
   const view = await swarm(c.env, id).view()
+  const answered = view.rounds.findLast((round) => round.status === 'completed' && round.message)
+  if (!row.answer && answered?.message) {
+    row.answer = JSON.stringify(Answer.parse(answered.n, answered.message, answered.endedAt ?? Date.now()))
+    await Store.update(c.env, id, { answer: row.answer })
+  }
   const [pledges, notes] = await Promise.all([
     Store.pledges(c.env, id),
     Store.notes(c.env, id, BigInt(row.raised), new Set(view.steered)),
@@ -102,6 +108,10 @@ app.get('/api/swarms/:id/feed', async (c) => {
     return problem(400, 'invalid_request', 'after must be a nonnegative integer.')
   return c.json({ entries: await swarm(c.env, c.req.param('id')).feed(after) })
 })
+
+app.get('/api/swarms/:id/live', (c) =>
+  swarm(c.env, c.req.param('id')).fetch(new Request('https://swarm/live', { signal: c.req.raw.signal })),
+)
 
 app.post('/api/swarms/:id/pledges', async (c) => {
   const id = c.req.param('id')

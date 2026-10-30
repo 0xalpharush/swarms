@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
+import * as Answer from '../shared/Answer.ts'
 import type { Config, Detail, Entry, Note, Pledge, Round } from '../shared/Api.ts'
 import * as Api from './api.ts'
 import { Feed } from './Feed.tsx'
 import { ago, duration, mach, percent, short } from './format.ts'
-import { useMedia, useNow, usePoll, useWallet } from './hooks.ts'
+import { type Draft, useLive, useMedia, useNow, usePoll, useWallet } from './hooks.ts'
 import { Machines } from './Machines.tsx'
+import { Markdown } from './Markdown.tsx'
 import { Box } from './Pledge.tsx'
 import { Link } from './router.tsx'
 import { Bar, Constellation, Status } from './Visual.tsx'
@@ -17,7 +19,7 @@ function merge(previous: Entry[], next: readonly Entry[]) {
 }
 
 const banners = {
-  done: 'Done. The last report below is what the swarm found.',
+  done: 'Done. The answer below is what the swarm found.',
   funding: 'No money behind it yet. The first pledge starts round 1.',
   paused: 'Out of money, so the swarm is paused. A pledge resumes it.',
 } as const
@@ -35,6 +37,7 @@ export function Swarm(props: { config: Config | undefined; id: string; onTitle: 
   const wide = useMedia('(min-width: 600px)')
   const loaded = detail.data !== undefined
   const onTitle = props.onTitle
+  const draft = useLive(props.id, detail.data?.status === 'running')
 
   useEffect(() => {
     setEntries([])
@@ -102,6 +105,13 @@ export function Swarm(props: { config: Config | undefined; id: string; onTitle: 
           <h1 className="display">{swarm.title}</h1>
           <p className="goal">{swarm.goal}</p>
           {swarm.status !== 'running' && <p className="banner">{banners[swarm.status]}</p>}
+          <section className="answer-block">
+            <h2 className="answer-head">
+              {swarm.status === 'done' ? 'Answer' : 'Latest answer'}
+              {swarm.answer && <span>Round {swarm.answer.round}</span>}
+            </h2>
+            <Latest draft={draft} swarm={swarm} />
+          </section>
           <div className="tile tile-wide">
             <Constellation machines={swarm.hands.filter((hand) => hand.connected).map((hand) => hand.name)} swarm={swarm} wide={wide} />
             <p className="tile-caption">
@@ -146,7 +156,7 @@ export function Swarm(props: { config: Config | undefined; id: string; onTitle: 
           <h2 className="block-head">
             <span className="index">[4]</span> Rounds
           </h2>
-          <History history={swarm.history} />
+          <History draft={draft} history={swarm.history} />
         </div>
         <div className="col-side">
           <h2 className="block-head">
@@ -246,7 +256,56 @@ function Notes(props: { done: boolean; notes: readonly Note[]; onBack: (note: st
   )
 }
 
-function History(props: { history: readonly Round[] }) {
+const waiting = {
+  done: 'The swarm ended without a report.',
+  funding: 'No answer yet. The first pledge starts round 1, and its report lands here.',
+  paused: 'No answer yet. The swarm is paused until the next pledge.',
+  running: '',
+} as const
+
+function writing(draft: Draft | undefined, round: Round | undefined) {
+  if (!draft || !round || draft.round !== round.n) return undefined
+  const text = draft.items.at(-1)?.text
+  return { text: text ? Answer.parse(round.n, text, 0).text : '', thinking: draft.thinking }
+}
+
+function Latest(props: { draft: Draft | undefined; swarm: Detail }) {
+  const now = useNow()
+  const answer = props.swarm.answer
+  const running = props.swarm.history.findLast((round) => round.status === 'running')
+  const live = writing(props.draft, running)
+  return (
+    <div className="answer">
+      {running && (
+        <div className="answer-live">
+          <p className="answer-meta">
+            <i className="answer-dot" />
+            Round {running.n} is writing{answer ? ' the next answer' : ' the first answer'} · {duration(now - running.startedAt)}
+          </p>
+          {live?.text ? (
+            <Markdown streaming text={live.text} />
+          ) : (
+            <p className="answer-thinking">{live?.thinking ? `Thinking: …${live.thinking.slice(-280)}` : 'The lead is working. Its words stream in here as it writes them.'}</p>
+          )}
+        </div>
+      )}
+      {answer ? (
+        <div className="answer-final">
+          <p className="answer-meta">
+            <span>Round {answer.round}</span>
+            <span>{ago(answer.at, now)}</span>
+            {answer.done ? <span className="tag tag-on">Goal met</span> : answer.next && <span>Next: {answer.next}</span>}
+          </p>
+          <Markdown text={answer.text} />
+        </div>
+      ) : (
+        !running && <p className="empty">{waiting[props.swarm.status]}</p>
+      )}
+    </div>
+  )
+}
+
+function History(props: { draft: Draft | undefined; history: readonly Round[] }) {
   const now = useNow()
   if (props.history.length === 0) return <p className="empty">No rounds yet. Each round ends with a report, and it shows up here.</p>
   const ordered = [...props.history].sort((a, b) => b.n - a.n)
@@ -265,24 +324,17 @@ function History(props: { history: readonly Round[] }) {
               <span>{duration((round.endedAt ?? now) - round.startedAt)}</span>
               <span>{mach(round.spent)} MACH</span>
             </summary>
-            {round.message ? <Report text={round.message} /> : <p className="empty">{round.status === 'running' ? 'Working. The report appears here when the round ends.' : 'No report.'}</p>}
+            {round.message ? (
+              <Markdown text={round.message} />
+            ) : round.status === 'running' && writing(props.draft, round)?.text ? (
+              <Markdown streaming text={writing(props.draft, round)?.text ?? ''} />
+            ) : (
+              <p className="empty">{round.status === 'running' ? 'Working. The report streams in here as the lead writes it.' : 'No report.'}</p>
+            )}
           </details>
         </li>
       ))}
     </ol>
-  )
-}
-
-function Report(props: { text: string }) {
-  return (
-    <p className="report">
-      {props.text.split('\n').map((line, index) => (
-        <span className={/\S {2,}\S/.test(line) ? 'report-table' : undefined} key={index}>
-          {line}
-          {'\n'}
-        </span>
-      ))}
-    </p>
   )
 }
 

@@ -1,9 +1,10 @@
+import * as Answer from '../shared/Answer.ts'
 import type { Config, Detail, Entry, Kind, Note, Pledge, Pledged, Requested, Round, Status, Summary } from '../shared/Api.ts'
 import { decimal, units } from '../shared/Memo.ts'
 
 type Line = readonly [Kind, string, (string | null)?]
 
-type Live = Detail & { cursor: number; flicker: readonly string[]; next: number; script: readonly Line[]; steered: Set<string> }
+type Live = Omit<Detail, 'answer'> & { cursor: number; flicker: readonly string[]; next: number; script: readonly Line[]; steered: Set<string> }
 
 const minute = 60_000
 
@@ -366,7 +367,9 @@ function find(key: string) {
 }
 
 function summary(swarm: Live): Summary {
+  const answered = swarm.history.findLast((round) => round.status === 'completed' && round.message)
   return {
+    answer: answered?.message ? Answer.parse(answered.n, answered.message, answered.endedAt ?? swarm.updatedAt) : null,
     contributors: swarm.contributors,
     createdAt: swarm.createdAt,
     goal: swarm.goal,

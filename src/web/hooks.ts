@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
-import type { Config } from '../shared/Api.ts'
+import type { Config, Live } from '../shared/Api.ts'
 import * as Api from './api.ts'
 import * as Wallet from './wallet.ts'
 
@@ -61,6 +61,54 @@ export function usePoll<T>(load: () => Promise<T>, ms: number, key: string) {
 
   const reload = useCallback(() => setVersion((value) => value + 1), [])
   return [state, reload] as const
+}
+
+export type Draft = { items: { id: string; text: string }[]; round: number; thinking: string }
+
+function apply(draft: Draft | undefined, event: Live): Draft | undefined {
+  if (event.type === 'round') return draft?.round === event.round ? draft : { items: [], round: event.round, thinking: '' }
+  if (!draft) return draft
+  if (event.type === 'thinking') return { ...draft, thinking: (draft.thinking + event.delta).slice(-2000) }
+  if (event.type !== 'text' && event.type !== 'message') return draft
+
+  const found = draft.items.find((item) => item.id === event.item)
+  const before = found?.text ?? ''
+  const text =
+    event.type === 'message' ? event.text : event.offset === null ? before + event.delta : before.slice(0, event.offset) + event.delta
+  const items = found
+    ? draft.items.map((item) => (item === found ? { id: item.id, text } : item))
+    : [...draft.items, { id: event.item, text }]
+  return { ...draft, items, thinking: event.type === 'text' ? '' : draft.thinking }
+}
+
+export function useLive(id: string, active: boolean) {
+  const [draft, setDraft] = useState<Draft>()
+  useEffect(() => {
+    if (!active || Api.fixture) return
+    let alive = true
+    let source: EventSource | undefined
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const again = (ms: number) => {
+      source?.close()
+      if (alive) timer = setTimeout(open, ms)
+    }
+    const open = () => {
+      source = new EventSource(`/api/swarms/${encodeURIComponent(id)}/live`)
+      source.onmessage = (message) => {
+        const event = JSON.parse(String(message.data)) as Live
+        if (event.type === 'end' || event.type === 'idle') return again(event.type === 'end' ? 1500 : 4000)
+        setDraft((previous) => apply(previous, event))
+      }
+      source.onerror = () => again(3000)
+    }
+    open()
+    return () => {
+      alive = false
+      source?.close()
+      clearTimeout(timer)
+    }
+  }, [active, id])
+  return draft
 }
 
 export function useNow(ms = 1000) {

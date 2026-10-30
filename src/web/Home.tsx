@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import * as Answer from '../shared/Answer.ts'
 import type { Status as Kind, Summary } from '../shared/Api.ts'
 import { decimal, units } from '../shared/Memo.ts'
 import * as Api from './api.ts'
@@ -31,6 +32,14 @@ function Card(props: { index: number; now: number; swarm: Summary }) {
       </p>
       <h3 className="card-title">{swarm.title}</h3>
       <p className="card-goal">{swarm.goal}</p>
+      {swarm.answer && (
+        <div className="card-answer">
+          <p className="label">
+            {swarm.status === 'done' ? 'Answer' : 'Latest answer'} · round {swarm.answer.round}
+          </p>
+          <p>{Answer.excerpt(swarm.answer.text)}</p>
+        </div>
+      )}
       <Bar swarm={swarm} />
       <dl className="figures">
         <div>

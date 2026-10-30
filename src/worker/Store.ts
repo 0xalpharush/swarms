@@ -1,7 +1,8 @@
-import type { Note, Pledge, Summary } from '../shared/Api.ts'
+import type { Answer, Note, Pledge, Summary } from '../shared/Api.ts'
 import * as Memo from '../shared/Memo.ts'
 
 export type Row = {
+  answer: string | null
   contributors: number
   created_at: number
   goal: string
@@ -31,13 +32,13 @@ export type Backing = {
   swarm: string
 }
 
-export type Fields = Partial<Pick<Row, 'machines' | 'rounds' | 'status' | 'workers'>>
+export type Fields = Partial<Pick<Row, 'answer' | 'machines' | 'rounds' | 'status' | 'workers'>>
 
-export const perWorker = 60_000n
+export const perWorker = 100_000n
 
-export const reserve = 60_000n
+export const reserve = 120_000n
 
-export const minPledge = 100_000n
+export const minPledge = 250_000n
 
 export const maxParallel = 4
 
@@ -54,6 +55,7 @@ export function parallel(remaining: bigint) {
 
 export function summary(row: Row, current?: bigint): Summary {
   return {
+    answer: row.answer ? (JSON.parse(row.answer) as Answer) : null,
     contributors: row.contributors,
     createdAt: row.created_at,
     goal: row.goal,

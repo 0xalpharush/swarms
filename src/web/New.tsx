@@ -18,7 +18,7 @@ const stages = [
 export function New(props: { config: Config | undefined }) {
   const [title, setTitle] = useState('')
   const [goal, setGoal] = useState('')
-  const [amount, setAmount] = useState('0.10')
+  const [amount, setAmount] = useState('0.25')
   const [note, setNote] = useState('')
   const [state, setState] = useState<{ created?: Summary; error?: string; short?: boolean; step?: Step | 'create' }>({})
   const busy = state.step !== undefined

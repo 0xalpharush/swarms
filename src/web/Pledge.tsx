@@ -8,7 +8,7 @@ import * as Wallet from './wallet.ts'
 
 export type Step = 'request' | 'approve' | 'confirm'
 
-export const amounts = ['0.10', '0.25', '1', '5'] as const
+export const amounts = ['0.25', '0.50', '1', '5'] as const
 
 export const disclosure = "Tempo Wallet will ask you to approve a spending key for this app. Its wallet cap is at least 1 MACH, but the swarm can spend at most your pledge: the key's channel opens with exactly the pledged amount and never tops up. Unspent money goes back when the swarm finishes."
 
@@ -41,7 +41,7 @@ export function Amount(props: { config: Config | undefined; onChange: (value: st
         Amount
       </label>
       <div className="field-input">
-        <input id="amount" inputMode="decimal" onChange={(event) => props.onChange(event.target.value.replace(',', '.'))} placeholder="0.10" value={props.value} />
+        <input id="amount" inputMode="decimal" onChange={(event) => props.onChange(event.target.value.replace(',', '.'))} placeholder="0.25" value={props.value} />
         <span className="field-suffix">MACH</span>
       </div>
       <div className="chips">
@@ -114,7 +114,7 @@ export function WalletLine(props: { amount: string; config: Config | undefined }
 }
 
 export function Box(props: { config: Config | undefined; note: string; noteRef: RefObject<HTMLDivElement | null>; onDone: () => void; onNote: (note: string) => void; swarm: Summary }) {
-  const [amount, setAmount] = useState('0.10')
+  const [amount, setAmount] = useState('0.25')
   const [state, setState] = useState<{ done?: string; error?: string; short?: boolean; step?: Step }>({})
   const busy = state.step !== undefined
   const ready = valid(amount, props.config) && props.note.length <= maxNote && !!props.config && !busy

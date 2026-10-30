@@ -1647,22 +1647,6 @@ kbd::after {
   border-color: var(--red);
 }
 
-.report {
-  max-width: 40em;
-  padding: 0 0 var(--space-5);
-  font-size: var(--size-large);
-  line-height: 1.4;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-
-.report-table {
-  font-family: var(--mono);
-  font-size: var(--size-small);
-  letter-spacing: 0.01em;
-  line-height: 1.7;
-}
-
 .round .empty {
   padding-top: 0;
   padding-bottom: var(--space-3);
@@ -1850,6 +1834,218 @@ kbd::after {
   margin-top: 10px;
   max-width: 28em;
   color: var(--grey-700);
+}
+
+.answer-block {
+  margin-top: var(--space-5);
+  padding-top: 12px;
+  border-top: 1px solid var(--black);
+}
+
+.answer-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: var(--space-3);
+  font-size: var(--size-title);
+  font-weight: 400;
+  letter-spacing: -0.02em;
+}
+
+.answer-head span {
+  font-family: var(--mono);
+  font-size: var(--size-small);
+  letter-spacing: 0.02em;
+  color: var(--grey-600);
+}
+
+.answer {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.answer-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 14px;
+  margin-bottom: var(--space-3);
+  font-family: var(--mono);
+  font-size: var(--size-small);
+  letter-spacing: 0.02em;
+  color: var(--grey-600);
+}
+
+.answer-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--green);
+  box-shadow: 0 0 8px var(--green);
+  animation: pulse 1.4s ease-in-out infinite;
+}
+
+.answer-live {
+  padding: var(--space-3) var(--space-3) var(--space-1);
+  background: var(--grey-100);
+  border-left: 2px solid var(--green);
+  border-radius: var(--radius-small);
+}
+
+.answer-thinking {
+  padding-bottom: var(--space-3);
+  font-family: var(--serif);
+  font-style: italic;
+  color: var(--grey-600);
+  max-width: 44em;
+}
+
+.answer-final .markdown {
+  font-size: var(--size-headline);
+}
+
+.card-answer {
+  margin-top: var(--space-3);
+  padding: 10px 12px;
+  background: var(--grey-100);
+  border-radius: var(--radius-small);
+}
+
+.card-answer .label {
+  margin-bottom: 4px;
+}
+
+.card-answer p:last-child {
+  color: var(--grey-700);
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4;
+  overflow: hidden;
+}
+
+.markdown {
+  max-width: 44em;
+  padding-bottom: var(--space-3);
+  font-size: var(--size-large);
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.markdown > * + * {
+  margin-top: 0.75em;
+}
+
+.markdown h1,
+.markdown h2,
+.markdown h3,
+.markdown h4 {
+  font-family: var(--serif);
+  font-weight: 400;
+  letter-spacing: -0.02em;
+  line-height: 1.15;
+  margin-top: 1.2em;
+}
+
+.markdown h1 {
+  font-size: var(--size-title);
+}
+
+.markdown h2 {
+  font-size: var(--size-headline);
+}
+
+.markdown h3,
+.markdown h4 {
+  font-size: var(--size-large);
+}
+
+.markdown > :first-child {
+  margin-top: 0;
+}
+
+.markdown strong {
+  font-weight: 400;
+  background: linear-gradient(transparent 62%, var(--green-wash) 62%);
+}
+
+.markdown ul,
+.markdown ol {
+  padding-left: 1.3em;
+}
+
+.markdown li + li {
+  margin-top: 0.3em;
+}
+
+.markdown code {
+  font-family: var(--mono);
+  font-size: 0.82em;
+  padding: 1px 4px;
+  background: var(--grey-200);
+  border-radius: 3px;
+}
+
+.markdown pre {
+  padding: 12px 14px;
+  background: var(--grey-100);
+  border: 1px solid var(--grey-300);
+  border-radius: var(--radius-small);
+  overflow-x: auto;
+}
+
+.markdown pre code {
+  padding: 0;
+  background: none;
+  font-size: var(--size-small);
+  line-height: 1.6;
+}
+
+.markdown blockquote {
+  padding-left: 12px;
+  border-left: 2px solid var(--grey-400);
+  color: var(--grey-600);
+}
+
+.markdown a {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.markdown-table {
+  overflow-x: auto;
+}
+
+.markdown table {
+  border-collapse: collapse;
+  font-family: var(--mono);
+  font-size: var(--size-small);
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+}
+
+.markdown th,
+.markdown td {
+  padding: 6px 14px 6px 0;
+  border-bottom: 1px solid var(--grey-300);
+  text-align: left;
+}
+
+.markdown th {
+  color: var(--grey-600);
+  font-weight: 400;
+  border-bottom-color: var(--grey-500);
+}
+
+.markdown[data-streaming='true'] > :last-child::after {
+  content: '';
+  display: inline-block;
+  width: 0.5em;
+  height: 1em;
+  margin-left: 2px;
+  vertical-align: text-bottom;
+  background: var(--black);
+  animation: blink 1s steps(1) infinite;
 }
 
 @keyframes pulse {

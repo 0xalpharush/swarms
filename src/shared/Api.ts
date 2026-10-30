@@ -1,6 +1,9 @@
 export type Status = 'funding' | 'running' | 'paused' | 'done'
 
+export type Answer = { at: number; done: boolean; next: string | null; round: number; text: string }
+
 export type Summary = {
+  answer: Answer | null
   contributors: number
   createdAt: number
   goal: string
@@ -57,6 +60,12 @@ export type Entry = {
 }
 
 export type Hand = { connected: boolean; name: string }
+
+export type Live =
+  | { round: number; type: 'round' }
+  | { delta: string; item: string; offset: number | null; type: 'text' | 'thinking' }
+  | { item: string; text: string; type: 'message' }
+  | { type: 'end' | 'idle' }
 
 export type Detail = Summary & {
   feed: Entry[]
