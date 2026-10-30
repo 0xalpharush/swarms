@@ -76,9 +76,12 @@ function build(input: {
     text,
   }))
   return settle({
+    budgets: [],
+    contributions: [],
     contributors: 0,
     createdAt: at(input.age),
     cursor: 0,
+    daily: '0',
     feed,
     flicker: input.flicker ?? [],
     goal: input.goal,
@@ -90,9 +93,11 @@ function build(input: {
     notes: [],
     parallel: 1,
     pledges,
+    pool: '0',
     raised: '0',
     remaining: '0',
     rounds: input.history.length,
+    wallet: null,
     script: input.script ?? [],
     spent: input.spent,
     status: input.status,
@@ -372,10 +377,12 @@ function summary(swarm: Live): Summary {
     answer: answered?.message ? Answer.parse(answered.n, answered.message, answered.endedAt ?? swarm.updatedAt) : null,
     contributors: swarm.contributors,
     createdAt: swarm.createdAt,
+    daily: swarm.daily,
     goal: swarm.goal,
     id: swarm.id,
     machines: swarm.machines,
     parallel: swarm.parallel,
+    pool: swarm.pool,
     raised: swarm.raised,
     remaining: swarm.remaining,
     rounds: swarm.rounds,
@@ -383,16 +390,18 @@ function summary(swarm: Live): Summary {
     status: swarm.status,
     title: swarm.title,
     updatedAt: swarm.updatedAt,
+    wallet: swarm.wallet,
     workers: swarm.workers,
   }
 }
 
 function detail(swarm: Live): Detail {
-  return { ...summary(swarm), feed: swarm.feed.slice(-200), hands: swarm.hands, history: swarm.history, notes: swarm.notes, pledges: swarm.pledges }
+  return { ...summary(swarm), budgets: swarm.budgets, contributions: swarm.contributions, feed: swarm.feed.slice(-200), hands: swarm.hands, history: swarm.history, notes: swarm.notes, pledges: swarm.pledges }
 }
 
 export function config(): Promise<Config> {
   return delay({
+    budget: { days: 30, max: '100.000000', min: '0.250000', period: 86_400 },
     chainId: 4217,
     explorer: 'https://explore.tempo.xyz',
     gateway: 'https://gateway.tempo-dev.workers.dev',
@@ -401,6 +410,11 @@ export function config(): Promise<Config> {
     perWorker: '0.100000',
     reserve: '0.010000',
     rpc: 'https://rpc.tempo.xyz',
+    tokens: [
+      { address: '0x20c0000000000000000000006a37DA5C996874BE', id: 'ousd', symbol: 'OUSD' },
+      { address: '0x20c0000000000000000000000000000000000000', id: 'pathusd', symbol: 'pathUSD' },
+      { address: '0x20C000000000000000000000b9537d11c60E8b50', id: 'usdce', symbol: 'USDC.e' },
+    ],
   })
 }
 
