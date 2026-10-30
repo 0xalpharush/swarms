@@ -35,10 +35,6 @@ const refreshMs = 10_000
 
 const retryMs = 30_000
 
-const turnMs = 30 * 60_000
-
-const maxRounds = 12
-
 const maxFailures = 3
 
 const settleMs = 15_000
@@ -146,11 +142,6 @@ export class Swarm extends DurableObject<Cloudflare.Env> {
 
   async advance(row: Store.Row) {
     const rounds = this.kv.get<number>('round') ?? 0
-    if (rounds >= maxRounds) {
-      await this.done(row, `The swarm reached its limit of ${maxRounds} rounds.`)
-      return null
-    }
-
     const current = await this.current(row)
     if (!current) {
       await this.pause(row, rounds ? 'paused' : 'funding')
@@ -242,10 +233,6 @@ export class Swarm extends DurableObject<Cloudflare.Env> {
       return this.finish(row, report.value)
     if (!report.ok && report.status !== 401 && report.status < 500)
       return this.finish(row, { error: report.detail, request_id: turn, status: 'failed' })
-    if (now - (this.kv.get<number>('started') ?? now) > turnMs) {
-      await Gateway.cancel(this.env, current.token, agent, turn)
-      this.log('status', 'The round ran past 30 minutes and was cancelled.')
-    }
     return now + followMs
   }
 
@@ -577,7 +564,7 @@ function brief(
   reports: { message: string | null; n: number }[],
 ) {
   return [
-    "You are the lead agent of a crowdfunded swarm. People pledged real money for this work: every model call, machine-second and tool call you make is paid from their pledges, so spend deliberately and make each round count.",
+    "You are the lead agent of a crowdfunded swarm. People pledged real money for this work, and every model call, machine-second and tool call you make is paid from their pledges.",
     '',
     `Goal: ${money.row.title}`,
     money.row.goal,
@@ -594,7 +581,7 @@ function brief(
       ? ['', 'Reports from earlier rounds, by a previous lead agent:', ...reports.map((report) => `Round ${report.n}: ${clip(report.message ?? '', 1500)}`)]
       : []),
     '',
-    'Aim to finish this round within about 5 minutes. Reply with a short report of what this round tried and found, with concrete numbers or artifacts, and end with one last line that is exactly "STATUS: done" if the goal is met, or "STATUS: continue: <what the next round should do>".',
+    'Work as long as the goal needs. When you reply, report what this round tried and found, with concrete numbers or artifacts, and end with one last line that is exactly "STATUS: done" if the goal is met, or "STATUS: continue: <what the next round should do>".',
   ].join('\n')
 }
 
@@ -606,7 +593,7 @@ function next(money: Money, backing: Store.Backing, n: number, parallel: number,
     'Contributor notes (MACH behind each, share of everything pledged):',
     listed(notes),
     '',
-    'Continue toward the goal from where the last round ended. Same rules: terminate the sandboxes you create, aim for about 5 minutes, and end with "STATUS: done" or "STATUS: continue: <next step>".',
+    'Continue toward the goal from where the last round ended. Terminate the sandboxes you create when you no longer need them, and end your reply with "STATUS: done" or "STATUS: continue: <next step>".',
   ].join('\n')
 }
 
