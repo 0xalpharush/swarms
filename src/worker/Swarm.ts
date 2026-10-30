@@ -1,11 +1,15 @@
 import { DurableObject } from 'cloudflare:workers'
 import type { Address } from 'viem'
-import type { Entry, Hand, Kind, Live, Note, Round } from '../shared/Api.ts'
+import { keccak256, stringToHex } from 'viem'
+import type { Entry, Hand, Kind, Live, Note, Round, Token } from '../shared/Api.ts'
 import * as Answer from '../shared/Answer.ts'
 import * as Memo from '../shared/Memo.ts'
+import * as Budget from './Budget.ts'
+import * as Chain from './Chain.ts'
 import * as Gateway from './Gateway.ts'
 import * as Seal from './Seal.ts'
 import * as Store from './Store.ts'
+import * as Vault from './Vault.ts'
 
 export type Pledged = {
   amount: string
@@ -15,9 +19,28 @@ export type Pledged = {
   swarm: string
 }
 
+export type Contributed = {
+  amount: string
+  contributor: Address
+  hash: string
+  note: string | null
+  noteId: string | null
+  swarm: string
+  token: Token
+}
+
+export type Budgeted = {
+  amount: string
+  contributor: Address
+  note: string | null
+  period: number
+  swarm: string
+  token: Token
+}
+
 export type View = { feed: Entry[]; hands: Hand[]; left: string | null; rounds: Round[]; steered: string[] }
 
-type Current = { backing: Store.Backing; token: string }
+type Current = { backing: Store.Backing; kind: 'pledge'; token: string } | { kind: 'pool'; token: string }
 
 type Money = { left: bigint; row: Store.Row }
 
@@ -39,6 +62,18 @@ const maxFailures = 3
 
 const settleMs = 15_000
 
+const unfundedMs = 15 * 60_000
+
+const refundMs = 60_000
+
+const refundWaitMs = 20 * 60_000
+
+const smallestSwap = 10_000n
+
+const smallestPull = 30_000n
+
+const poolKey = { days: 30, deposit: 0.1, limit: 100, token: 'ousd', topUp: 0.05 } as const
+
 export class Swarm extends DurableObject<Cloudflare.Env> {
   stepping: Promise<number | null> | undefined
   opened = new Map<string, string>()
@@ -59,8 +94,29 @@ export class Swarm extends DurableObject<Cloudflare.Env> {
       `${short(input.contributor)} pledged ${trim(input.amount)} MACH${input.note ? ' with a note' : ''}`,
       input.note,
     )
-    if (input.noteId) await this.steer(input.swarm, input.noteId, input.amount)
+    if (input.noteId) await this.steer(input.swarm, input.noteId, `pledged ${trim(input.amount)} MACH`)
     await this.ctx.storage.setAlarm(Date.now())
+  }
+
+  async contributed(input: Contributed) {
+    this.kv.put('id', input.swarm)
+    this.log(
+      'funds',
+      `${short(input.contributor)} sent ${trim(input.amount)} ${Chain.tokens[input.token].symbol}${input.note ? ' with a note' : ''}`,
+      [input.note, input.hash].filter(Boolean).join('\n'),
+    )
+    if (input.noteId) await this.steer(input.swarm, input.noteId, `sent ${trim(input.amount)} ${Chain.tokens[input.token].symbol}`)
+    if (!this.kv.get<string>('turn')) await this.ctx.storage.setAlarm(Date.now())
+  }
+
+  async budgeted(input: Budgeted) {
+    this.kv.put('id', input.swarm)
+    this.log(
+      'funds',
+      `${short(input.contributor)} set a budget of ${trim(input.amount)} ${Chain.tokens[input.token].symbol} ${per(input.period)}${input.note ? ' with a note' : ''}`,
+      input.note,
+    )
+    if (!this.kv.get<string>('turn')) await this.ctx.storage.setAlarm(Date.now())
   }
 
   view(): View {
@@ -136,19 +192,25 @@ export class Swarm extends DurableObject<Cloudflare.Env> {
     if (!row) return null
 
     if (this.kv.get<string>('turn')) return this.follow(row)
-    if (row.status === 'done') return null
+    if (row.status === 'done') return this.settle(row)
     return this.advance(row)
   }
 
   async advance(row: Store.Row) {
     const rounds = this.kv.get<number>('round') ?? 0
+    await this.fund(row)
     const current = await this.current(row)
     if (!current) {
-      await this.pause(row, rounds ? 'paused' : 'funding')
-      return null
+      const wake = await this.wake(row.id)
+      await this.pause(
+        row,
+        rounds ? 'paused' : 'funding',
+        wake ? `Waiting: every budget is used up for now. The next pull is at ${new Date(wake).toISOString().slice(11, 16)} UTC.` : undefined,
+      )
+      return wake
     }
     const money = await this.refresh(row, current)
-    if (this.kv.get<string>('pledge') !== current.backing.id || money.left < Store.reserve) return Date.now()
+    if (!this.holds(current) || money.left < Store.reserve) return Date.now()
 
     let agent = this.kv.get<string>('agent')
     if (!agent) {
@@ -159,21 +221,26 @@ export class Swarm extends DurableObject<Cloudflare.Env> {
       }
       agent = created.value.id
       this.kv.put('agent', agent)
+      if (current.kind === 'pool') this.kv.put('poolAgent', agent)
       this.kv.put('cursor', 0)
       this.kv.put('fresh', true)
-      this.log('status', `Created a lead agent on the gateway, paid from ${short(current.backing.contributor)}'s pledge.`, agent)
+      this.log('status', `Created a lead agent on the gateway, paid from ${payer(current)}.`, agent)
     }
 
     const n = rounds + 1
     const notes = await this.notes(money.row)
     const parallel = Store.parallel(money.left)
+    const seen = this.kv.get<number>('seen:' + agent) ?? 0
     const text = this.kv.get<boolean>('fresh')
-      ? brief(money, current.backing, n, parallel, notes, this.reports())
-      : next(money, current.backing, n, parallel, notes)
+      ? brief(money, current, n, parallel, notes, this.reports())
+      : next(money, current, n, parallel, notes, this.reports(seen))
     const sent = await Gateway.prompt(this.env, current.token, agent, { prompt: text, steer: false })
     if (!sent.ok) {
       this.log('error', `The gateway refused round ${n}.`, sent.detail)
-      if (sent.status === 401) await this.release(current.backing, current.token, 'ended')
+      if (sent.status === 401) {
+        if (current.kind === 'pledge') await this.release(current.backing, current.token, 'ended')
+        else this.retire(true)
+      }
       return Date.now() + retryMs
     }
 
@@ -181,6 +248,7 @@ export class Swarm extends DurableObject<Cloudflare.Env> {
     this.kv.put('fresh', false)
     this.kv.put('turn', sent.value.request_id)
     this.kv.put('round', n)
+    this.kv.put('seen:' + agent, n)
     this.kv.put('started', now)
     this.kv.put('workers', 0)
     this.ctx.storage.sql.exec(
@@ -195,7 +263,7 @@ export class Swarm extends DurableObject<Cloudflare.Env> {
     await Store.update(this.env, row.id, { rounds: n, status: 'running', workers: 0 })
     this.log(
       'status',
-      `Round ${n} started on ${short(current.backing.contributor)}'s pledge, with ${trim(Memo.decimal(money.left))} MACH left on it, ${parallel === 1 ? 'so the lead works alone' : `room for ${parallel - 1} explorer${parallel === 2 ? '' : 's'} beside the lead`}.`,
+      `Round ${n} started on ${payer(current)}, with ${dollars(money.left)} left on it, ${parallel === 1 ? 'so the lead works alone' : `room for ${parallel - 1} explorer${parallel === 2 ? '' : 's'} beside the lead`}.`,
       text,
     )
     return now + followMs
@@ -206,7 +274,7 @@ export class Swarm extends DurableObject<Cloudflare.Env> {
     const agent = this.kv.get<string>('agent')
     const turn = this.kv.get<string>('turn')
     if (!current || !agent || !turn) {
-      if (turn) return this.finish(row, { error: 'The pledge paying for this round ended.', request_id: turn, status: 'failed' })
+      if (turn) return this.finish(row, { error: 'The money paying for this round ended.', request_id: turn, status: 'failed' })
       return Date.now()
     }
 
@@ -225,7 +293,7 @@ export class Swarm extends DurableObject<Cloudflare.Env> {
     if (!ended && now - (this.kv.get<number>('checked') ?? 0) < refreshMs) return now + followMs
 
     this.kv.put('checked', now)
-    const [report] = await Promise.all([
+    const [report, money] = await Promise.all([
       Gateway.turn(this.env, current.token, agent, turn),
       this.refresh(row, current),
     ])
@@ -233,6 +301,7 @@ export class Swarm extends DurableObject<Cloudflare.Env> {
       return this.finish(row, report.value)
     if (!report.ok && report.status !== 401 && report.status < 500)
       return this.finish(row, { error: report.detail, request_id: turn, status: 'failed' })
+    if (current.kind === 'pool' && money.left < Store.reserve + Store.perWorker) await this.fund(money.row)
     return now + followMs
   }
 
@@ -266,7 +335,7 @@ export class Swarm extends DurableObject<Cloudflare.Env> {
       await Store.update(this.env, row.id, { answer: JSON.stringify(Answer.parse(n, message, Date.now())) })
     this.log(
       status === 'completed' ? 'status' : 'error',
-      `Round ${n} ${status}, spending ${trim(Memo.decimal(spent))} MACH.`,
+      `Round ${n} ${status}, spending ${dollars(spent)}.`,
       status === 'completed' ? null : message,
     )
 
@@ -274,11 +343,11 @@ export class Swarm extends DurableObject<Cloudflare.Env> {
     this.kv.put('failures', failures)
     if (status === 'completed' && /STATUS:\s*done/i.test(message ?? '')) {
       await this.done(row, 'The lead agent reports the goal is met.')
-      return null
+      return Date.now() + refundMs
     }
     if (failures >= maxFailures) {
       this.kv.put('failures', 0)
-      await this.pause(row, 'paused', `${failures} rounds in a row failed, so the swarm paused. A new pledge restarts it.`)
+      await this.pause(row, 'paused', `${failures} rounds in a row failed, so the swarm paused. New money restarts it.`)
       return null
     }
     return Date.now() + (status === 'completed' ? 0 : settleMs)
@@ -295,32 +364,60 @@ export class Swarm extends DurableObject<Cloudflare.Env> {
   }
 
   async current(row: Store.Row): Promise<Current | undefined> {
-    const id = this.kv.get<string>('pledge')
+    const pool = await this.pool()
+    if (pool && pool.left >= Store.reserve) {
+      if (this.kv.get<string>('source') !== 'pool') this.use('pool')
+      return { kind: 'pool', token: pool.token }
+    }
+
+    const id = this.kv.get<string>('source') === 'pledge' ? this.kv.get<string>('pledge') : undefined
     const active = await Store.active(this.env, row.id)
     const kept = active.find((backing) => backing.id === id)
-    if (kept && left(kept) >= Store.reserve) return { backing: kept, token: await this.open(kept) }
+    if (kept && left(kept) >= Store.reserve) return { backing: kept, kind: 'pledge', token: await this.open(kept) }
     if (kept) {
       const token = await this.open(kept)
       const me = await Gateway.me(this.env, token)
       const spent = me.ok && me.value.usage.channel ? Memo.units(me.value.usage.channel.spent) : BigInt(kept.spent)
       if (spent !== BigInt(kept.spent)) await Store.spend(this.env, kept.id, spent)
       const settled = { ...kept, spent: String(spent) }
-      if (left(settled) >= Store.reserve) return { backing: settled, token }
+      if (left(settled) >= Store.reserve) return { backing: settled, kind: 'pledge', token }
       await this.release(settled, token, 'spent', spent)
     }
 
     const chosen = active.find((backing) => backing.id !== id && left(backing) >= Store.reserve)
     if (!chosen) return undefined
-    this.kv.put('pledge', chosen.id)
-    this.kv.delete('agent')
-    this.kv.put('fresh', true)
-    return { backing: chosen, token: await this.open(chosen) }
+    this.use('pledge', chosen.id)
+    return { backing: chosen, kind: 'pledge', token: await this.open(chosen) }
+  }
+
+  use(source: 'pledge' | 'pool', pledge?: string) {
+    this.kv.put('source', source)
+    if (source === 'pledge' && pledge) {
+      this.kv.put('pledge', pledge)
+      this.kv.delete('agent')
+      this.kv.put('fresh', true)
+      return
+    }
+    this.kv.delete('pledge')
+    const agent = this.kv.get<string>('poolAgent')
+    if (agent) this.kv.put('agent', agent)
+    else this.kv.delete('agent')
+    this.kv.put('fresh', !agent)
+  }
+
+  holds(current: Current) {
+    if (current.kind === 'pool') return this.kv.get<string>('source') === 'pool'
+    return this.kv.get<string>('source') === 'pledge' && this.kv.get<string>('pledge') === current.backing.id
   }
 
   async held(row: Store.Row): Promise<Current | undefined> {
+    if (this.kv.get<string>('source') === 'pool') {
+      const token = await this.pooled()
+      return token ? { kind: 'pool', token } : undefined
+    }
     const id = this.kv.get<string>('pledge')
     const backing = id ? await Store.backing(this.env, row.id, id) : null
-    return backing?.status === 'active' ? { backing, token: await this.open(backing) } : undefined
+    return backing?.status === 'active' ? { backing, kind: 'pledge', token: await this.open(backing) } : undefined
   }
 
   async open(backing: Store.Backing) {
@@ -331,15 +428,245 @@ export class Swarm extends DurableObject<Cloudflare.Env> {
     return token
   }
 
+  async pooled() {
+    const sealed = this.kv.get<string>('poolKey')
+    if (!sealed) return undefined
+    const known = this.opened.get('pool')
+    if (known) return known
+    const token = await Seal.open(this.env.SWARMS_SECRET, sealed)
+    this.opened.set('pool', token)
+    return token
+  }
+
+  async pool() {
+    const token = await this.pooled()
+    if (!token) return undefined
+    const me = await Gateway.me(this.env, token)
+    if (!me.ok) {
+      if (me.status === 401) this.retire(true)
+      return undefined
+    }
+    const channel = me.value.usage.channel
+    return { left: channel ? Memo.units(channel.available) : 0n, me: me.value, token }
+  }
+
+  async mint(row: Store.Row, owner: Awaited<ReturnType<typeof Vault.account>>) {
+    const known = await this.pooled()
+    if (known) return known
+
+    const requested = await Gateway.request(this.env, poolKey)
+    if (!requested.ok) {
+      this.log('error', "The gateway did not start the swarm's own key.", requested.detail)
+      return undefined
+    }
+    const keyAuthorization = await Vault.authorize(
+      this.env,
+      owner,
+      requested.value.authorizeAccessKey as Parameters<typeof Vault.authorize>[2],
+    )
+    const completed = await Gateway.complete(this.env, {
+      id: requested.value.id,
+      keyAuthorization,
+      name: `Swarms pool: ${row.title}`.slice(0, 64),
+    })
+    if (!completed.ok) {
+      this.log('error', "The gateway refused the swarm's own key.", completed.detail)
+      return undefined
+    }
+    this.kv.put('poolKey', await Seal.seal(this.env.SWARMS_SECRET, completed.value.key))
+    this.opened.set('pool', completed.value.key)
+    this.log(
+      'funds',
+      `The swarm's wallet authorized its own gateway key: up to ${poolKey.limit} OUSD over ${poolKey.days} days, so the pool pays for rounds directly.`,
+    )
+    return completed.value.key
+  }
+
+  retire(ended = false) {
+    const spent = BigInt(this.kv.get<string>('poolChannel') ?? '0')
+    this.kv.put('poolSpent', String(BigInt(this.kv.get<string>('poolSpent') ?? '0') + spent))
+    this.kv.delete('poolChannel')
+    this.kv.delete('poolKey')
+    this.kv.delete('poolAgent')
+    this.opened.delete('pool')
+    if (this.kv.get<string>('source') === 'pool') {
+      this.kv.delete('source')
+      this.kv.delete('agent')
+    }
+    if (ended) this.log('funds', "The swarm's own gateway key ended (revoked, expired or used up), so its next rounds start a new one.")
+  }
+
+  async fund(row: Store.Row) {
+    if (!row.wallet || !row.sealed_wallet) return
+    const owner = await Vault.account(this.env, row)
+    const [pool, held] = await Promise.all([this.pool(), Vault.balances(this.env, row.wallet)])
+    let balances = held
+    const have = (pool?.left ?? 0n) + Vault.total(balances)
+    if (have < Store.stock && (await this.pull(row, Store.stock - have)) > 0n)
+      balances = await Vault.balances(this.env, row.wallet)
+
+    let swapped = false
+    for (const id of ['pathusd', 'usdce'] as const) {
+      const amount = balances[id] - Vault.dust
+      if (amount < smallestSwap) continue
+      const result = await Vault.swap(this.env, owner, id, amount).catch((error: unknown) => error as Error)
+      if (result instanceof Error) {
+        this.log('error', `Swapping ${Chain.tokens[id].symbol} to OUSD failed.`, result.message.split('\n')[0] ?? null)
+        continue
+      }
+      swapped = true
+      this.log(
+        'funds',
+        `Swapped ${trim(Memo.decimal(amount))} ${Chain.tokens[id].symbol} to ${trim(Memo.decimal(result.received))} OUSD on the stablecoin DEX (quote ${trim(Memo.decimal(result.quote))}, at least ${trim(Memo.decimal(result.minimum))}, fee ${trim(Memo.decimal(result.fee))}).`,
+        result.hash,
+      )
+    }
+    if (swapped) balances = await Vault.balances(this.env, row.wallet)
+
+    const spare = balances.ousd - Vault.dust
+    const token = spare >= smallestSwap ? await this.mint(row, owner) : undefined
+    const topped = token ? await Gateway.topUp(this.env, token, Number(spare) / 1e6) : undefined
+    if (topped && !topped.ok) this.log('error', "The gateway did not move the pool into the swarm's channel.", topped.detail)
+    if (topped?.ok) {
+      balances = { ...balances, ousd: balances.ousd - spare }
+      this.log(
+        'funds',
+        `Moved ${trim(Memo.decimal(spare))} OUSD into the swarm's gateway channel, which now holds ${dollars(Memo.units(topped.value.usage.channel?.available ?? '0'))} to spend.`,
+      )
+    }
+
+    const channel = topped?.ok ? topped.value.usage.channel : pool?.me.usage.channel
+    const loose = Vault.total(balances)
+    await Store.update(this.env, row.id, {
+      pool_left: Number((channel ? Memo.units(channel.available) : 0n) + (loose > Vault.dust * 3n ? loose - Vault.dust * 3n : 0n)),
+    })
+  }
+
+  async pull(row: Store.Row, need: bigint) {
+    if (!row.wallet) return 0n
+    const now = Date.now()
+    const ready: { allowance: Store.Allowance; room: bigint }[] = []
+    for (const allowance of await Store.allowances(this.env, row.id)) {
+      if (allowance.expires_at <= now) {
+        await Store.change(this.env, allowance.id, { detail: 'The key expired.', next_at: null, status: 'expired' })
+        this.log('funds', `${short(allowance.contributor ?? '')}'s budget expired.`)
+        continue
+      }
+      if ((allowance.next_at ?? 0) > now) continue
+      const state = await Budget.state(this.env, allowance).catch(() => undefined)
+      if (!state) continue
+      if (state.revoked) {
+        await Store.change(this.env, allowance.id, { detail: 'Revoked in Tempo Wallet.', next_at: null, status: 'revoked' })
+        this.log('funds', `${short(allowance.contributor ?? '')} revoked their budget in Tempo Wallet, so the swarm stopped pulling from it.`)
+        continue
+      }
+      const room = state.left < state.balance ? state.left : state.balance
+      const waiting =
+        state.left < Budget.smallest * 2n
+          ? { detail: 'Used up for this period.', next_at: state.periodEnd ?? now + allowance.period * 1000 }
+          : state.balance < Budget.smallest * 2n
+            ? { detail: `The wallet holds no ${Chain.tokens[allowance.token].symbol}.`, next_at: now + unfundedMs }
+            : undefined
+      await Store.change(this.env, allowance.id, {
+        detail: waiting?.detail ?? null,
+        left_now: String(state.left),
+        next_at: waiting?.next_at ?? null,
+        period_end: state.periodEnd,
+      })
+      if (!waiting) ready.push({ allowance, room })
+    }
+    if (!ready.length) return 0n
+
+    const count = Math.max(1, Math.min(ready.length, Number(need / smallestPull)))
+    const chosen = ready.slice(0, count).sort((a, b) => (a.room < b.room ? -1 : a.room > b.room ? 1 : 0))
+    let wanted = need
+    for (const [index, { allowance, room }] of chosen.entries()) {
+      const remaining = BigInt(chosen.length - index)
+      const share = (wanted + remaining - 1n) / remaining
+      const result = await Budget.pull(this.env, allowance, { amount: share, recipient: row.wallet, room })
+      if (!result.ok) {
+        await this.refused(allowance, result)
+        continue
+      }
+      wanted -= result.amount
+      const text = allowance.note
+      await Store.give(this.env, {
+        amount: String(result.amount),
+        budget: allowance.id,
+        contributor: allowance.contributor as Address,
+        id: result.hash,
+        kind: 'pull',
+        note: text,
+        note_id: allowance.note_id,
+        swarm: row.id,
+        token: allowance.token,
+      })
+      const left = room - result.amount - result.fee
+      await Store.change(this.env, allowance.id, {
+        detail: null,
+        left_now: String(left),
+        published: 1,
+        pulled: String(BigInt(allowance.pulled) + result.amount),
+        pulled_at: Date.now(),
+      })
+      this.log(
+        'funds',
+        `Pulled ${trim(Memo.decimal(result.amount))} ${Chain.tokens[allowance.token].symbol} from ${short(allowance.contributor ?? '')}'s budget (fee ${trim(Memo.decimal(result.fee))}, ${trim(Memo.decimal(left))} left this period).`,
+        result.hash,
+      )
+      if (allowance.note_id && BigInt(allowance.pulled) === 0n)
+        await this.steer(row.id, allowance.note_id, `put a daily budget of ${trim(Memo.decimal(BigInt(allowance.amount)))} ${Chain.tokens[allowance.token].symbol}`)
+      if (wanted <= 0n) break
+    }
+    return need - wanted
+  }
+
+  async refused(allowance: Store.Allowance, result: Extract<Budget.Pulled, { ok: false }>) {
+    const now = Date.now()
+    const changes: Store.Changes =
+      result.reason === 'revoked'
+        ? { detail: 'Revoked in Tempo Wallet.', next_at: null, status: 'revoked' }
+        : result.reason === 'expired'
+          ? { detail: 'The key expired.', next_at: null, status: 'expired' }
+          : result.reason === 'limit'
+            ? { detail: 'Used up for this period.', next_at: allowance.period_end ?? now + allowance.period * 1000 }
+            : result.reason === 'balance'
+              ? { detail: `The wallet holds too little ${Chain.tokens[allowance.token].symbol}.`, next_at: now + unfundedMs }
+              : { detail: result.detail, next_at: now + retryMs * 10 }
+    await Store.change(this.env, allowance.id, changes)
+    this.log('funds', `The swarm could not pull from ${short(allowance.contributor ?? '')}'s budget: ${changes.detail ?? result.detail}`, result.detail)
+  }
+
+  async wake(swarm: string) {
+    const next = (await Store.allowances(this.env, swarm))
+      .map((allowance) => allowance.next_at)
+      .filter((at): at is number => at !== null && at > Date.now())
+      .sort((a, b) => a - b)[0]
+    return next ?? null
+  }
+
   async refresh(row: Store.Row, current: Current): Promise<Money> {
-    const [me, hands] = await Promise.all([
+    const [me, hands, balances] = await Promise.all([
       Gateway.me(this.env, current.token),
       Gateway.hands(this.env, current.token),
+      current.kind === 'pool' && row.wallet ? Vault.balances(this.env, row.wallet) : undefined,
     ])
     const channel = me.ok ? me.value.usage.channel : null
-    const spent = channel ? Memo.units(channel.spent) : BigInt(current.backing.spent)
-    if (!me.ok && me.status === 401) await this.release(current.backing, current.token, 'ended', spent)
-    else if (spent !== BigInt(current.backing.spent)) await Store.spend(this.env, current.backing.id, spent)
+
+    let leftover: bigint
+    if (current.kind === 'pledge') {
+      const spent = channel ? Memo.units(channel.spent) : BigInt(current.backing.spent)
+      if (!me.ok && me.status === 401) await this.release(current.backing, current.token, 'ended', spent)
+      else if (spent !== BigInt(current.backing.spent)) await Store.spend(this.env, current.backing.id, spent)
+      const remaining = BigInt(current.backing.amount) - spent
+      const available = channel ? Memo.units(channel.available) : remaining
+      leftover = remaining < available ? remaining : available
+    } else {
+      if (!me.ok && me.status === 401) this.retire(true)
+      else if (channel) this.kv.put('poolChannel', String(Memo.units(channel.spent)))
+      const loose = balances ? Vault.total(balances) : 0n
+      leftover = (channel ? Memo.units(channel.available) : 0n) + (loose > Vault.dust * 3n ? loose - Vault.dust * 3n : 0n)
+    }
 
     const connected = hands.ok ? hands.value.hands.filter((hand) => hand.connected) : []
     const previous = new Set((this.kv.get<Hand[]>('hands') ?? []).map((hand) => hand.name))
@@ -349,15 +676,17 @@ export class Swarm extends DurableObject<Cloudflare.Env> {
       if (!connected.some((hand) => hand.name === name)) this.log('machine', `Machine ${name} left.`)
     this.kv.put('hands', connected.map((hand) => ({ connected: true, name: hand.name })))
 
-    const remaining = BigInt(current.backing.amount) - spent
-    const available = channel ? Memo.units(channel.available) : remaining
-    const leftover = remaining < available ? remaining : available
     this.kv.put('left', Memo.decimal(leftover))
     await Store.update(this.env, row.id, {
       machines: connected.length,
+      ...(current.kind === 'pool' ? { pool_left: Number(leftover), pool_spent: Number(this.spentFromPool()) } : {}),
       workers: this.kv.get<number>('workers') ?? 0,
     })
     return { left: leftover, row: (await Store.find(this.env, row.id)) ?? row }
+  }
+
+  spentFromPool() {
+    return BigInt(this.kv.get<string>('poolSpent') ?? '0') + BigInt(this.kv.get<string>('poolChannel') ?? '0')
   }
 
   async release(backing: Store.Backing, token: string, status: 'ended' | 'spent', spent?: bigint) {
@@ -370,6 +699,7 @@ export class Swarm extends DurableObject<Cloudflare.Env> {
     if (this.kv.get<string>('pledge') === backing.id) {
       this.kv.delete('pledge')
       this.kv.delete('agent')
+      this.kv.delete('source')
     }
     this.log(
       'funds',
@@ -380,14 +710,15 @@ export class Swarm extends DurableObject<Cloudflare.Env> {
   }
 
   async pause(row: Store.Row, status: 'funding' | 'paused', reason?: string) {
-    if (row.status === status && !reason) return
+    if (row.status === status && (!reason || this.kv.get<string>('paused') === reason)) return
+    if (reason) this.kv.put('paused', reason)
     await Store.update(this.env, row.id, { status })
     this.log(
       'status',
       reason ??
         (status === 'funding'
-          ? 'Waiting for its first pledge.'
-          : 'Paused: every pledge is used up. A new pledge starts the next round.'),
+          ? 'Waiting for its first contribution, budget or pledge.'
+          : 'Paused: the money is used up. A contribution, budget or pledge starts the next round.'),
     )
   }
 
@@ -397,14 +728,69 @@ export class Swarm extends DurableObject<Cloudflare.Env> {
       await Gateway.revoke(this.env, token)
       await Store.spend(this.env, backing.id, BigInt(backing.spent), 'ended')
     }
+    const pool = await this.pool()
+    if (pool) {
+      await this.sweep(pool.token)
+      const revoked = await Gateway.revoke(this.env, pool.token)
+      if (revoked.ok) {
+        this.kv.put('poolChannel', String(Memo.units(pool.me.usage.channel?.spent ?? '0')))
+        this.kv.put('expected', String(pool.left))
+        this.log('funds', `Revoked the swarm's own gateway key, so its channel closes and returns ${dollars(pool.left)} to the swarm's wallet.`)
+      }
+      this.retire()
+    }
+    await Store.end(this.env, row.id)
     this.opened.clear()
     this.kv.delete('pledge')
     this.kv.delete('agent')
-    await Store.update(this.env, row.id, { machines: 0, status: 'done', workers: 0 })
-    this.log('status', `Done. ${reason} Every pledge's unspent money goes back to its wallet.`)
+    this.kv.delete('source')
+    this.kv.put('refundAt', Date.now() + refundMs)
+    await Store.update(this.env, row.id, { machines: 0, pool_spent: Number(this.spentFromPool()), status: 'done', workers: 0 })
+    this.log(
+      'status',
+      `Done. ${reason} Every pledge's unspent money goes back to its wallet, budgets stop, and what the pool did not spend goes back to its contributors in proportion to what each put in.`,
+    )
   }
 
-  async steer(swarm: string, noteId: string, amount: string) {
+  async settle(row: Store.Row) {
+    const at = this.kv.get<number>('refundAt')
+    if (!at || this.kv.get<boolean>('refunded')) return null
+    if (Date.now() < at) return at
+    if (!row.wallet || !row.sealed_wallet) return null
+
+    const owner = await Vault.account(this.env, row)
+    let balances = await Vault.balances(this.env, row.wallet)
+    const expected = BigInt(this.kv.get<string>('expected') ?? '0')
+    if (balances.ousd < expected - expected / 10n && Date.now() - at < refundWaitMs) return Date.now() + refundMs
+
+    for (const id of ['pathusd', 'usdce'] as const) {
+      const amount = balances[id] - Vault.dust
+      if (amount >= smallestSwap) await Vault.swap(this.env, owner, id, amount).catch(() => undefined)
+    }
+    balances = await Vault.balances(this.env, row.wallet)
+    const pot = balances.ousd - Vault.dust * 2n
+    const shares = await Store.shares(this.env, row.id)
+    const total = shares.reduce((sum, share) => sum + share.amount, 0n)
+    this.kv.put('refunded', true)
+    if (pot < smallestSwap || total <= 0n) {
+      await Store.update(this.env, row.id, { pool_left: 0 })
+      this.log('funds', `The pool has ${dollars(balances.ousd)} left, too little to return.`)
+      return null
+    }
+
+    const memo = keccak256(stringToHex(`refund:${row.id}`))
+    for (const share of shares) {
+      const amount = (pot * share.amount) / total
+      if (amount < 1_000n) continue
+      const sent = await Vault.send(this.env, owner, { amount, memo, to: share.contributor }).catch((error: unknown) => error as Error)
+      if (sent instanceof Error) this.log('error', `Returning ${trim(Memo.decimal(amount))} OUSD to ${short(share.contributor)} failed.`, sent.message.split('\n')[0] ?? null)
+      else this.log('funds', `Returned ${trim(Memo.decimal(amount))} OUSD to ${short(share.contributor)}, their share of what the pool did not spend.`, sent.hash)
+    }
+    await Store.update(this.env, row.id, { pool_left: 0 })
+    return null
+  }
+
+  async steer(swarm: string, noteId: string, what: string) {
     const row = await Store.find(this.env, swarm)
     const current = row ? await this.held(row) : undefined
     const agent = this.kv.get<string>('agent')
@@ -414,7 +800,7 @@ export class Swarm extends DurableObject<Cloudflare.Env> {
     const note = (await this.notes(row)).find((found) => found.id === noteId)
     if (!note) return
     const sent = await Gateway.prompt(this.env, current.token, agent, {
-      prompt: `A contributor just pledged ${trim(amount)} MACH behind this note, which now has ${trim(note.weight)} MACH behind it (${percent(note.share)} of everything pledged, ${note.backers} backer${note.backers === 1 ? '' : 's'}): "${note.note}". Steer the swarm toward it in proportion to that weight.`,
+      prompt: `A contributor just ${what} behind this note, which now has ${dollars(Memo.units(note.weight))} behind it (${percent(note.share)} of everything contributed, ${note.backers} backer${note.backers === 1 ? '' : 's'}): "${note.note}". Steer the swarm toward it in proportion to that weight.`,
       steer: true,
     })
     if (!sent.ok) return
@@ -423,7 +809,7 @@ export class Swarm extends DurableObject<Cloudflare.Env> {
     this.log(
       'steer',
       `Steered the running round toward "${clip(note.note, 120)}"`,
-      `${trim(note.weight)} MACH behind it, ${percent(note.share)} of everything pledged`,
+      `${dollars(Memo.units(note.weight))} behind it, ${percent(note.share)} of everything contributed`,
     )
   }
 
@@ -438,10 +824,11 @@ export class Swarm extends DurableObject<Cloudflare.Env> {
       .map((row) => row.note)
   }
 
-  reports() {
+  reports(after = 0) {
     return this.ctx.storage.sql
       .exec<{ message: string | null; n: number }>(
-        "SELECT n, message FROM rounds WHERE status = 'completed' ORDER BY n DESC LIMIT 3",
+        "SELECT n, message FROM rounds WHERE status = 'completed' AND n > ? ORDER BY n DESC LIMIT 3",
+        after,
       )
       .toArray()
       .reverse()
@@ -486,7 +873,7 @@ export class Swarm extends DurableObject<Cloudflare.Env> {
       this.kv.get<number>('round') ?? 0,
       kind,
       text,
-      detail ?? null,
+      detail || null,
     )
   }
 }
@@ -550,32 +937,42 @@ function left(backing: Store.Backing) {
   return BigInt(backing.amount) - BigInt(backing.spent)
 }
 
+function payer(current: Current) {
+  return current.kind === 'pool' ? "the swarm's own pool" : `${short(current.backing.contributor)}'s pledge`
+}
+
 function pool(money: Money) {
   const row = money.row
-  return `${trim(Memo.decimal(BigInt(row.raised)))} MACH pledged by ${row.contributors} contributor${row.contributors === 1 ? '' : 's'}, ${trim(Memo.decimal(BigInt(row.remaining)))} MACH still unspent`
+  return `${dollars(BigInt(row.raised))} contributed by ${row.contributors} contributor${row.contributors === 1 ? '' : 's'} (transfers, daily budgets and pledges), ${dollars(BigInt(row.remaining))} still unspent`
+}
+
+function paid(money: Money, current: Current) {
+  return current.kind === 'pool'
+    ? `This round is paid from the swarm's own pool (transfers and daily budgets, held as OUSD), which has ${dollars(money.left)} in hand; the swarm pulls more from contributors' daily budgets as it runs low.`
+    : `This round is paid from ${short(current.backing.contributor)}'s pledge, which has ${dollars(money.left)} left.`
 }
 
 function brief(
   money: Money,
-  backing: Store.Backing,
+  current: Current,
   n: number,
   parallel: number,
   notes: Note[],
   reports: { message: string | null; n: number }[],
 ) {
   return [
-    "You are the lead agent of a crowdfunded swarm. People pledged real money for this work, and every model call, machine-second and tool call you make is paid from their pledges.",
+    'You are the lead agent of a crowdfunded swarm. People put real money into this work, and every model call, machine-second and tool call you make is paid from it.',
     '',
     `Goal: ${money.row.title}`,
     money.row.goal,
     '',
-    `Budget: ${pool(money)}. This is round ${n}; rounds continue while pledges last. This round is paid from ${short(backing.contributor)}'s pledge, which has ${trim(Memo.decimal(money.left))} MACH left; everything you and your explorers do spends from it.`,
+    `Budget: ${pool(money)}. This is round ${n}; rounds continue while the money lasts. ${paid(money, current)} Everything you and your explorers do spends from it.`,
     '',
     crew(parallel),
     '',
     'For anything that needs a real machine (running code, benchmarks, installs, downloads), create a Modal sandbox with tools.mcp__gateway__compute_create({ image: "python:3.12-slim", cpu: 1, memory: 1024, lease: 300, timeout: 900, attach: "<short name>" }). It joins as a hand with that name, so pass hand: "<short name>" to exec_command and the file tools to work there. Terminate every sandbox you create with tools.mcp__gateway__compute_terminate before you reply.',
     '',
-    'Contributors steer the swarm with their money. Their notes, with the MACH behind each and its share of everything pledged (weigh them by that share; new notes may arrive while you work):',
+    'Contributors steer the swarm with their money. Their notes, with the money behind each and its share of everything contributed (weigh them by that share; new notes may arrive while you work):',
     listed(notes),
     ...(reports.length
       ? ['', 'Reports from earlier rounds, by a previous lead agent:', ...reports.map((report) => `Round ${report.n}: ${clip(report.message ?? '', 1500)}`)]
@@ -585,13 +982,23 @@ function brief(
   ].join('\n')
 }
 
-function next(money: Money, backing: Store.Backing, n: number, parallel: number, notes: Note[]) {
+function next(
+  money: Money,
+  current: Current,
+  n: number,
+  parallel: number,
+  notes: Note[],
+  missed: { message: string | null; n: number }[],
+) {
   return [
-    `Round ${n}. ${pool(money)}. This round is paid from ${short(backing.contributor)}'s pledge, with ${trim(Memo.decimal(money.left))} MACH left on it.`,
+    `Round ${n}. ${pool(money)}. ${paid(money, current)}`,
     crew(parallel),
     '',
-    'Contributor notes (MACH behind each, share of everything pledged):',
+    'Contributor notes (money behind each, share of everything contributed):',
     listed(notes),
+    ...(missed.length
+      ? ['', 'Rounds since your last one, run by another lead agent:', ...missed.map((report) => `Round ${report.n}: ${clip(report.message ?? '', 1500)}`)]
+      : []),
     '',
     'Continue toward the goal from where the last round ended. Terminate the sandboxes you create when you no longer need them, and end your reply with "STATUS: done" or "STATUS: continue: <next step>".',
   ].join('\n')
@@ -600,8 +1007,8 @@ function next(money: Money, backing: Store.Backing, n: number, parallel: number,
 function crew(parallel: number) {
   const explorers = parallel - 1
   if (!explorers)
-    return "This round's budget is small, so work alone: do not spawn explorers, run one thing at a time and use at most one machine. Every model call reserves up to about 0.04 MACH until it finishes."
-  return `This round you may run up to ${explorers} explorer${explorers === 1 ? '' : 's'} in parallel with you: spawn_agent subagents, each taking its own angle on the goal, with at most one machine each. More money unlocks more explorers (one more per ${trim(Memo.decimal(Store.perWorker))} MACH left, up to ${Store.maxParallel - 1}). Every model call reserves up to about 0.04 MACH until it finishes, so stay within that.`
+    return "This round's budget is small, so work alone: do not spawn explorers, run one thing at a time and use at most one machine. Every model call reserves up to about $0.04 until it finishes."
+  return `This round you may run up to ${explorers} explorer${explorers === 1 ? '' : 's'} in parallel with you: spawn_agent subagents, each taking its own angle on the goal, with at most one machine each. More money unlocks more explorers (one more per ${dollars(Store.perWorker)} left, up to ${Store.maxParallel - 1}). Every model call reserves up to about $0.04 until it finishes, so stay within that.`
 }
 
 function listed(notes: Note[]) {
@@ -610,7 +1017,7 @@ function listed(notes: Note[]) {
     .slice(0, 8)
     .map(
       (note, index) =>
-        `${index + 1}. "${note.note}" (${trim(note.weight)} MACH, ${percent(note.share)}, ${note.backers} backer${note.backers === 1 ? '' : 's'})`,
+        `${index + 1}. "${note.note}" (${dollars(Memo.units(note.weight))}, ${percent(note.share)}, ${note.backers} backer${note.backers === 1 ? '' : 's'})`,
     )
     .join('\n')
 }
@@ -665,6 +1072,14 @@ function short(address: string) {
 
 function trim(amount: string) {
   return amount.replace(/(\.\d*?)0+$/, '$1').replace(/\.$/, '')
+}
+
+function dollars(atomics: bigint) {
+  return '$' + trim(Memo.decimal(atomics))
+}
+
+function per(period: number) {
+  return period === 86_400 ? 'a day' : period % 3600 === 0 ? `every ${period / 3600} h` : `every ${period} s`
 }
 
 function percent(share: number) {

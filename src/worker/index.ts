@@ -1,21 +1,31 @@
 import { Hono } from 'hono'
+import { parseEventLogs } from 'viem'
+import type { Address, Hex } from 'viem'
+import { getTransactionReceipt } from 'viem/actions'
+import { Abis } from 'viem/tempo'
 import { z } from 'zod'
-import type { Config, Detail, Pledged, Problem, Requested } from '../shared/Api.ts'
+import type { BudgetRequested, Budgeted, Config, Contributed, Detail, Pledged, Problem, Requested } from '../shared/Api.ts'
 import * as Answer from '../shared/Answer.ts'
 import * as Memo from '../shared/Memo.ts'
+import * as Budget from './Budget.ts'
 import * as Chain from './Chain.ts'
 import * as Gateway from './Gateway.ts'
 import * as Seal from './Seal.ts'
 import * as Store from './Store.ts'
 import type { Swarm } from './Swarm.ts'
+import * as Vault from './Vault.ts'
 
 export { Swarm } from './Swarm.ts'
 
-const amount = z
+const decimal = z
   .union([z.string().regex(/^\d+(\.\d{1,6})?$/), z.number().positive()])
   .transform((value) => Memo.units(typeof value === 'number' ? value.toFixed(6) : value))
+
+const amount = decimal
   .refine((value) => value >= Store.minPledge, `A pledge is at least ${Memo.decimal(Store.minPledge)} MACH.`)
   .refine((value) => value <= 100_000_000n, 'A pledge is at most 100 MACH.')
+
+const note = z.string().trim().max(Memo.maxNote).nullish()
 
 const schema = {
   approval: z
@@ -26,7 +36,15 @@ const schema = {
     .refine((input) => input.keyAuthorization !== undefined || input.transaction !== undefined, {
       message: 'Send the keyAuthorization Tempo Wallet returned, or a signed transaction carrying it.',
     }),
-  pledge: z.object({ amount, note: z.string().trim().max(Memo.maxNote).nullish() }),
+  budget: z.object({
+    amount: decimal
+      .refine((value) => value >= Store.budget.min, `A daily budget is at least ${Memo.decimal(Store.budget.min)}.`)
+      .refine((value) => value <= Store.budget.max, `A daily budget is at most ${Memo.decimal(Store.budget.max)}.`),
+    note,
+    token: z.enum(Chain.ids),
+  }),
+  contribution: z.object({ hash: z.string().regex(/^0x[0-9a-fA-F]{64}$/), note }),
+  pledge: z.object({ amount, note }),
   swarm: z.object({
     goal: z.string().trim().min(10).max(2000),
     title: z.string().trim().min(3).max(80),
@@ -52,8 +70,22 @@ function identifier() {
   return crypto.randomUUID().replace(/-/g, '').slice(0, 12)
 }
 
+async function provisioned(env: Cloudflare.Env, row: Store.Row) {
+  if (row.wallet) return { ...row, wallet: row.wallet }
+  await Store.provision(env, row.id, await Vault.create(env.SWARMS_SECRET))
+  const updated = await Store.find(env, row.id)
+  if (!updated?.wallet) throw new Error('The swarm has no wallet.')
+  return { ...updated, wallet: updated.wallet }
+}
+
 app.get('/api/config', (c) =>
   c.json({
+    budget: {
+      days: Store.budget.days,
+      max: Memo.decimal(Store.budget.max),
+      min: Memo.decimal(Store.budget.min),
+      period: Store.budget.period,
+    },
     chainId: Chain.chain.id,
     explorer: Chain.chain.blockExplorers.default.url,
     gateway: c.env.GATEWAY_URL,
@@ -62,6 +94,7 @@ app.get('/api/config', (c) =>
     perWorker: Memo.decimal(Store.perWorker),
     reserve: Memo.decimal(Store.reserve),
     rpc: c.env.TEMPO_RPC,
+    tokens: Chain.ids.map((id) => ({ address: Chain.tokens[id].address, id, symbol: Chain.tokens[id].symbol })),
   } satisfies Config),
 )
 
@@ -72,15 +105,16 @@ app.post('/api/swarms', async (c) => {
   if (input instanceof Response) return input
 
   const id = identifier()
-  await Store.insert(c.env, { goal: input.goal, id, title: input.title })
+  await Store.insert(c.env, { goal: input.goal, id, title: input.title, ...(await Vault.create(c.env.SWARMS_SECRET)) })
   const row = await Store.find(c.env, id)
   return row ? c.json(Store.summary(row), 201) : problem(502, 'unavailable', 'The swarm was not saved.')
 })
 
 app.get('/api/swarms/:id', async (c) => {
   const id = c.req.param('id')
-  const row = await Store.find(c.env, id)
-  if (!row) return problem(404, 'not_found', 'No swarm has this id.')
+  const found = await Store.find(c.env, id)
+  if (!found) return problem(404, 'not_found', 'No swarm has this id.')
+  const row = await provisioned(c.env, found)
 
   const view = await swarm(c.env, id).view()
   const answered = view.rounds.findLast((round) => round.status === 'completed' && round.message)
@@ -88,12 +122,16 @@ app.get('/api/swarms/:id', async (c) => {
     row.answer = JSON.stringify(Answer.parse(answered.n, answered.message, answered.endedAt ?? Date.now()))
     await Store.update(c.env, id, { answer: row.answer })
   }
-  const [pledges, notes] = await Promise.all([
+  const [pledges, notes, budgets, contributions] = await Promise.all([
     Store.pledges(c.env, id),
     Store.notes(c.env, id, BigInt(row.raised), new Set(view.steered)),
+    Store.budgets(c.env, id),
+    Store.contributions(c.env, id),
   ])
   return c.json({
     ...Store.summary(row, view.left === null ? undefined : Memo.units(view.left)),
+    budgets,
+    contributions,
     feed: view.feed,
     hands: view.hands,
     history: view.rounds,
@@ -113,6 +151,153 @@ app.get('/api/swarms/:id/live', (c) =>
   swarm(c.env, c.req.param('id')).fetch(new Request('https://swarm/live', { signal: c.req.raw.signal })),
 )
 
+app.post('/api/swarms/:id/contributions', async (c) => {
+  const id = c.req.param('id')
+  const input = await body(c.req.raw, schema.contribution)
+  if (input instanceof Response) return input
+  const found = await Store.find(c.env, id)
+  if (!found) return problem(404, 'not_found', 'No swarm has this id.')
+  if (found.status === 'done') return problem(409, 'conflict', 'This swarm is done.')
+  const row = await provisioned(c.env, found)
+
+  const receipt = await getTransactionReceipt(Chain.client(c.env), { hash: input.hash as Hex }).catch(() => undefined)
+  if (!receipt) return problem(404, 'not_found', 'Tempo has no receipt for this transaction yet.')
+  if (receipt.status !== 'success') return problem(400, 'invalid_request', 'The transaction reverted.')
+
+  const wallet = row.wallet.toLowerCase()
+  const sender = receipt.from.toLowerCase()
+  const logs = parseEventLogs({ abi: Abis.tip20, logs: receipt.logs })
+  const transfers = logs.flatMap((log) => {
+    const token = Chain.token(log.address)
+    return log.eventName === 'Transfer' &&
+      token &&
+      log.args.to.toLowerCase() === wallet &&
+      log.args.from.toLowerCase() === sender &&
+      sender !== wallet
+      ? [{ amount: log.args.amount, token }]
+      : []
+  })
+  const first = transfers[0]
+  if (!first)
+    return problem(
+      400,
+      'invalid_request',
+      `That transaction sends no USDC.e, pathUSD or OUSD from its sender to this swarm's address ${row.wallet}. MACH cannot be sent to a swarm: pledge it instead.`,
+    )
+
+  const text = input.note || null
+  const memos = logs.flatMap((log) =>
+    log.eventName === 'TransferWithMemo' && log.args.to.toLowerCase() === wallet ? [log.args.memo.toLowerCase()] : [],
+  )
+  if (text && !memos.includes(Memo.memo(id, text).toLowerCase()))
+    return problem(
+      400,
+      'invalid_request',
+      `The transfer's memo does not commit to this note. Send it with the memo keccak256("note:${id}:<note>").`,
+    )
+
+  const total = transfers.reduce((sum, transfer) => sum + transfer.amount, 0n)
+  const noteId = text ? await Store.noteId(text) : null
+  const existing = await Store.gift(c.env, input.hash)
+  if (existing) {
+    if (!text || existing.note || existing.kind !== 'transfer' || !noteId)
+      return problem(409, 'conflict', 'This transaction is already counted.')
+    await Store.annotate(c.env, input.hash, { note: text, note_id: noteId })
+  } else {
+    await Store.give(c.env, {
+      amount: String(total),
+      budget: null,
+      contributor: sender as Address,
+      id: input.hash as Hex,
+      kind: 'transfer',
+      note: text,
+      note_id: noteId,
+      swarm: id,
+      token: first.token,
+    })
+  }
+  await swarm(c.env, id).contributed({
+    amount: Memo.decimal(total),
+    contributor: sender as Address,
+    hash: input.hash,
+    note: text,
+    noteId,
+    swarm: id,
+    token: first.token,
+  })
+
+  const [gift, updated] = await Promise.all([Store.gift(c.env, input.hash), Store.find(c.env, id)])
+  if (!gift) return problem(502, 'unavailable', 'The contribution was not saved.')
+  return c.json({ contribution: Store.contribution(gift), swarm: Store.summary(updated ?? row) } satisfies Contributed, existing ? 200 : 201)
+})
+
+app.post('/api/swarms/:id/budgets', async (c) => {
+  const id = c.req.param('id')
+  const input = await body(c.req.raw, schema.budget)
+  if (input instanceof Response) return input
+  const found = await Store.find(c.env, id)
+  if (!found) return problem(404, 'not_found', 'No swarm has this id.')
+  if (found.status === 'done') return problem(409, 'conflict', 'This swarm is done.')
+  const row = await provisioned(c.env, found)
+
+  const requested = await Budget.request(c.env, {
+    amount: input.amount,
+    days: Store.budget.days,
+    period: Store.budget.period,
+    recipient: row.wallet,
+    token: input.token,
+  })
+  const text = input.note || null
+  const budget = identifier()
+  await Store.allow(c.env, {
+    access_key: requested.authorizeAccessKey.address,
+    amount: String(input.amount),
+    authorization: JSON.stringify(requested.authorizeAccessKey),
+    expires_at: requested.authorizeAccessKey.expiry * 1000,
+    id: budget,
+    note: text,
+    note_id: text ? await Store.noteId(text) : null,
+    period: Store.budget.period,
+    sealed_key: requested.sealed,
+    swarm: id,
+    token: input.token,
+  })
+  return c.json({ authorizeAccessKey: requested.authorizeAccessKey, budget } satisfies BudgetRequested, 201)
+})
+
+app.post('/api/swarms/:id/budgets/:budget', async (c) => {
+  const id = c.req.param('id')
+  const input = await body(c.req.raw, schema.approval)
+  if (input instanceof Response) return input
+  const [row, allowance] = await Promise.all([Store.find(c.env, id), Store.allowance(c.env, id, c.req.param('budget'))])
+  if (!row || !allowance) return problem(404, 'not_found', 'No budget has this id.')
+  if (allowance.status !== 'pending') return problem(409, 'conflict', 'This budget is already approved.')
+
+  const approved = await Budget.approve(c.env, JSON.parse(allowance.authorization) as Budget.Request, {
+    keyAuthorization: input.keyAuthorization,
+    transaction: input.transaction as Hex | undefined,
+  })
+  if (typeof approved === 'string') return problem(400, 'invalid_request', approved)
+  const activated = await Store.approve(c.env, allowance.id, {
+    amount: String(approved.limit),
+    contributor: approved.contributor,
+    key_authorization: JSON.stringify(approved.keyAuthorization),
+    published: approved.published,
+  })
+  if (!activated) return problem(409, 'conflict', 'This budget is already approved.')
+  await swarm(c.env, id).budgeted({
+    amount: Memo.decimal(approved.limit),
+    contributor: approved.contributor,
+    note: allowance.note,
+    period: allowance.period,
+    swarm: id,
+    token: allowance.token,
+  })
+
+  const [updated, saved] = await Promise.all([Store.find(c.env, id), Store.allowance(c.env, id, allowance.id)])
+  return c.json({ budget: Store.view(saved ?? allowance), swarm: Store.summary(updated ?? row) } satisfies Budgeted, 201)
+})
+
 app.post('/api/swarms/:id/pledges', async (c) => {
   const id = c.req.param('id')
   const input = await body(c.req.raw, schema.pledge)
@@ -130,13 +315,13 @@ app.post('/api/swarms/:id/pledges', async (c) => {
   })
   if (!requested.ok) return problem(502, 'upstream_failed', `The gateway did not start a key: ${requested.detail}`)
 
-  const note = input.note || null
+  const text = input.note || null
   const pledge = identifier()
   await Store.request(c.env, {
     amount: String(input.amount),
     id: pledge,
-    note,
-    note_id: note ? await Store.noteId(note) : null,
+    note: text,
+    note_id: text ? await Store.noteId(text) : null,
     request: requested.value.id,
     swarm: id,
   })

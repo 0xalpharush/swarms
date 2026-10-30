@@ -5,7 +5,8 @@ export type Requested = { authorizeAccessKey: unknown; id: string }
 export type Me = {
   wallet: `0x${string}`
   usage: {
-    channel: { available: string; deposit: string; spent: string } | null
+    channel: { available: string; deposit: string; id: string; spent: string } | null
+    limit: { remaining: string | null; total: string }
     wallet: { balance: string | null }
   }
 }
@@ -63,9 +64,14 @@ async function send<value>(env: Cloudflare.Env, path: string, init: Init = {}): 
 
 export function request(
   env: Cloudflare.Env,
-  input: { days: number; deposit: number; limit: number; topUp: number },
+  input: { days: number; deposit: number; limit: number; token?: 'mach' | 'ousd'; topUp: number },
 ) {
   return send<Requested>(env, '/api/keys/request', { body: input })
+}
+
+export async function topUp(env: Cloudflare.Env, key: string, amount: number) {
+  const topped = await send<Me | undefined>(env, '/api/keys/topup', { body: { amount }, key })
+  return topped.ok && !topped.value?.usage ? me(env, key) : (topped as Result<Me>)
 }
 
 export function complete(
