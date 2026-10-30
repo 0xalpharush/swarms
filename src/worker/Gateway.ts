@@ -1,0 +1,119 @@
+export type Result<value> = { ok: true; value: value } | { detail: string; ok: false; status: number }
+
+export type Requested = { authorizeAccessKey: unknown; id: string }
+
+export type Me = {
+  wallet: `0x${string}`
+  usage: {
+    channel: { available: string; deposit: string; spent: string } | null
+    wallet: { balance: string | null }
+  }
+}
+
+export type Report = {
+  error?: { message?: string } | string
+  ok?: { message?: string }
+  request_id: string
+  status: string
+}
+
+export type Event = {
+  event?: {
+    event?: { payload?: Record<string, unknown>; type?: string }
+    source?: string
+    type?: string
+  }
+  request_id?: string
+  seq: number
+}
+
+export type Page = { events: Event[]; has_more: boolean; next_cursor: number }
+
+export type Hands = { hands: { connected: boolean; name: string }[] }
+
+type Init = { body?: unknown; key?: string; method?: string }
+
+async function send<value>(env: Cloudflare.Env, path: string, init: Init = {}): Promise<Result<value>> {
+  const headers = new Headers({ accept: 'application/json' })
+  if (init.body !== undefined) headers.set('content-type', 'application/json')
+  if (init.key) headers.set('authorization', 'Bearer ' + init.key)
+
+  const response = await fetch(env.GATEWAY_URL + path, {
+    body: init.body === undefined ? null : JSON.stringify(init.body),
+    headers,
+    method: init.method ?? (init.body === undefined ? 'GET' : 'POST'),
+  })
+  const text = await response.text()
+  const parsed = (() => {
+    try {
+      return JSON.parse(text) as Record<string, unknown>
+    } catch {
+      return undefined
+    }
+  })()
+  if (!response.ok)
+    return {
+      detail: String(parsed?.['detail'] ?? parsed?.['error'] ?? text.slice(0, 300)),
+      ok: false,
+      status: response.status,
+    }
+
+  return { ok: true, value: parsed as value }
+}
+
+export function request(
+  env: Cloudflare.Env,
+  input: { days: number; deposit: number; limit: number; topUp: number },
+) {
+  return send<Requested>(env, '/api/keys/request', { body: input })
+}
+
+export function complete(
+  env: Cloudflare.Env,
+  input: { id: string; keyAuthorization?: unknown; name: string; transaction?: string },
+) {
+  return send<{ key: string }>(env, '/api/keys/complete', { body: input })
+}
+
+export function me(env: Cloudflare.Env, key: string) {
+  return send<Me>(env, '/api/keys/me', { key })
+}
+
+export function revoke(env: Cloudflare.Env, key: string) {
+  return send<unknown>(env, '/api/keys/revoke', { body: {}, key })
+}
+
+export function agent(env: Cloudflare.Env, key: string, input: { name: string }) {
+  return send<{ id: string }>(env, '/v1/agents', {
+    body: { harness: 'codex', name: input.name, thinking: 'low' },
+    key,
+  })
+}
+
+export function prompt(
+  env: Cloudflare.Env,
+  key: string,
+  agent: string,
+  input: { prompt: string; steer: boolean },
+) {
+  return send<{ request_id: string; status: string }>(env, `/v1/agents/${agent}/turns`, {
+    body: input,
+    key,
+  })
+}
+
+export function turn(env: Cloudflare.Env, key: string, agent: string, turn: string) {
+  return send<Report>(env, `/v1/agents/${agent}/turns/${turn}`, { key })
+}
+
+export function cancel(env: Cloudflare.Env, key: string, agent: string, turn: string) {
+  return send<unknown>(env, `/v1/agents/${agent}/turns/${turn}/cancel`, { body: {}, key })
+}
+
+export function events(env: Cloudflare.Env, key: string, agent: string, after: number) {
+  return send<Page>(env, `/v1/agents/${agent}/events?after=${after}&limit=128`, { key })
+}
+
+export function hands(env: Cloudflare.Env, key: string) {
+  return send<Hands>(env, '/v1/hands', { key })
+}

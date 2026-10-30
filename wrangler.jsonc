@@ -1,0 +1,30 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "swarms",
+  "account_id": "0a39052b0a32ba8c8444345fe21b7595",
+  "main": "./src/worker/index.ts",
+  "compatibility_date": "2026-10-01",
+  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
+  "assets": {
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*"]
+  },
+  "observability": { "enabled": true },
+  "vars": {
+    "GATEWAY_URL": "https://gateway.tempo-dev.workers.dev",
+    "TEMPO_RPC": "https://rpc.tempo.xyz"
+  },
+  "secrets": { "required": ["SWARMS_SECRET"] },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "swarms",
+      "database_id": "e500285b-17a8-4ce3-beb8-b35480defc50",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "durable_objects": {
+    "bindings": [{ "name": "SWARMS", "class_name": "Swarm" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Swarm"] }]
+}

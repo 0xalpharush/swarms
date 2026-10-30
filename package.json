@@ -1,0 +1,34 @@
+{
+  "name": "swarms",
+  "private": true,
+  "type": "module",
+  "version": "0.0.0",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "check": "tsc -b",
+    "db:migrate": "wrangler d1 migrations apply swarms --remote",
+    "db:migrate:local": "wrangler d1 migrations apply swarms --local",
+    "deploy": "vite build && wrangler deploy",
+    "gen:types": "wrangler types worker-configuration.d.ts"
+  },
+  "dependencies": {
+    "accounts": "0.21.0",
+    "hono": "^4.13.14",
+    "ox": "0.14.56",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
+    "viem": "2.57.7",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@cloudflare/vite-plugin": "^1.66.0",
+    "@types/node": "^26.6.6",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@vitejs/plugin-react": "^6.1.2",
+    "typescript": "6.0.2",
+    "vite": "^8.3.5",
+    "wrangler": "^4.156.0"
+  }
+}
