@@ -40,6 +40,8 @@ const maxRounds = 12
 
 const maxFailures = 3
 
+const settleMs = 15_000
+
 export class Swarm extends DurableObject<Cloudflare.Env> {
   stepping: Promise<number | null> | undefined
   opened = new Map<string, string>()
@@ -188,7 +190,7 @@ export class Swarm extends DurableObject<Cloudflare.Env> {
     await Store.update(this.env, row.id, { rounds: n, status: 'running', workers: 0 })
     this.log(
       'status',
-      `Round ${n} started on ${short(current.backing.contributor)}'s pledge, with ${trim(Memo.decimal(money.left))} MACH left on it and room for ${parallel} parallel explorer${parallel === 1 ? '' : 's'}.`,
+      `Round ${n} started on ${short(current.backing.contributor)}'s pledge, with ${trim(Memo.decimal(money.left))} MACH left on it, ${parallel === 1 ? 'so the lead works alone' : `room for ${parallel - 1} explorer${parallel === 2 ? '' : 's'} beside the lead`}.`,
       text,
     )
     return now + followMs
@@ -241,6 +243,7 @@ export class Swarm extends DurableObject<Cloudflare.Env> {
       report.status === 'completed' ? 'completed' : report.status === 'cancelled' ? 'cancelled' : 'failed'
     this.flush()
     const current = await this.held(row)
+    if (current) await this.sweep(current.token)
     const money = current ? await this.refresh(row, current) : { left: 0n, row: (await Store.find(this.env, row.id)) ?? row }
     const before = BigInt(
       this.ctx.storage.sql
@@ -275,7 +278,17 @@ export class Swarm extends DurableObject<Cloudflare.Env> {
       await this.pause(row, 'paused', `${failures} rounds in a row failed, so the swarm paused. A new pledge restarts it.`)
       return null
     }
-    return Date.now()
+    return Date.now() + (status === 'completed' ? 0 : settleMs)
+  }
+
+  async sweep(token: string) {
+    if (!(this.kv.get<Hand[]>('hands') ?? []).length) return
+    const listed = await Gateway.sandboxes(this.env, token)
+    if (!listed.ok) return
+    for (const sandbox of listed.value.sandboxes.filter((found) => found.status !== 'terminated')) {
+      const ended = await Gateway.terminate(this.env, token, sandbox.sandboxId)
+      if (ended.ok) this.log('machine', `Shut down ${sandbox.hand ?? sandbox.sandboxId}, which the round left running.`)
+    }
   }
 
   async current(row: Store.Row): Promise<Current | undefined> {
@@ -283,7 +296,15 @@ export class Swarm extends DurableObject<Cloudflare.Env> {
     const active = await Store.active(this.env, row.id)
     const kept = active.find((backing) => backing.id === id)
     if (kept && left(kept) >= Store.reserve) return { backing: kept, token: await this.open(kept) }
-    if (kept) await this.release(kept, await this.open(kept), 'spent')
+    if (kept) {
+      const token = await this.open(kept)
+      const me = await Gateway.me(this.env, token)
+      const spent = me.ok && me.value.usage.channel ? Memo.units(me.value.usage.channel.spent) : BigInt(kept.spent)
+      if (spent !== BigInt(kept.spent)) await Store.spend(this.env, kept.id, spent)
+      const settled = { ...kept, spent: String(spent) }
+      if (left(settled) >= Store.reserve) return { backing: settled, token }
+      await this.release(settled, token, 'spent', spent)
+    }
 
     const chosen = active.find((backing) => backing.id !== id && left(backing) >= Store.reserve)
     if (!chosen) return undefined
@@ -337,7 +358,10 @@ export class Swarm extends DurableObject<Cloudflare.Env> {
   }
 
   async release(backing: Store.Backing, token: string, status: 'ended' | 'spent', spent?: bigint) {
-    if (status === 'spent') await Gateway.revoke(this.env, token)
+    if (status === 'spent') {
+      await this.sweep(token)
+      await Gateway.revoke(this.env, token)
+    }
     await Store.spend(this.env, backing.id, spent ?? BigInt(backing.spent), status)
     this.opened.delete(backing.id)
     if (this.kv.get<string>('pledge') === backing.id) {
@@ -489,7 +513,7 @@ function brief(
     '',
     `Budget: ${pool(money)}. This is round ${n}; rounds continue while pledges last. This round is paid from ${short(backing.contributor)}'s pledge, which has ${trim(Memo.decimal(money.left))} MACH left; everything you and your explorers do spends from it.`,
     '',
-    `This round you may run up to ${parallel} explorer${parallel === 1 ? '' : 's'} in parallel: spawn_agent subagents, each taking its own angle on the goal. More money unlocks more parallel explorers (one per ${trim(Memo.decimal(Store.perWorker))} MACH left, up to ${Store.maxParallel}).`,
+    crew(parallel),
     '',
     'For anything that needs a real machine (running code, benchmarks, installs, downloads), create a Modal sandbox with tools.mcp__gateway__compute_create({ image: "python:3.12-slim", cpu: 1, memory: 1024, lease: 300, timeout: 900, attach: "<short name>" }). It joins as a hand with that name, so pass hand: "<short name>" to exec_command and the file tools to work there. Terminate every sandbox you create with tools.mcp__gateway__compute_terminate before you reply.',
     '',
@@ -505,13 +529,21 @@ function brief(
 
 function next(money: Money, backing: Store.Backing, n: number, parallel: number, notes: Note[]) {
   return [
-    `Round ${n}. ${pool(money)}. This round is paid from ${short(backing.contributor)}'s pledge, with ${trim(Memo.decimal(money.left))} MACH left on it; up to ${parallel} parallel explorer${parallel === 1 ? '' : 's'}.`,
+    `Round ${n}. ${pool(money)}. This round is paid from ${short(backing.contributor)}'s pledge, with ${trim(Memo.decimal(money.left))} MACH left on it.`,
+    crew(parallel),
     '',
     'Contributor notes (MACH behind each, share of everything pledged):',
     listed(notes),
     '',
     'Continue toward the goal from where the last round ended. Same rules: terminate the sandboxes you create, aim for about 5 minutes, and end with "STATUS: done" or "STATUS: continue: <next step>".',
   ].join('\n')
+}
+
+function crew(parallel: number) {
+  const explorers = parallel - 1
+  if (!explorers)
+    return "This round's budget is small, so work alone: do not spawn explorers, run one thing at a time and use at most one machine. Every model call reserves up to about 0.04 MACH until it finishes."
+  return `This round you may run up to ${explorers} explorer${explorers === 1 ? '' : 's'} in parallel with you: spawn_agent subagents, each taking its own angle on the goal, with at most one machine each. More money unlocks more explorers (one more per ${trim(Memo.decimal(Store.perWorker))} MACH left, up to ${Store.maxParallel - 1}). Every model call reserves up to about 0.04 MACH until it finishes, so stay within that.`
 }
 
 function listed(notes: Note[]) {

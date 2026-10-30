@@ -33,7 +33,7 @@ export type Backing = {
 
 export type Fields = Partial<Pick<Row, 'machines' | 'rounds' | 'status' | 'workers'>>
 
-export const perWorker = 100_000n
+export const perWorker = 60_000n
 
 export const reserve = 60_000n
 
@@ -49,7 +49,7 @@ const totals = `select s.*,
   from swarms s`
 
 export function parallel(remaining: bigint) {
-  return Math.min(maxParallel, Math.max(1, Number(remaining / perWorker)))
+  return Math.min(maxParallel, Math.max(1, 1 + Number((remaining - reserve) / perWorker)))
 }
 
 export function summary(row: Row, current?: bigint): Summary {

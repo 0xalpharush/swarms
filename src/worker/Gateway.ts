@@ -114,6 +114,18 @@ export function events(env: Cloudflare.Env, key: string, agent: string, after: n
   return send<Page>(env, `/v1/agents/${agent}/events?after=${after}&limit=128`, { key })
 }
 
+export function sandboxes(env: Cloudflare.Env, key: string) {
+  return send<{ sandboxes: { hand?: string | null; sandboxId: string; status: string }[] }>(
+    env,
+    '/v1/compute/list',
+    { body: {}, key },
+  )
+}
+
+export function terminate(env: Cloudflare.Env, key: string, sandboxId: string) {
+  return send<unknown>(env, '/v1/compute/terminate', { body: { sandboxId }, key })
+}
+
 export function hands(env: Cloudflare.Env, key: string) {
   return send<Hands>(env, '/v1/hands', { key })
 }
