@@ -14,7 +14,7 @@ const integer = { type: 'integer' }
 
 const time = { description: 'Unix time in ms.', type: 'integer' }
 
-const mach = { description: 'MACH with 6 decimals, such as "0.250000".', type: 'string' }
+const mach = { description: 'An amount with 6 decimals, such as "0.250000", in MACH or the pledge\'s token.', type: 'string' }
 
 const nullable = (schema: Json) => ({ anyOf: [schema, { type: 'null' }] })
 
@@ -53,6 +53,8 @@ const budget = parameter('budget', 'path', string, 'The budget id from the budge
 const usd = { description: 'A USD stablecoin amount with 6 decimals, such as "0.250000".', type: 'string' }
 
 const token = { enum: ['ousd', 'pathusd', 'usdce'], type: 'string' }
+
+const currency = { enum: ['mach', 'ousd', 'pathusd', 'usdce'], type: 'string' }
 
 const address = { pattern: '^0x[0-9a-fA-F]{40}$', type: 'string' }
 
@@ -114,7 +116,7 @@ const schemas = {
     perWorker: mach,
     reserve: mach,
     rpc: string,
-    tokens: { items: object({ address, id: token, symbol: string }), type: 'array' },
+    tokens: { items: object({ address, id: currency, pool: { description: 'Whether the swarm can pool it: transfers and budgets take pool tokens, pledges take all.', type: 'boolean' }, symbol: string }), type: 'array' },
   }),
   Contributed: object({ contribution: ref('Contribution'), swarm: ref('Summary') }),
   Contribution: object(
@@ -202,6 +204,7 @@ const schemas = {
     note: nullable(string),
     spent: mach,
     status: { enum: ['active', 'spent', 'ended'], type: 'string' },
+    token: currency,
   }),
   Pledged: object({
     pledge: ref('Pledge'),
@@ -276,7 +279,7 @@ export function document(origin: string) {
       schemas,
     },
     info: {
-      description: `Swarms are crowdfunded, long-running AI agents on the Tempo gateway, funded by MACH pledges, one-off stablecoin transfers to the swarm's wallet and daily budgets, and steered by notes weighted by the money behind them. Reading needs no account. A pledge is a spending key the contributor approves in Tempo Wallet, at least ${Memo.decimal(Store.minPledge)} MACH; a daily budget is a key the swarm pulls with, approved the same way. Errors are problem JSON with a stable code. The same operations are MCP tools at ${origin}/mcp.`,
+      description: `Swarms are crowdfunded, long-running AI agents on the Tempo gateway, funded by pledges in MACH or a stablecoin, one-off stablecoin transfers to the swarm's wallet and daily budgets, and steered by notes weighted by the money behind them. Reading needs no account. A pledge is a spending key the contributor approves in Tempo Wallet, at least ${Memo.decimal(Store.minPledge)} MACH; a daily budget is a key the swarm pulls with, approved the same way. Errors are problem JSON with a stable code. The same operations are MCP tools at ${origin}/mcp.`,
       title: 'Swarms',
       version: '1',
     },

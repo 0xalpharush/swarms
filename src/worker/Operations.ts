@@ -58,9 +58,9 @@ function units(value: string | number) {
 const decimal = z.union([z.string().regex(/^\d+(\.\d{1,6})?$/), z.number().positive()])
 
 const amount = decimal
-  .refine((value) => units(value) >= Store.minPledge, `A pledge is at least ${Memo.decimal(Store.minPledge)} MACH.`)
-  .refine((value) => units(value) <= 100_000_000n, 'A pledge is at most 100 MACH.')
-  .describe(`MACH to pledge, from ${Memo.decimal(Store.minPledge)} to 100, as a decimal string such as "0.25" or a number.`)
+  .refine((value) => units(value) >= Store.minPledge, `A pledge is at least ${Memo.decimal(Store.minPledge)}.`)
+  .refine((value) => units(value) <= 100_000_000n, 'A pledge is at most 100.')
+  .describe(`The amount to pledge in its token, from ${Memo.decimal(Store.minPledge)} to 100, as a decimal string such as "0.25" or a number.`)
 
 const note = z
   .string()
@@ -135,8 +135,12 @@ export const schema = {
       .trim()
       .max(Memo.maxNote)
       .nullish()
-      .describe('Optional steering note, weighted by the MACH behind it. The same text backs an existing note.'),
+      .describe('Optional steering note, weighted by the money behind it. The same text backs an existing note.'),
     swarm: id,
+    token: z
+      .enum(Chain.pledgeable)
+      .default('mach')
+      .describe('The token to pledge: mach (the default), ousd, usdce or pathusd. A pledge in USDC.e or pathUSD opens its channel in OUSD through the stablecoin DEX.'),
   }),
   pledged: z.object({
     pledge: pledgeId,
@@ -246,7 +250,12 @@ export function config(env: Cloudflare.Env): Config {
     perWorker: Memo.decimal(Store.perWorker),
     reserve: Memo.decimal(Store.reserve),
     rpc: env.TEMPO_RPC,
-    tokens: Chain.ids.map((id) => ({ address: Chain.tokens[id].address, id, symbol: Chain.tokens[id].symbol })),
+    tokens: Chain.pledgeable.map((id) => ({
+      address: Chain.currencies[id].address,
+      id,
+      pool: id !== 'mach',
+      symbol: Chain.currencies[id].symbol,
+    })),
   }
 }
 
@@ -470,6 +479,7 @@ export async function pledge(env: Cloudflare.Env, input: Input<'pledge'>): Promi
     deposit,
     device: request.device,
     limit: Math.max(1, Math.ceil(deposit)),
+    token: request.token,
     topUp: 0,
   })
   if (!requested.ok)
@@ -487,6 +497,7 @@ export async function pledge(env: Cloudflare.Env, input: Input<'pledge'>): Promi
     note_id: note ? await Store.noteId(note) : null,
     request: requested.value.id,
     swarm: row.id,
+    token: request.token,
   })
   if (device) await Devices.save(env, id, device)
   return Problem.ok({ authorizeAccessKey: requested.value.authorizeAccessKey, ...(device ? { device } : {}), pledge: id })
@@ -741,7 +752,7 @@ async function activate(
     return Problem.fail(
       409,
       'insufficient_balance',
-      `The wallet holds ${balance} MACH, less than the ${amount} MACH pledge. Add MACH and pledge again.`,
+      `The wallet holds ${balance} ${Chain.currencies[backing.token].symbol}, less than the ${amount} ${Chain.currencies[backing.token].symbol} pledge. Add some and pledge again.`,
     )
   }
 
@@ -754,12 +765,12 @@ async function activate(
     await Gateway.revoke(env, key)
     return Problem.fail(409, 'conflict', 'This pledge is already approved.')
   }
-  await stub(env, row.id).pledged({ amount, contributor, note: backing.note, noteId: backing.note_id, swarm: row.id })
+  await stub(env, row.id).pledged({ amount, contributor, note: backing.note, noteId: backing.note_id, swarm: row.id, token: backing.token })
   if (backing.note && backing.note_id) await logged(Search.note(env, row.id, backing.note_id, backing.note))
 
   const updated = (await Store.find(env, row.id)) ?? row
   return Problem.ok({
-    pledge: { amount, at: backing.created_at, contributor, id: backing.id, note: backing.note, spent: '0.000000', status: 'active' },
+    pledge: { amount, at: backing.created_at, contributor, id: backing.id, note: backing.note, spent: '0.000000', status: 'active', token: backing.token },
     status: 'active',
     swarm: Store.summary(updated),
   })
@@ -784,6 +795,7 @@ function pledged(row: Store.Row, backing: Store.Backing): Pledged {
       note: backing.note,
       spent: Memo.decimal(BigInt(backing.spent)),
       status,
+      token: backing.token,
     },
     status,
     swarm: Store.summary(row),

@@ -1,5 +1,5 @@
 import type { Status as Kind, Summary } from '../shared/Api.ts'
-import { mach, ratio } from './format.ts'
+import { ratio, usd } from './format.ts'
 
 const labels = { done: 'Done', funding: 'Funding', paused: 'Paused', running: 'Running' } as const satisfies Record<Kind, string>
 
@@ -20,9 +20,9 @@ export function Bar(props: { swarm: Pick<Summary, 'raised' | 'remaining' | 'spen
         <div className="bar-spent" style={{ width: `${spent * 100}%` }} />
       </div>
       <div className="bar-legend">
-        <span>{mach(props.swarm.spent)} spent</span>
+        <span>{usd(props.swarm.spent)} spent</span>
         <span>
-          {mach(props.swarm.remaining)} left of {mach(props.swarm.raised)} MACH
+          {usd(props.swarm.remaining)} left of {usd(props.swarm.raised)}
         </span>
       </div>
     </div>

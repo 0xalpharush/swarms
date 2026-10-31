@@ -1,13 +1,14 @@
 import { useEffect, useRef, useState } from 'react'
 import * as Answer from '../shared/Answer.ts'
-import type { Config, Detail, Entry, Note, Pledge, Round } from '../shared/Api.ts'
+import type { Config, Detail, Entry, Note, Round } from '../shared/Api.ts'
 import * as Api from './api.ts'
 import { Feed } from './Feed.tsx'
-import { ago, duration, mach, percent, short } from './format.ts'
-import { type Draft, useLive, useMedia, useNow, usePoll, useWallet } from './hooks.ts'
+import { Budgets, Contributions, Pledges } from './Backing.tsx'
+import { Box } from './Contribute.tsx'
+import { ago, duration, mach, percent, short, usd } from './format.ts'
+import { type Draft, useLive, useMedia, useNow, usePoll } from './hooks.ts'
 import { Machines } from './Machines.tsx'
 import { Markdown } from './Markdown.tsx'
-import { Box } from './Pledge.tsx'
 import { Link } from './router.tsx'
 import { Bar, Constellation, Status } from './Visual.tsx'
 
@@ -20,13 +21,12 @@ function merge(previous: Entry[], next: readonly Entry[]) {
 
 const banners = {
   done: 'Done. The answer below is what the swarm found.',
-  funding: 'No money behind it yet. The first pledge starts round 1.',
-  paused: 'Out of money, so the swarm is paused. A pledge resumes it.',
+  funding: 'No money behind it yet. The first transfer, daily budget or pledge starts round 1.',
+  paused: 'Out of money, so the swarm is paused. A transfer, a budget or a pledge resumes it, and it resumes on its own when a budget allows its next pull.',
 } as const
 
 const rounds = { cancelled: 'Cancelled', completed: 'Completed', failed: 'Failed', running: 'Running' } as const satisfies Record<Round['status'], string>
 
-const pledges = { active: 'Active', ended: 'Ended', spent: 'Spent' } as const satisfies Record<Pledge['status'], string>
 
 export function Swarm(props: { config: Config | undefined; id: string; onTitle: (title: string | undefined) => void }) {
   const [detail, reload] = usePoll(() => Api.swarm(props.id), 5000, props.id)
@@ -158,10 +158,18 @@ export function Swarm(props: { config: Config | undefined; id: string; onTitle: 
           </h2>
           <History draft={draft} history={swarm.history} />
         </div>
-        <div className="col-side">
+        <div className="col-side backing">
           <h2 className="block-head">
-            <span className="index">[5]</span> Pledges
+            <span className="index">[5]</span> Backing
+            <span className="block-count">{usd(swarm.raised)} in</span>
           </h2>
+          <h3 className="backing-head">
+            Daily budgets{Number(swarm.daily) > 0 && <span>{usd(swarm.daily)} a day</span>}
+          </h3>
+          <Budgets budgets={swarm.budgets} config={props.config} />
+          <h3 className="backing-head">Transfers</h3>
+          <Contributions config={props.config} contributions={swarm.contributions} />
+          <h3 className="backing-head">Pledges</h3>
           <Pledges config={props.config} pledges={swarm.pledges} />
         </div>
       </section>
@@ -194,7 +202,7 @@ function Ledger(props: { config: Config | undefined; swarm: Detail }) {
     <div className="ledger">
       <p className="label">{swarm.status === 'done' ? 'Spent' : 'Left to spend'}</p>
       <p className="figure">
-        {mach(swarm.status === 'done' ? swarm.spent : swarm.remaining)} <span>MACH</span>
+        {mach(swarm.status === 'done' ? swarm.spent : swarm.remaining)} <span>USD</span>
       </p>
       <Bar swarm={swarm} />
       <div className="slots" data-live={swarm.status === 'running'}>
@@ -221,13 +229,30 @@ function Ledger(props: { config: Config | undefined; swarm: Detail }) {
           <dd>{swarm.rounds}</dd>
         </div>
       </dl>
-      {props.config && <p className="fine">Each explorer beyond the first needs {mach(props.config.perWorker)} MACH left to spend. The swarm pauses below {mach(props.config.reserve)} MACH.</p>}
+      {swarm.wallet && (
+        <p className="address">
+          <span>Swarm wallet</span>
+          {props.config ? (
+            <a href={`${props.config.explorer}/address/${swarm.wallet}`} rel="noreferrer" target="_blank" title={swarm.wallet}>
+              {short(swarm.wallet)} ↗
+            </a>
+          ) : (
+            <span>{short(swarm.wallet)}</span>
+          )}
+          <span>{usd(swarm.pool)} pooled</span>
+        </p>
+      )}
+      {props.config && (
+        <p className="fine">
+          Stablecoins count one to one. Each explorer beyond the first needs {usd(props.config.perWorker)} left to spend, and the swarm pauses below {usd(props.config.reserve)}.
+        </p>
+      )}
     </div>
   )
 }
 
 function Notes(props: { done: boolean; notes: readonly Note[]; onBack: (note: string) => void }) {
-  if (props.notes.length === 0) return <p className="empty">No notes yet. A pledge can carry one, and the swarm weighs it by the MACH behind it.</p>
+  if (props.notes.length === 0) return <p className="empty">No notes yet. A transfer, a budget or a pledge can carry one, and the swarm weighs it by the money behind it.</p>
   return (
     <ol className="notes">
       {props.notes.map((note, index) => (
@@ -239,8 +264,8 @@ function Notes(props: { done: boolean; notes: readonly Note[]; onBack: (note: st
               <div style={{ width: `${Math.max(1, note.share * 100)}%` }} />
             </div>
             <p className="note-meta">
-              <span>{mach(note.weight)} MACH</span>
-              <span>{percent(note.share)} of all pledged</span>
+              <span>{usd(note.weight)}</span>
+              <span>{percent(note.share)} of everything in</span>
               <span>{note.backers === 1 ? '1 backer' : `${note.backers} backers`}</span>
               <span className={note.steered ? 'tag tag-on' : 'tag'}>{note.steered ? 'Sent to the swarm' : 'Not sent yet'}</span>
             </p>
@@ -258,8 +283,8 @@ function Notes(props: { done: boolean; notes: readonly Note[]; onBack: (note: st
 
 const waiting = {
   done: 'The swarm ended without a report.',
-  funding: 'No answer yet. The first pledge starts round 1, and its report lands here.',
-  paused: 'No answer yet. The swarm is paused until the next pledge.',
+  funding: 'No answer yet. The first transfer, budget or pledge starts round 1, and its report lands here.',
+  paused: 'No answer yet. The swarm is paused until more money comes in.',
   running: '',
 } as const
 
@@ -322,7 +347,7 @@ function History(props: { draft: Draft | undefined; history: readonly Round[] })
                 {rounds[round.status]}
               </span>
               <span>{duration((round.endedAt ?? now) - round.startedAt)}</span>
-              <span>{mach(round.spent)} MACH</span>
+              <span>{usd(round.spent)}</span>
             </summary>
             {round.message ? (
               <Markdown text={round.message} />
@@ -335,45 +360,5 @@ function History(props: { draft: Draft | undefined; history: readonly Round[] })
         </li>
       ))}
     </ol>
-  )
-}
-
-function Pledges(props: { config: Config | undefined; pledges: readonly Pledge[] }) {
-  const wallet = useWallet()
-  const [all, setAll] = useState(false)
-  if (props.pledges.length === 0) return <p className="empty">No pledges yet.</p>
-  const ordered = [...props.pledges].sort((a, b) => b.at - a.at)
-  const shown = all ? ordered : ordered.slice(0, 8)
-  return (
-    <>
-      <ol className="pledges">
-        {shown.map((pledge) => (
-          <li className="pledge-row" data-status={pledge.status} key={pledge.id}>
-            <p className="pledge-head">
-              {props.config ? (
-                <a href={`${props.config.explorer}/address/${pledge.contributor}`} rel="noreferrer" target="_blank">
-                  {short(pledge.contributor)}
-                </a>
-              ) : (
-                <span>{short(pledge.contributor)}</span>
-              )}
-              {wallet.address?.toLowerCase() === pledge.contributor.toLowerCase() && <span className="tag tag-on">You</span>}
-              <span className="pledge-ago">{ago(pledge.at)}</span>
-            </p>
-            <p className="pledge-figures">
-              <span>{mach(pledge.amount)} MACH</span>
-              <span>{mach(pledge.spent)} spent</span>
-              <span className="tag">{pledges[pledge.status]}</span>
-            </p>
-            {pledge.note && <p className="pledge-note">{pledge.note}</p>}
-          </li>
-        ))}
-      </ol>
-      {ordered.length > shown.length && (
-        <button className="btn btn-minimal" onClick={() => setAll(true)} type="button">
-          Show all {ordered.length}
-        </button>
-      )}
-    </>
   )
 }

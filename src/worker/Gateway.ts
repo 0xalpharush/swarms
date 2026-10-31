@@ -1,4 +1,4 @@
-import type { Device } from '../shared/Api.ts'
+import type { Currency, Device } from '../shared/Api.ts'
 
 export type Result<value> = { ok: true; value: value } | { detail: string; ok: false; status: number }
 
@@ -68,7 +68,7 @@ async function send<value>(env: Cloudflare.Env, path: string, init: Init = {}): 
 
 export function request(
   env: Cloudflare.Env,
-  input: { days: number; deposit: number; device?: boolean; limit: number; token?: 'mach' | 'ousd'; topUp: number },
+  input: { days: number; deposit: number; device?: boolean; limit: number; search?: number; token?: Currency; topUp: number },
 ) {
   return send<Requested>(env, '/api/keys/request', { body: input })
 }

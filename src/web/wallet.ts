@@ -1,16 +1,16 @@
 import { Mach, Provider, tempoWallet } from 'accounts'
-import type { Address } from 'viem'
-import { Actions, createClient, http } from 'viem/tempo'
+import { type Address, encodeFunctionData, type Hex } from 'viem'
+import { Abis, Actions, createClient, http } from 'viem/tempo'
 import { tempo } from 'viem/tempo/chains'
-import type { Config } from '../shared/Api.ts'
+import type { Config, Currency } from '../shared/Api.ts'
 import { fixture } from './api.ts'
 import * as Fixtures from './fixtures.ts'
 
-export type State = { address: Address | undefined; balance: bigint | undefined }
+export type State = { address: Address | undefined; balance: bigint | undefined; balances: Partial<Record<Currency, bigint>> }
 
 let provider: ReturnType<typeof Provider.create> | undefined
 
-let state: State = { address: undefined, balance: undefined }
+let state: State = { address: undefined, balance: undefined, balances: {} }
 
 const listeners = new Set<() => void>()
 
@@ -74,12 +74,42 @@ export async function authorize(config: Config, authorizeAccessKey: unknown) {
   return { address: account.address, keyAuthorization }
 }
 
+export async function send(config: Config, input: { amount: bigint; memo: Hex; to: Address; token: Currency }) {
+  if (fixture) {
+    await new Promise((resolve) => setTimeout(resolve, 1400))
+    return `0x${'5a'.repeat(32)}` as Hex
+  }
+  const address = await connect(config)
+  const token = config.tokens.find((item) => item.id === input.token)
+  if (!token) throw new Error('That token is not offered.')
+  const receipt = (await wallet().request({
+    method: 'eth_sendTransactionSync',
+    params: [
+      {
+        calls: [{ data: encodeFunctionData({ abi: Abis.tip20, args: [input.to, input.amount, input.memo], functionName: 'transferWithMemo' }), to: token.address }],
+        feeToken: token.address,
+        from: address,
+      },
+    ],
+  } as never)) as { status?: string; transactionHash?: Hex }
+  if (!receipt.transactionHash) throw new Error('Tempo Wallet returned no transaction.')
+  if (receipt.status && receipt.status !== 'success' && receipt.status !== '0x1') throw new Error('The transfer reverted.')
+  void refresh(config).catch(() => {})
+  return receipt.transactionHash
+}
+
 export async function refresh(config: Config) {
   const address = state.address
   if (!address) return undefined
-  const balance = fixture ? Fixtures.balance : (await Actions.token.getBalance(createClient({ chain: tempo, transport: http(config.rpc) }), { account: address, token: config.mach })).amount
-  if (state.address === address) set({ balance })
-  return balance
+  const client = createClient({ chain: tempo, transport: http(config.rpc) })
+  const read = (token: Config['tokens'][number]) =>
+    fixture
+      ? Promise.resolve(Fixtures.balances[token.id])
+      : Actions.token.getBalance(client, { account: address, token: token.address }).then((balance) => balance.amount)
+  const entries = await Promise.all(config.tokens.map(async (token) => [token.id, await read(token).catch(() => undefined)] as const))
+  const balances = Object.fromEntries(entries.filter((entry): entry is readonly [Currency, bigint] => entry[1] !== undefined)) as Partial<Record<Currency, bigint>>
+  if (state.address === address) set({ balance: balances.mach, balances })
+  return balances.mach
 }
 
 export function fund(shortfall?: bigint) {

@@ -15,6 +15,8 @@ export type Swapped = { fee: bigint; hash: Hex; minimum: bigint; quote: bigint; 
 
 export const dust = 2_000n
 
+export const search = 100_000n
+
 export const slippage = 50n
 
 export async function create(secret: string) {

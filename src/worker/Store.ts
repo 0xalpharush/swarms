@@ -1,4 +1,4 @@
-import type { Answer, Budget, Contribution, Note, Pledge, Summary, Token } from '../shared/Api.ts'
+import type { Answer, Budget, Contribution, Currency, Note, Pledge, Summary, Token } from '../shared/Api.ts'
 import * as Memo from '../shared/Memo.ts'
 
 export type Row = {
@@ -35,6 +35,7 @@ export type Backing = {
   spent: string
   status: 'pending' | Pledge['status']
   swarm: string
+  token: Currency
 }
 
 export type Gift = {
@@ -187,13 +188,13 @@ export async function update(env: Cloudflare.Env, id: string, fields: Fields) {
 
 export async function request(
   env: Cloudflare.Env,
-  input: Pick<Backing, 'amount' | 'id' | 'note' | 'note_id' | 'request' | 'swarm'>,
+  input: Pick<Backing, 'amount' | 'id' | 'note' | 'note_id' | 'request' | 'swarm' | 'token'>,
 ) {
   const now = Date.now()
   await env.DB.prepare(
-    'insert into pledges (id, swarm, request, amount, note, note_id, created_at, updated_at) values (?, ?, ?, ?, ?, ?, ?, ?)',
+    'insert into pledges (id, swarm, request, amount, token, note, note_id, created_at, updated_at) values (?, ?, ?, ?, ?, ?, ?, ?, ?)',
   )
-    .bind(input.id, input.swarm, input.request, input.amount, input.note, input.note_id, now, now)
+    .bind(input.id, input.swarm, input.request, input.amount, input.token, input.note, input.note_id, now, now)
     .run()
 }
 
@@ -249,6 +250,7 @@ export async function pledges(env: Cloudflare.Env, swarm: string): Promise<Pledg
     note: row.note,
     spent: Memo.decimal(BigInt(row.spent)),
     status: row.status === 'pending' ? 'active' : row.status,
+    token: row.token,
   }))
 }
 

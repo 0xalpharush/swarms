@@ -1,7 +1,7 @@
 import { createClient, http } from 'viem'
 import type { Address } from 'viem'
 import { tempo } from 'viem/tempo/chains'
-import type { Token } from '../shared/Api.ts'
+import type { Currency, Token } from '../shared/Api.ts'
 
 export const mach: Address = '0x20c000000000000000000000f37de3740ADec032'
 
@@ -14,6 +14,13 @@ export const tokens = {
 } as const satisfies Record<Token, { address: Address; symbol: string }>
 
 export const ids = Object.keys(tokens) as Token[]
+
+export const currencies = {
+  mach: { address: mach, symbol: 'MACH' },
+  ...tokens,
+} as const satisfies Record<Currency, { address: Address; symbol: string }>
+
+export const pledgeable = ['mach', ...ids] as const satisfies readonly Currency[]
 
 export function token(address: string): Token | undefined {
   return ids.find((id) => tokens[id].address.toLowerCase() === address.toLowerCase())

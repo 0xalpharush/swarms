@@ -1,7 +1,7 @@
 import { DurableObject } from 'cloudflare:workers'
 import type { Address } from 'viem'
 import { keccak256, stringToHex } from 'viem'
-import type { Entry, Hand, Kind, Live, Note, Round, Token } from '../shared/Api.ts'
+import type { Currency, Entry, Hand, Kind, Live, Note, Round, Token } from '../shared/Api.ts'
 import * as Answer from '../shared/Answer.ts'
 import * as Memo from '../shared/Memo.ts'
 import * as Budget from './Budget.ts'
@@ -18,6 +18,7 @@ export type Pledged = {
   note: string | null
   noteId: string | null
   swarm: string
+  token: Currency
 }
 
 export type Contributed = {
@@ -73,7 +74,7 @@ const smallestSwap = 10_000n
 
 const smallestPull = 30_000n
 
-const poolKey = { days: 30, deposit: 0.1, limit: 100, token: 'ousd', topUp: 0.05 } as const
+const poolKey = { days: 30, deposit: 0.1, limit: 100, search: 0.5, token: 'ousd', topUp: 0.05 } as const
 
 export class Swarm extends DurableObject<Cloudflare.Env> {
   stepping: Promise<number | null> | undefined
@@ -92,10 +93,10 @@ export class Swarm extends DurableObject<Cloudflare.Env> {
     this.kv.put('id', input.swarm)
     this.log(
       'funds',
-      `${short(input.contributor)} pledged ${trim(input.amount)} MACH${input.note ? ' with a note' : ''}`,
+      `${short(input.contributor)} pledged ${trim(input.amount)} ${Chain.currencies[input.token].symbol}${input.note ? ' with a note' : ''}`,
       input.note,
     )
-    if (input.noteId) await this.steer(input.swarm, input.noteId, `pledged ${trim(input.amount)} MACH`)
+    if (input.noteId) await this.steer(input.swarm, input.noteId, `pledged ${trim(input.amount)} ${Chain.currencies[input.token].symbol}`)
     await this.ctx.storage.setAlarm(Date.now())
   }
 
@@ -502,7 +503,7 @@ export class Swarm extends DurableObject<Cloudflare.Env> {
     this.opened.set('pool', completed.value.key)
     this.log(
       'funds',
-      `The swarm's wallet authorized its own gateway key: up to ${poolKey.limit} OUSD over ${poolKey.days} days, so the pool pays for rounds directly.`,
+      `The swarm's wallet authorized its own gateway key: up to ${poolKey.limit} OUSD over ${poolKey.days} days for rounds, and ${poolKey.search} USDC.e for paid web search from the USDC.e it keeps.`,
     )
     return completed.value.key
   }
@@ -532,7 +533,7 @@ export class Swarm extends DurableObject<Cloudflare.Env> {
 
     let swapped = false
     for (const id of ['pathusd', 'usdce'] as const) {
-      const amount = balances[id] - Vault.dust
+      const amount = balances[id] - Vault.dust - (id === 'usdce' ? Vault.search : 0n)
       if (amount < smallestSwap) continue
       const result = await Vault.swap(this.env, owner, id, amount).catch((error: unknown) => error as Error)
       if (result instanceof Error) {
@@ -729,7 +730,7 @@ export class Swarm extends DurableObject<Cloudflare.Env> {
     this.log(
       'funds',
       status === 'spent'
-        ? `${short(backing.contributor)}'s pledge is used up: ${trim(Memo.decimal(spent ?? BigInt(backing.spent)))} of ${trim(Memo.decimal(BigInt(backing.amount)))} MACH spent, and the rest goes back to their wallet.`
+        ? `${short(backing.contributor)}'s pledge is used up: ${trim(Memo.decimal(spent ?? BigInt(backing.spent)))} of ${trim(Memo.decimal(BigInt(backing.amount)))} ${Chain.currencies[backing.token].symbol} spent, and the rest goes back to their wallet.`
         : `${short(backing.contributor)}'s key ended at the gateway (revoked or expired), so the swarm stopped spending from it.`,
     )
   }

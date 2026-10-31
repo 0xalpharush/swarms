@@ -1,10 +1,10 @@
 import { useState } from 'react'
-import type { Config, Summary } from '../shared/Api.ts'
+import type { Config, Currency, Summary } from '../shared/Api.ts'
 import { decimal, maxNote, units } from '../shared/Memo.ts'
 import * as Api from './api.ts'
-import { mach } from './format.ts'
+import { mach, symbols } from './format.ts'
 import { message } from './hooks.ts'
-import { Amount, code, disclosure, NoteField, pledge, type Step, valid, WalletLine } from './Pledge.tsx'
+import { Amount, code, disclosure, NoteField, pledge, type Step, Tokens, valid, WalletLine } from './Pledge.tsx'
 import { Link, navigate } from './router.tsx'
 import * as Wallet from './wallet.ts'
 
@@ -20,6 +20,7 @@ export function New(props: { config: Config | undefined }) {
   const [goal, setGoal] = useState('')
   const [amount, setAmount] = useState('0.25')
   const [note, setNote] = useState('')
+  const [token, setToken] = useState<Currency>('mach')
   const [state, setState] = useState<{ created?: Summary; error?: string; short?: boolean; step?: Step | 'create' }>({})
   const busy = state.step !== undefined
   const ready = title.trim().length >= 3 && title.trim().length <= 80 && goal.trim().length >= 10 && goal.trim().length <= 2000 && valid(amount, props.config) && note.length <= maxNote && !!props.config && !busy
@@ -35,7 +36,7 @@ export function New(props: { config: Config | undefined }) {
         created = await Api.create({ goal: goal.trim(), title: title.trim() })
       }
       const swarm = created
-      await pledge(config, swarm.id, amount, note, (step) => setState({ created: swarm, step }))
+      await pledge(config, swarm.id, amount, note, token, (step) => setState({ created: swarm, step }))
       navigate(`/s/${swarm.id}`)
     } catch (error) {
       setState({ ...(created ? { created } : {}), error: message(error), short: code(error) === 'insufficient_balance' })
@@ -85,19 +86,20 @@ export function New(props: { config: Config | undefined }) {
               <span>{goal.length}/2000</span>
             </p>
           </div>
-          <Amount config={props.config} onChange={setAmount} value={amount} />
+          <Tokens config={props.config} onChange={setToken} value={token} />
+          <Amount config={props.config} onChange={setAmount} suffix={symbols[token]} value={amount} />
           <NoteField hint="Optional. The first note the swarm reads, weighted by your pledge." onChange={setNote} value={note} />
-          <WalletLine amount={amount} config={props.config} />
+          <WalletLine amount={amount} config={props.config} token={token} />
           <button className="btn btn-high btn-wide" disabled={!ready} type="submit">
-            {busy ? (stages.find(([key]) => key === state.step)?.[1] ?? 'Working') + '…' : state.created ? 'Try the pledge again' : `Start the swarm with ${valid(amount, props.config) ? mach(decimal(units(amount))) : ''} MACH`}
+            {busy ? (stages.find(([key]) => key === state.step)?.[1] ?? 'Working') + '…' : state.created ? 'Try the pledge again' : `Start the swarm with ${valid(amount, props.config) ? mach(decimal(units(amount))) : ''} ${symbols[token]}`}
           </button>
           {state.error && (
             <p className="error">
               {state.error}
-              {state.short && (
+              {state.short && token === 'mach' && (
                 <>
                   {' '}
-                  <button className="btn btn-minimal" onClick={() => void Wallet.fund(units(amount) - (Wallet.snapshot().balance ?? 0n))} type="button">
+                  <button className="btn btn-minimal" onClick={() => void Wallet.fund(units(amount) - (Wallet.snapshot().balances.mach ?? 0n))} type="button">
                     Add MACH
                   </button>
                 </>
@@ -119,10 +121,10 @@ export function New(props: { config: Config | undefined }) {
               </li>
             ))}
           </ol>
-          <p className="fine">{disclosure}</p>
+          <p className="fine">{disclosure(token)}</p>
           {props.config && (
             <p className="fine">
-              The minimum pledge is {mach(props.config.minPledge)} MACH. Each explorer beyond the first needs {mach(props.config.perWorker)} MACH left to spend, and the swarm pauses below {mach(props.config.reserve)} MACH.
+              The minimum pledge is {mach(props.config.minPledge)} {symbols[token]}. Each explorer beyond the first needs ${mach(props.config.perWorker)} left to spend, and the swarm pauses below ${mach(props.config.reserve)}. Once it exists, anyone can also send it money once or give it a daily budget.
             </p>
           )}
         </aside>

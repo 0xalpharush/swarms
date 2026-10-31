@@ -1,31 +1,34 @@
-import { type RefObject, useState } from 'react'
-import type { Config, Summary } from '../shared/Api.ts'
+import { useState } from 'react'
+import type { Config, Currency } from '../shared/Api.ts'
 import { decimal, maxNote, units } from '../shared/Memo.ts'
 import * as Api from './api.ts'
-import { mach, short } from './format.ts'
+import { mach, short, symbols } from './format.ts'
 import { message, useWallet } from './hooks.ts'
 import * as Wallet from './wallet.ts'
 
 export type Step = 'request' | 'approve' | 'confirm'
 
-export const amounts = ['0.25', '0.50', '1', '5'] as const
+export const amounts = ['0.25', '1', '5'] as const
 
-export const disclosure = "Tempo Wallet will ask you to approve a spending key for this app. Its wallet cap is at least 1 MACH, but the swarm can spend at most your pledge: the key's channel opens with exactly the pledged amount and never tops up. Unspent money goes back when the swarm finishes."
+export function disclosure(token: Currency) {
+  const symbol = symbols[token]
+  return `Tempo Wallet will ask you to approve a spending key for this app. Its wallet cap is at least 1 ${symbol}, but the swarm can spend at most your pledge: the key's channel opens with exactly the pledged amount and never tops up.${token === 'mach' || token === 'ousd' ? '' : ' The gateway takes MACH or OUSD, so this pledge opens its channel in OUSD: it spends OUSD your wallet already holds first, then swaps your ' + symbol + ' on the stablecoin DEX in the same transaction.'} Unspent money goes back when the swarm finishes.`
+}
 
-export function valid(amount: string, config: Config | undefined) {
+export function valid(amount: string, config: Config | undefined, least = config?.minPledge) {
   const text = amount.trim()
   if (!/^(\d+\.?\d{0,6}|\.\d{1,6})$/.test(text)) return false
-  return units(text) >= units(config?.minPledge ?? '0.000001')
+  return units(text) >= units(least ?? '0.000001')
 }
 
 export function code(error: unknown) {
   return typeof error === 'object' && error !== null && 'code' in error ? String(error.code) : undefined
 }
 
-export async function pledge(config: Config, swarm: string, amount: string, note: string, onStep: (step: Step) => void) {
+export async function pledge(config: Config, swarm: string, amount: string, note: string, token: Currency, onStep: (step: Step) => void) {
   onStep('request')
   const text = note.trim()
-  const requested = await Api.pledge(swarm, text ? { amount: decimal(units(amount)), note: text } : { amount: decimal(units(amount)) })
+  const requested = await Api.pledge(swarm, { amount: decimal(units(amount)), token, ...(text ? { note: text } : {}) })
   onStep('approve')
   const approved = await Wallet.authorize(config, requested.authorizeAccessKey)
   onStep('confirm')
@@ -34,15 +37,16 @@ export async function pledge(config: Config, swarm: string, amount: string, note
 
 export const steps = { approve: 'Approve the key in Tempo Wallet…', confirm: 'Recording the pledge…', request: 'Preparing the pledge…' } as const satisfies Record<Step, string>
 
-export function Amount(props: { config: Config | undefined; onChange: (value: string) => void; value: string }) {
+export function Amount(props: { config: Config | undefined; hint?: string; label?: string; least?: string; onChange: (value: string) => void; suffix: string; value: string }) {
+  const least = props.least ?? props.config?.minPledge
   return (
     <div className="field">
       <label className="field-label" htmlFor="amount">
-        Amount
+        {props.label ?? 'Amount'}
       </label>
       <div className="field-input">
         <input id="amount" inputMode="decimal" onChange={(event) => props.onChange(event.target.value.replace(',', '.'))} placeholder="0.25" value={props.value} />
-        <span className="field-suffix">MACH</span>
+        <span className="field-suffix">{props.suffix}</span>
       </div>
       <div className="chips">
         {amounts.map((value) => (
@@ -50,7 +54,23 @@ export function Amount(props: { config: Config | undefined; onChange: (value: st
             {value}
           </button>
         ))}
-        {props.config && <span className="chips-hint">min {mach(props.config.minPledge)}</span>}
+        {least && <span className="chips-hint">{props.hint ?? `min ${mach(least)}`}</span>}
+      </div>
+    </div>
+  )
+}
+
+export function Tokens(props: { config: Config | undefined; onChange: (token: Currency) => void; only?: 'pool'; value: Currency }) {
+  const tokens = (props.config?.tokens ?? []).filter((token) => !props.only || token.pool)
+  return (
+    <div className="field">
+      <span className="field-label">Token</span>
+      <div className="chips" role="radiogroup">
+        {tokens.map((token) => (
+          <button aria-checked={props.value === token.id} className={props.value === token.id ? 'chip chip-on' : 'chip'} key={token.id} onClick={() => props.onChange(token.id)} role="radio" type="button">
+            {token.symbol}
+          </button>
+        ))}
       </div>
     </div>
   )
@@ -75,11 +95,12 @@ export function NoteField(props: { hint: string; onChange: (value: string) => vo
   )
 }
 
-export function WalletLine(props: { amount: string; config: Config | undefined }) {
+export function WalletLine(props: { amount: string; config: Config | undefined; token: Currency }) {
   const wallet = useWallet()
   const [error, setError] = useState<string>()
   const needed = /^\d*\.?\d*$/.test(props.amount) && props.amount !== '' ? units(props.amount) : 0n
-  const low = wallet.balance !== undefined && wallet.balance < needed
+  const balance = wallet.balances[props.token]
+  const low = balance !== undefined && balance < needed
 
   if (!wallet.address)
     return (
@@ -102,64 +123,13 @@ export function WalletLine(props: { amount: string; config: Config | undefined }
   return (
     <p className="wallet-line" data-low={low}>
       <span>
-        {short(wallet.address)} · {wallet.balance === undefined ? '…' : `${mach(decimal(wallet.balance))} MACH`}
+        {short(wallet.address)} · {balance === undefined ? '…' : `${mach(decimal(balance))} ${symbols[props.token]}`}
       </span>
-      {(low || wallet.balance === 0n) && (
-        <button className="btn btn-minimal" onClick={() => void Wallet.fund(low && wallet.balance !== undefined ? needed - wallet.balance : undefined).then(() => props.config && Wallet.refresh(props.config))} type="button">
+      {props.token === 'mach' && (low || balance === 0n) && (
+        <button className="btn btn-minimal" onClick={() => void Wallet.fund(low && balance !== undefined ? needed - balance : undefined).then(() => props.config && Wallet.refresh(props.config))} type="button">
           Add MACH
         </button>
       )}
     </p>
-  )
-}
-
-export function Box(props: { config: Config | undefined; note: string; noteRef: RefObject<HTMLDivElement | null>; onDone: () => void; onNote: (note: string) => void; swarm: Summary }) {
-  const [amount, setAmount] = useState('0.25')
-  const [state, setState] = useState<{ done?: string; error?: string; short?: boolean; step?: Step }>({})
-  const busy = state.step !== undefined
-  const ready = valid(amount, props.config) && props.note.length <= maxNote && !!props.config && !busy
-
-  const submit = async () => {
-    if (!props.config) return
-    try {
-      const pledged = await pledge(props.config, props.swarm.id, amount, props.note, (step) => setState({ step }))
-      setState({ done: pledged.pledge.amount })
-      props.onNote('')
-      props.onDone()
-    } catch (error) {
-      setState({ error: message(error), short: code(error) === 'insufficient_balance' })
-    }
-  }
-
-  return (
-    <div className="pledge" id="pledge" ref={props.noteRef}>
-      <h3 className="label">{props.swarm.status === 'paused' ? 'Pledge to resume it' : props.swarm.status === 'funding' ? 'Fund the first round' : props.swarm.status === 'done' ? 'This swarm is done' : 'Pledge'}</h3>
-      {props.swarm.status === 'done' && <p className="fine">It takes no more pledges. What it did not spend goes back to each backer when the gateway closes their key's channel.</p>}
-      {props.swarm.status !== 'done' && (
-        <>
-          <Amount config={props.config} onChange={setAmount} value={amount} />
-          <NoteField hint="Steers the swarm in proportion to the MACH behind it. The same text backs an existing note." onChange={props.onNote} value={props.note} />
-          <WalletLine amount={amount} config={props.config} />
-          <button className="btn btn-high btn-wide" disabled={!ready} onClick={() => void submit()} type="button">
-            {state.step ? steps[state.step] : state.short ? 'Try the pledge again' : `Pledge ${valid(amount, props.config) ? mach(decimal(units(amount))) : ''} MACH`}
-          </button>
-          {state.done && <p className="notice">Pledged {mach(state.done)} MACH. The swarm spends it as it works; what it does not spend goes back to you.</p>}
-          {state.error && (
-            <p className="error">
-              {state.error}
-              {state.short && (
-                <>
-                  {' '}
-                  <button className="btn btn-minimal" onClick={() => void Wallet.fund(units(amount) - (Wallet.snapshot().balance ?? 0n))} type="button">
-                    Add MACH
-                  </button>
-                </>
-              )}
-            </p>
-          )}
-          <p className="fine">{disclosure}</p>
-        </>
-      )}
-    </div>
   )
 }

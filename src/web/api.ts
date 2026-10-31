@@ -1,4 +1,4 @@
-import type { Config, Detail, Entry, Pledged, Problem, Requested, Summary } from '../shared/Api.ts'
+import type { BudgetRequested, Budgeted, Config, Contributed, Currency, Detail, Entry, Pledged, Problem, Requested, Summary, Token } from '../shared/Api.ts'
 import * as Fixtures from './fixtures.ts'
 
 export const fixture = new URLSearchParams(location.search).has('fixture')
@@ -50,8 +50,20 @@ export function create(input: { goal: string; title: string }) {
   return fixture ? Fixtures.create(input) : request<Summary>('/api/swarms', input)
 }
 
-export function pledge(id: string, input: { amount: string; note?: string }) {
+export function pledge(id: string, input: { amount: string; note?: string; token: Currency }) {
   return fixture ? Fixtures.pledge(id, input) : request<Requested>(`${path(id)}/pledges`, input)
+}
+
+export function contribute(id: string, input: { hash: string; note?: string }) {
+  return fixture ? Fixtures.contribute(id, input) : request<Contributed>(`${path(id)}/contributions`, input)
+}
+
+export function budget(id: string, input: { amount: string; note?: string; token: Token }) {
+  return fixture ? Fixtures.budget(id, input) : request<BudgetRequested>(`${path(id)}/budgets`, input)
+}
+
+export function allow(id: string, budget: string, keyAuthorization: unknown) {
+  return fixture ? Fixtures.allow(id, budget) : request<Budgeted>(`${path(id)}/budgets/${encodeURIComponent(budget)}`, { keyAuthorization })
 }
 
 export function confirm(id: string, pledge: string, keyAuthorization: unknown) {

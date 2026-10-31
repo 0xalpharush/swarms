@@ -2,6 +2,8 @@ export type Status = 'funding' | 'running' | 'paused' | 'done'
 
 export type Token = 'ousd' | 'pathusd' | 'usdce'
 
+export type Currency = 'mach' | Token
+
 export type Answer = { at: number; done: boolean; next: string | null; round: number; text: string }
 
 export type Summary = {
@@ -33,6 +35,7 @@ export type Pledge = {
   note: string | null
   spent: string
   status: 'active' | 'spent' | 'ended'
+  token: Currency
 }
 
 export type Contribution = {
@@ -119,7 +122,7 @@ export type Config = {
   perWorker: string
   reserve: string
   rpc: string
-  tokens: { address: `0x${string}`; id: Token; symbol: string }[]
+  tokens: { address: `0x${string}`; id: Currency; pool: boolean; symbol: string }[]
 }
 
 export type Device = {

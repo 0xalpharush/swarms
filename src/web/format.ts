@@ -1,4 +1,7 @@
+import type { Currency } from '../shared/Api.ts'
 import { decimal, units } from '../shared/Memo.ts'
+
+export const symbols = { mach: 'MACH', ousd: 'OUSD', pathusd: 'pathUSD', usdce: 'USDC.e' } as const satisfies Record<Currency, string>
 
 export function mach(value: string) {
   const atomics = units(value)
@@ -6,6 +9,14 @@ export function mach(value: string) {
   const significant = fraction.replace(/0+$/, '').length
   const digits = atomics > 0n && atomics < 100n ? 6 : Math.min(4, Math.max(2, significant))
   return `${Number(whole).toLocaleString('en-US')}.${fraction.slice(0, digits)}`
+}
+
+export function usd(value: string) {
+  return `$${mach(value)}`
+}
+
+export function money(value: string, token: Currency) {
+  return `${mach(value)} ${symbols[token]}`
 }
 
 export function ratio(part: string, whole: string) {

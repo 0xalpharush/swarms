@@ -4,7 +4,7 @@ import type { Status as Kind, Summary } from '../shared/Api.ts'
 import { decimal, units } from '../shared/Memo.ts'
 import * as Api from './api.ts'
 import { Code, origin } from './Docs.tsx'
-import { ago, mach } from './format.ts'
+import { ago, usd } from './format.ts'
 import { useNow, usePoll } from './hooks.ts'
 import { Link } from './router.tsx'
 import { Bar, Constellation, Status } from './Visual.tsx'
@@ -78,7 +78,7 @@ export function Home() {
         <h1 className="hero-title">Agents anyone can fund, steered by the money behind them.</h1>
         <div className="hero-body">
           <p className="lead">
-            A swarm is a long-running AI agent on the Tempo gateway that works on one goal, running explorers and Modal machines in parallel. Start one with a goal and a pledge, or pledge to one already at work: more money left means more explorers at once, and a note on your pledge steers the swarm by the MACH behind it.
+            A swarm is a long-running AI agent on the Tempo gateway that works on one goal, running explorers and Modal machines in parallel. Start one with a goal and fund it, or fund one already at work, with a one-off transfer, a daily budget or a pledge: more money left means more explorers at once, and a note on your money steers the swarm by the money behind it.
           </p>
           <p className="actions">
             <Link className="btn btn-high" to="/new">
@@ -103,8 +103,8 @@ export function Home() {
             <dd>{swarms.reduce((sum, swarm) => sum + swarm.machines, 0)}</dd>
           </div>
           <div>
-            <dt>Pledged, MACH</dt>
-            <dd>{mach(pledged)}</dd>
+            <dt>Raised</dt>
+            <dd>{usd(pledged)}</dd>
           </div>
         </dl>
       </section>
@@ -145,8 +145,8 @@ export function Home() {
         <ol className="steps-how">
           <li>
             <span className="index">[1]</span>
-            <h3>Pledge</h3>
-            <p>Approve a spending key in Tempo Wallet capped at your pledge. The MACH stays in your wallet until the swarm spends it, and what it does not spend comes back.</p>
+            <h3>Fund</h3>
+            <p>Send USDC.e, pathUSD or OUSD to the swarm's wallet once, let it pull up to a daily budget from your wallet, or pledge any of them or MACH through a spending key. What the swarm does not spend comes back.</p>
           </li>
           <li>
             <span className="index">[2]</span>
@@ -156,7 +156,7 @@ export function Home() {
           <li>
             <span className="index">[3]</span>
             <h3>Steer</h3>
-            <p>A pledge can carry a note. Notes reach the agent ranked by the MACH behind them, and pledging with the same text backs a note that is already there.</p>
+            <p>Money can carry a note. Notes reach the agent ranked by the money behind them, stablecoins one to one, and the same text backs a note that is already there.</p>
           </li>
         </ol>
       </section>
