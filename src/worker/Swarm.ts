@@ -157,8 +157,8 @@ export class Swarm extends DurableObject<Cloudflare.Env> {
 
   async view(): Promise<View> {
     const sql = this.ctx.storage.sql
-    const paused = this.kv.get<string>('paused')
-    if (paused && !this.kv.get<string>('turn') && this.kv.get<string>('rechecked') !== paused) {
+    const paused = this.kv.get<string>('paused') ?? 'unchecked'
+    if (!this.kv.get<string>('turn') && this.kv.get<string>('rechecked') !== paused) {
       this.kv.put('rechecked', paused)
       if ((await this.ctx.storage.getAlarm()) === null) await this.ctx.storage.setAlarm(Date.now())
     }

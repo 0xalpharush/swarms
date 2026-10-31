@@ -92,7 +92,7 @@ export function Swarm(props: { config: Config | undefined; id: string }) {
   return (
     <article className="page swarm game-swarm" data-status={swarm.status}>
       <div className="quest-title"><div><Meta swarm={swarm} /><h1>{swarm.title}</h1></div><span className="quest-mode">{Api.fixture ? 'DEMO QUEST' : 'LIVE QUEST'}</span></div>
-      {swarm.status !== 'running' && <p className="banner">{swarm.status === 'done' ? 'Done. The answer below is what the swarm found.' : swarm.reason ?? 'No money behind it yet. The first contribution starts round 1.'}</p>}
+      {swarm.status !== 'running' && <p className="banner">{swarm.status === 'done' ? 'Done. The answer below is what the swarm found.' : swarm.reason ?? (swarm.status === 'paused' ? 'Paused: the money is used up. A contribution, budget or pledge starts the next round.' : 'No money behind it yet. The first contribution starts round 1.')}</p>}
       {(swarm.answer || live) && (
         <section className="quest-findings">
           <h2 className="answer-head">{swarm.status === 'done' ? 'Answer' : 'Latest answer'}</h2>
