@@ -96,6 +96,31 @@ export type Entry = {
 
 export type Hand = { connected: boolean; name: string }
 
+export type Prepared = {
+  amount: string | null
+  call: { data: `0x${string}`; to: `0x${string}` } | null
+  link: string
+  memo: `0x${string}`
+  memoText: string
+  note: string | null
+  swarm: string
+  symbol: string
+  token: Token
+  tokenAddress: `0x${string}`
+  wallet: `0x${string}`
+}
+
+export type Linked = {
+  amount: string
+  days: number
+  link: string
+  note: string | null
+  swarm: string
+  symbol: string
+  token: Token
+  wallet: `0x${string}`
+}
+
 export type Lent = { at: number; connected: boolean; label: string; name: string }
 
 export type Issued = {

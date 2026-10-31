@@ -15,7 +15,7 @@ const tools = [
   ['swarm_create', 'Start a swarm with a title and a goal. It waits until money comes in.'],
   ['swarm_pledge', 'Pledge MACH, with an optional note. Returns a Tempo Wallet link and code for the user.'],
   ['swarm_pledge_status', 'Polls a pending pledge and activates it once the user approves.'],
-  ['swarm_contribute', "Counts a transfer the user already sent to the swarm's wallet."],
+  ['swarm_contribute', "Prepares a one-off transfer (address, memo, call data, a link that sends it) or counts one by hash."],
   ['swarm_budget', "A link to the swarm's page with a daily budget filled in, to approve in Tempo Wallet."],
   ['swarm_hand', 'Issues a hand to lend a machine: the nc hand command and a nanocode-ts snippet.'],
   ['swarm_wait', 'Waits up to 55 s for the running round to end and returns its report.'],

@@ -1,4 +1,4 @@
-import { parseEventLogs } from 'viem'
+import { encodeFunctionData, parseEventLogs } from 'viem'
 import type { Address, Hex } from 'viem'
 import { getTransactionReceipt } from 'viem/actions'
 import { Abis } from 'viem/tempo'
@@ -16,11 +16,13 @@ import type {
   Issued,
   Kind,
   Lent,
+  Linked,
   Overview,
   Page,
   Pending,
   Pledge,
   Pledged,
+  Prepared,
   Requested,
   Round,
   Running,
@@ -111,6 +113,20 @@ export const schema = {
       .describe("The hash of a transferWithMemo of USDC.e, pathUSD or OUSD to the swarm's wallet."),
     note,
     swarm: id,
+  }),
+  transfer: z.object({
+    amount: decimal
+      .refine((value) => units(value) >= 10_000n, 'A transfer is at least 0.01.')
+      .optional()
+      .describe('How much to send, as a decimal string such as "1" or a number. With it the answer carries ready call data.'),
+    hash: z
+      .string()
+      .regex(/^0x[0-9a-fA-F]{64}$/)
+      .optional()
+      .describe('The hash of a transfer already sent. With it the transfer is counted instead of prepared.'),
+    note,
+    swarm: id,
+    token: z.enum(Chain.ids).default('usdce').describe('The stablecoin to send: usdce (USDC.e), pathusd (pathUSD) or ousd (OUSD).'),
   }),
   create: z.object({
     goal: z
@@ -514,22 +530,65 @@ export async function hands(env: Cloudflare.Env, input: Input<'swarm'>): Promise
   return Problem.ok({ hands: Hands.lent(rows, connected) })
 }
 
-export async function link(
-  env: Cloudflare.Env,
-  input: Input<'budget'>,
-  origin: string,
-): Promise<Problem.Result<{ link: string; token: string; amount: string; note: string | null; swarm: string }>> {
+export async function transfer(env: Cloudflare.Env, input: Input<'transfer'>, origin: string): Promise<Problem.Result<Prepared>> {
+  const parsed = parse(schema.transfer, input)
+  if (!parsed.ok) return parsed
+  const request = parsed.value
+  const found = await Store.find(env, request.swarm)
+  if (!found) return missing()
+  if (found.status === 'done') return Problem.fail(409, 'conflict', 'This swarm is done.')
+  const row = await provisioned(env, found)
+
+  const note = request.note || null
+  const amount = request.amount === undefined ? null : units(request.amount)
+  const memo = Memo.memo(row.id, note)
+  const token = Chain.tokens[request.token]
+  const query = new URLSearchParams({
+    fund: 'transfer',
+    token: request.token,
+    ...(amount === null ? {} : { amount: Memo.decimal(amount) }),
+    ...(note ? { note } : {}),
+  })
+  return Problem.ok({
+    amount: amount === null ? null : Memo.decimal(amount),
+    call:
+      amount === null
+        ? null
+        : { data: encodeFunctionData({ abi: Abis.tip20, args: [row.wallet, amount, memo], functionName: 'transferWithMemo' }), to: token.address },
+    link: `${origin}/s/${row.id}?${query}`,
+    memo,
+    memoText: note ? `note:${row.id}:${note}` : `swarm:${row.id}`,
+    note,
+    swarm: row.id,
+    symbol: token.symbol,
+    token: request.token,
+    tokenAddress: token.address,
+    wallet: row.wallet,
+  })
+}
+
+export async function link(env: Cloudflare.Env, input: Input<'budget'>, origin: string): Promise<Problem.Result<Linked>> {
   const parsed = parse(schema.budget, input)
   if (!parsed.ok) return parsed
   const request = parsed.value
-  const row = await Store.find(env, request.swarm)
-  if (!row) return missing()
-  if (row.status === 'done') return Problem.fail(409, 'conflict', 'This swarm is done.')
+  const found = await Store.find(env, request.swarm)
+  if (!found) return missing()
+  if (found.status === 'done') return Problem.fail(409, 'conflict', 'This swarm is done.')
+  const row = await provisioned(env, found)
 
   const amount = Memo.decimal(units(request.amount))
   const note = request.note || null
   const query = new URLSearchParams({ amount, fund: 'budget', token: request.token, ...(note ? { note } : {}) })
-  return Problem.ok({ amount, link: `${origin}/s/${row.id}?${query}`, note, swarm: row.id, token: request.token })
+  return Problem.ok({
+    amount,
+    days: Store.budget.days,
+    link: `${origin}/s/${row.id}?${query}`,
+    note,
+    swarm: row.id,
+    symbol: Chain.tokens[request.token].symbol,
+    token: request.token,
+    wallet: row.wallet,
+  })
 }
 
 export async function pledges(env: Cloudflare.Env, input: Input<'swarm'>): Promise<Problem.Result<{ pledges: Pledge[] }>> {
