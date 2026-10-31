@@ -256,6 +256,7 @@ async function load(env: Cloudflare.Env, id: string) {
   const row = await provisioned(env, found)
 
   const view = await stub(env, id).view()
+  if (row.status === 'paused' && BigInt(row.remaining) >= Store.reserve) await stub(env, id).kick()
   const answered = view.rounds.findLast((round) => round.status === 'completed' && round.message)
   if (!row.answer && answered?.message) {
     row.answer = JSON.stringify(Answer.parse(answered.n, answered.message, answered.endedAt ?? Date.now()))

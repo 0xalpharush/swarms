@@ -77,6 +77,8 @@ const maxFailures = 3
 
 const settleMs = 15_000
 
+const kickMs = 60_000
+
 const unfundedMs = 15 * 60_000
 
 const refundMs = 60_000
@@ -87,7 +89,7 @@ const smallestSwap = 10_000n
 
 const smallestPull = 30_000n
 
-const poolKey = { days: 30, deposit: 0.1, limit: 100, search: 0.5, token: 'ousd', topUp: 0.05 } as const
+const poolKey = { days: 30, deposit: 0.1, limit: 100, token: 'ousd', topUp: 0.05 } as const
 
 export class Swarm extends DurableObject<Cloudflare.Env> {
   stepping: Promise<number | null> | undefined
@@ -155,13 +157,16 @@ export class Swarm extends DurableObject<Cloudflare.Env> {
     return listed.ok ? listed.value.hands.filter((hand) => hand.connected).map((hand) => hand.name) : []
   }
 
+  async kick() {
+    const now = Date.now()
+    if (this.kv.get<string>('turn') || now - (this.kv.get<number>('kicked') ?? 0) < kickMs) return
+    this.kv.put('kicked', now)
+    const alarm = await this.ctx.storage.getAlarm()
+    if (alarm === null || alarm > now + kickMs) await this.ctx.storage.setAlarm(now)
+  }
+
   async view(): Promise<View> {
     const sql = this.ctx.storage.sql
-    const paused = this.kv.get<string>('paused') ?? 'unchecked'
-    if (!this.kv.get<string>('turn') && this.kv.get<string>('rechecked') !== paused) {
-      this.kv.put('rechecked', paused)
-      if ((await this.ctx.storage.getAlarm()) === null) await this.ctx.storage.setAlarm(Date.now())
-    }
     const feed = sql
       .exec<Record<string, SqlStorageValue>>(
         'SELECT seq, at, round, kind, text, detail FROM feed ORDER BY seq DESC LIMIT 200',
@@ -404,8 +409,6 @@ export class Swarm extends DurableObject<Cloudflare.Env> {
       status === 'completed' ? null : message,
     )
 
-    if (status !== 'completed' && /HTTP 402|billing_error|payment_failed/.test(message ?? '') && current?.kind === 'pledge' && this.kv.get<string>('pledge') === current.backing.id)
-      await this.release(current.backing, current.token, 'spent')
     const failures = status === 'completed' ? 0 : (this.kv.get<number>('failures') ?? 0) + 1
     this.kv.put('failures', failures)
     if (status === 'completed' && /STATUS:\s*done/i.test(message ?? '')) {
@@ -564,7 +567,7 @@ export class Swarm extends DurableObject<Cloudflare.Env> {
     this.opened.set('pool', completed.value.key)
     this.log(
       'funds',
-      `The swarm's wallet authorized its own gateway key: up to ${poolKey.limit} OUSD over ${poolKey.days} days for rounds, and ${poolKey.search} USDC.e for paid web search from the USDC.e it keeps.`,
+      `The swarm's wallet authorized its own gateway key: up to ${poolKey.limit} OUSD over ${poolKey.days} days for rounds.`,
     )
     return completed.value.key
   }
@@ -594,7 +597,7 @@ export class Swarm extends DurableObject<Cloudflare.Env> {
 
     let swapped = false
     for (const id of ['pathusd', 'usdce'] as const) {
-      const amount = balances[id] - Vault.dust - (id === 'usdce' ? Vault.search : 0n)
+      const amount = balances[id] - Vault.dust
       if (amount < smallestSwap) continue
       const result = await Vault.swap(this.env, owner, id, amount).catch((error: unknown) => error as Error)
       if (result instanceof Error) {
@@ -820,7 +823,6 @@ export class Swarm extends DurableObject<Cloudflare.Env> {
         : 'Paused: the money is used up. A contribution, budget or pledge starts the next round.')
     if (row.status === status && this.kv.get<string>('paused') === text) return
     this.kv.put('paused', text)
-    this.kv.put('rechecked', text)
     await Store.update(this.env, row.id, { status })
     this.log('status', text)
   }

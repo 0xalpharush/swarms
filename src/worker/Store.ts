@@ -90,7 +90,7 @@ export type Changes = Partial<
 
 export const perWorker = 100_000n
 
-export const reserve = 120_000n
+export const reserve = 50_000n
 
 export const minPledge = 250_000n
 
