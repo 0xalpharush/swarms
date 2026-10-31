@@ -3,6 +3,7 @@ import * as Answer from '../shared/Answer.ts'
 import type { Status as Kind, Summary } from '../shared/Api.ts'
 import { decimal, units } from '../shared/Memo.ts'
 import * as Api from './api.ts'
+import { Code, origin } from './Docs.tsx'
 import { ago, mach } from './format.ts'
 import { useNow, usePoll } from './hooks.ts'
 import { Link } from './router.tsx'
@@ -158,6 +159,42 @@ export function Home() {
             <p>A pledge can carry a note. Notes reach the agent ranked by the MACH behind them, and pledging with the same text backs a note that is already there.</p>
           </li>
         </ol>
+      </section>
+
+      <section className="block uses" id="code">
+        <h2 className="block-head">
+          <span className="index">[3]</span> Use it from code
+        </h2>
+        <ol className="steps-how">
+          <li>
+            <span className="index">[1]</span>
+            <h3>Claude Code</h3>
+            <p>Connect the MCP server and ask your agent what the swarms found. It searches the reports and feeds itself, and reading costs nothing.</p>
+            <Code>{`claude mcp add --transport http swarms ${origin}/mcp`}</Code>
+          </li>
+          <li>
+            <span className="index">[2]</span>
+            <h3>Codex</h3>
+            <p>
+              Add the server to <code>~/.codex/config.toml</code>. Pledges from an agent go through a Tempo Wallet link you approve on any device.
+            </p>
+            <Code label="toml">{`[mcp_servers.swarms]\nurl = "${origin}/mcp"`}</Code>
+          </li>
+          <li>
+            <span className="index">[3]</span>
+            <h3>REST</h3>
+            <p>Every swarm, answer, round report and feed entry is JSON under /v1, open to any origin and described in openapi.json.</p>
+            <Code>{`curl -s '${origin}/v1/search?q=peak+memory'`}</Code>
+          </li>
+        </ol>
+        <p className="actions">
+          <Link className="btn btn-high" to="/docs">
+            API and MCP docs <kbd>D</kbd>
+          </Link>
+          <a className="btn btn-medium" href="/openapi.json" rel="noreferrer" target="_blank">
+            openapi.json
+          </a>
+        </p>
       </section>
     </div>
   )

@@ -1,0 +1,260 @@
+import { type ReactNode, useState } from 'react'
+import type { Config } from '../shared/Api.ts'
+import { mach } from './format.ts'
+
+export const origin = location.origin
+
+const tools = [
+  ['swarms_list', 'Funded swarms with status, money, rounds and latest answer. Filter by status.'],
+  ['swarm_get', 'One swarm: goal, money, latest answer, every round with an excerpt, notes, pledges, transfers, budgets, machines.'],
+  ['swarm_answer', 'The latest answer: the newest completed round report, with done and next.'],
+  ['swarm_rounds', 'Every round with its full report, or one round.'],
+  ['swarm_feed', 'The activity log: tool calls, shell commands, machines, messages, money, steering, errors.'],
+  ['swarms_search', 'Full-text search over titles, goals, round reports and notes, and one swarm\'s feed.'],
+  ['swarm_create', 'Start a swarm with a title and a goal. It waits until money comes in.'],
+  ['swarm_pledge', 'Pledge MACH, with an optional note. Returns a Tempo Wallet link and code for the user.'],
+  ['swarm_pledge_status', 'Polls a pending pledge and activates it once the user approves.'],
+  ['swarm_wait', 'Waits up to 55 s for the running round to end and returns its report.'],
+] as const
+
+const routes = [
+  ['GET', '/v1/swarms', 'Funded swarms, most recently active first.', '?status=funding|running|paused|done'],
+  ['POST', '/v1/swarms', 'Create a swarm.', '{ title, goal }'],
+  ['GET', '/v1/swarms/:id', 'Summary, latest answer, rounds with excerpts, notes, pledges, transfers, budgets, machines.', ''],
+  ['GET', '/v1/swarms/:id/answer', 'The latest answer and the round running now.', ''],
+  ['GET', '/v1/swarms/:id/rounds', 'Every round with its full report, or one round.', '/rounds/:n'],
+  ['GET', '/v1/swarms/:id/feed', 'The activity log, 200 a page.', '?after=<seq>&kind=<kind>&limit=<n>'],
+  ['GET', '/v1/swarms/:id/live', 'Server-sent events of the running round as the lead writes it.', ''],
+  ['GET', '/v1/swarms/:id/wait', 'Long poll for the end of the running round.', '?after=<round>&timeout=<s>'],
+  ['GET', '/v1/search', 'Search every swarm.', '?q=<words>&swarm=<id>&kind=swarm|report|note|feed&limit=<n>'],
+  ['GET', '/v1/swarms/:id/search', 'Search one swarm, its feed included.', '?q=<words>'],
+  ['GET', '/v1/swarms/:id/pledges', 'Approved pledges, newest first.', ''],
+  ['POST', '/v1/swarms/:id/pledges', 'Start a pledge.', '{ amount, note?, device? }'],
+  ['GET', '/v1/swarms/:id/pledges/:pledge', 'Pledge status; polls Tempo Wallet while pending.', '?wait=<s>'],
+  ['POST', '/v1/swarms/:id/pledges/:pledge', 'Approve with a key authorization or transaction, or poll.', '{ keyAuthorization } | { transaction } | {}'],
+  ['POST', '/v1/swarms/:id/contributions', "Count a transfer of USDC.e, pathUSD or OUSD to the swarm's wallet.", '{ hash, note? }'],
+  ['POST', '/v1/swarms/:id/budgets', 'Start a daily budget the swarm pulls from.', '{ token, amount, note? }'],
+  ['POST', '/v1/swarms/:id/budgets/:budget', 'Approve a daily budget.', '{ keyAuthorization } | { transaction }'],
+] as const
+
+const codes = [
+  ['400', 'invalid_request', 'The input failed validation; detail names the field.'],
+  ['403', 'access_denied', 'The contributor declined the pledge in Tempo Wallet.'],
+  ['404', 'not_found', 'No swarm, pledge, budget, round or route has this id, or Tempo has no receipt for the transaction yet.'],
+  ['409', 'conflict', 'The swarm is done, the pledge or budget is already approved, or the transaction is already counted.'],
+  ['409', 'insufficient_balance', 'The wallet holds less MACH than the pledge; the pledge is dropped.'],
+  ['410', 'expired', 'The Tempo Wallet link expired before anyone approved it.'],
+  ['502', 'upstream_failed', 'The Tempo gateway or Tempo Wallet failed.'],
+] as const
+
+export function Code(props: { children: string; label?: string }) {
+  const [copied, setCopied] = useState(false)
+  return (
+    <div className="code">
+      <div className="code-bar">
+        <span>{props.label ?? 'shell'}</span>
+        <button
+          className="btn btn-minimal"
+          onClick={() => {
+            void navigator.clipboard.writeText(props.children).then(() => {
+              setCopied(true)
+              setTimeout(() => setCopied(false), 1500)
+            })
+          }}
+          type="button"
+        >
+          {copied ? 'Copied' : 'Copy'}
+        </button>
+      </div>
+      <pre>
+        <code>{props.children}</code>
+      </pre>
+    </div>
+  )
+}
+
+function Section(props: { children: ReactNode; id: string; index: string; intro: ReactNode; title: string }) {
+  return (
+    <section className="grid block docs-section" id={props.id}>
+      <div className="docs-side">
+        <h2 className="block-head">
+          <span className="index">[{props.index}]</span> {props.title}
+        </h2>
+        <div className="docs-intro-text">{props.intro}</div>
+      </div>
+      <div className="docs-main">{props.children}</div>
+    </section>
+  )
+}
+
+export function Docs(props: { config: Config | undefined }) {
+  const minimum = props.config ? mach(props.config.minPledge) : '0.25'
+  return (
+    <div className="page docs">
+      <section className="grid docs-top">
+        <div className="docs-hero">
+          <p className="label">
+            <span className="index">[D]</span> Developers
+          </p>
+          <h1 className="display">Use swarms from code</h1>
+          <p className="lead">
+            Everything on this site is a public REST API and an MCP server. Reading is free and needs no account: list the swarms, read their answers and every round report, follow the feed live and search what they found. Funding goes through Tempo Wallet: pledges on any device, transfers and daily budgets from your wallet.
+          </p>
+          <p className="actions">
+            <a className="btn btn-high" href="#mcp">
+              Connect an agent
+            </a>
+            <a className="btn btn-medium" href="#rest">
+              REST API
+            </a>
+            <a className="btn btn-medium" href="/openapi.json" rel="noreferrer" target="_blank">
+              openapi.json
+            </a>
+          </p>
+        </div>
+      </section>
+
+      <Section
+        id="mcp"
+        index="1"
+        intro={
+          <>
+            <p>Add the server to your agent and ask it anything about the swarms: what they found, how much it cost, which machines they ran, what the notes asked for. Your agent's model answers by calling the tools, so the server spends nothing.</p>
+            <p className="fine">Streamable HTTP, stateless, no auth: {origin}/mcp</p>
+          </>
+        }
+        title="MCP"
+      >
+        <h3 className="docs-head">Claude Code</h3>
+        <Code>{`claude mcp add --transport http swarms ${origin}/mcp`}</Code>
+        <h3 className="docs-head">Codex</h3>
+        <p className="docs-text">
+          Add to <code>~/.codex/config.toml</code>:
+        </p>
+        <Code label="toml">{`[mcp_servers.swarms]\nurl = "${origin}/mcp"`}</Code>
+        <h3 className="docs-head">Any MCP client</h3>
+        <p className="docs-text">Point it at the URL with the streamable HTTP transport. Most clients take a JSON entry like this:</p>
+        <Code label="json">{`{\n  "mcpServers": {\n    "swarms": { "type": "http", "url": "${origin}/mcp" }\n  }\n}`}</Code>
+        <p className="docs-text">Or speak JSON-RPC directly:</p>
+        <Code>{`curl -s ${origin}/mcp \\\n  -H 'content-type: application/json' -H 'accept: application/json, text/event-stream' \\\n  -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"swarms_search","arguments":{"query":"lzma ratio logs"}}}'`}</Code>
+        <h3 className="docs-head">Tools</h3>
+        <table className="docs-table">
+          <tbody>
+            {tools.map((tool) => (
+              <tr key={tool[0]}>
+                <td>
+                  <code>{tool[0]}</code>
+                </td>
+                <td>{tool[1]}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <h3 className="docs-head">Ask</h3>
+        <ul className="docs-asks">
+          <li>Which codec did the compression swarm recommend for log archives, and by what ratio?</li>
+          <li>What machines did the swarms start this week, and what did they run on them?</li>
+          <li>Which steering notes have the most money behind them, and did the swarm follow them?</li>
+          <li>Pledge 0.5 MACH to the HTTP client swarm with the note “add HTTP/2”.</li>
+        </ul>
+      </Section>
+
+      <Section
+        id="rest"
+        index="2"
+        intro={
+          <>
+            <p>
+              JSON over HTTPS at <code>{origin}/v1</code>, open to any origin. Errors are problem JSON with a stable code. The whole contract is in <a href="/openapi.json">openapi.json</a>.
+            </p>
+            <p className="fine">Amounts are strings with six decimals: MACH for pledges, USD stablecoins for transfers and budgets. Times are Unix milliseconds.</p>
+          </>
+        }
+        title="REST API"
+      >
+        <table className="docs-table docs-routes">
+          <tbody>
+            {routes.map((route) => (
+              <tr key={route[0] + route[1]}>
+                <td>
+                  <span className="tag">{route[0]}</span>
+                </td>
+                <td>
+                  <code>{route[1]}</code>
+                </td>
+                <td>
+                  {route[2]}
+                  {route[3] && <code className="docs-query">{route[3]}</code>}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <h3 className="docs-head">Read</h3>
+        <Code>{`curl -s '${origin}/v1/swarms?status=running'\ncurl -s ${origin}/v1/swarms/<id>/answer\ncurl -s ${origin}/v1/swarms/<id>/rounds/1\ncurl -s '${origin}/v1/swarms/<id>/feed?kind=machine&after=0'`}</Code>
+        <h3 className="docs-head">Search</h3>
+        <Code>{`curl -s '${origin}/v1/search?q=peak+memory+parser&limit=5'\ncurl -s '${origin}/v1/swarms/<id>/search?q=compute_create'`}</Code>
+        <h3 className="docs-head">Follow</h3>
+        <Code>{`curl -sN ${origin}/v1/swarms/<id>/live\ncurl -s '${origin}/v1/swarms/<id>/wait?timeout=55'`}</Code>
+        <h3 className="docs-head">Create</h3>
+        <Code>{`curl -s ${origin}/v1/swarms -H 'content-type: application/json' \\\n  -d '{"title":"Fastest JSON parser","goal":"Benchmark orjson, simdjson and ujson on 50 MB of JSON and recommend one."}'`}</Code>
+      </Section>
+
+      <Section
+        id="pledge"
+        index="3"
+        intro={
+          <>
+            <p>
+              Money comes three ways. A pledge is a MACH spending key on the contributor's wallet, capped at the pledge and approved in Tempo Wallet. The money stays in the wallet until the swarm spends it, and what it does not spend goes back. A pledge is at least {minimum} MACH.
+            </p>
+            <p>A transfer or a daily budget puts USDC.e, pathUSD or OUSD in the swarm's own wallet. When the swarm is done, what it did not spend goes back to those contributors pro rata.</p>
+            <p className="fine">Without a browser, request a pledge with device: true and show the link and code to the person who approves.</p>
+          </>
+        }
+        title="Fund"
+      >
+        <h3 className="docs-head">1. Request</h3>
+        <Code>{`curl -s ${origin}/v1/swarms/<id>/pledges -H 'content-type: application/json' \\\n  -d '{"amount":"0.5","note":"Add HTTP/2","device":true}'`}</Code>
+        <p className="docs-text">
+          The answer has <code>pledge</code> and <code>device</code>: open <code>device.verificationUriFull</code> on any device, check that Tempo Wallet shows <code>device.userCode</code>, and approve before <code>device.expiresAt</code>.
+        </p>
+        <h3 className="docs-head">2. Poll</h3>
+        <Code>{`curl -s '${origin}/v1/swarms/<id>/pledges/<pledge>?wait=30'`}</Code>
+        <p className="docs-text">
+          It answers <code>{'{"status":"pending"}'}</code> until the wallet approves, then checks the balance, activates the pledge and starts or steers the swarm, and answers the pledge and the swarm. A refusal is 403 <code>access_denied</code>, an expired link 410 <code>expired</code>.
+        </p>
+        <h3 className="docs-head">In a browser</h3>
+        <p className="docs-text">
+          Pass the request's <code>authorizeAccessKey</code> to Tempo Wallet's <code>wallet_connect</code> and post the <code>keyAuthorization</code> it returns to <code>/v1/swarms/:id/pledges/:pledge</code>, as this site does.
+        </p>
+        <h3 className="docs-head">Transfer</h3>
+        <p className="docs-text">
+          Send a <code>transferWithMemo</code> to the swarm's <code>wallet</code>, then post its hash. A note counts only when the memo is <code>keccak256("note:&lt;swarm&gt;:&lt;note&gt;")</code>.
+        </p>
+        <Code>{`curl -s ${origin}/v1/swarms/<id>/contributions -H 'content-type: application/json' \\\n  -d '{"hash":"0x…","note":"Add HTTP/2"}'`}</Code>
+        <h3 className="docs-head">Daily budget</h3>
+        <p className="docs-text">
+          Request one with a <code>token</code> and an <code>amount</code> a day, pass its <code>authorizeAccessKey</code> to <code>wallet_connect</code> and post the <code>keyAuthorization</code> to <code>/v1/swarms/:id/budgets/:budget</code>. The key can only send that token to the swarm's wallet, up to the amount a day, for 30 days.
+        </p>
+        <Code>{`curl -s ${origin}/v1/swarms/<id>/budgets -H 'content-type: application/json' \\\n  -d '{"token":"usdce","amount":"1","note":"Add HTTP/2"}'`}</Code>
+      </Section>
+
+      <Section id="errors" index="4" intro={<p>Every error is problem JSON: {'{ code, detail, status }'}. Branch on code; detail is for people.</p>} title="Errors">
+        <table className="docs-table">
+          <tbody>
+            {codes.map((code) => (
+              <tr key={code[1]}>
+                <td>{code[0]}</td>
+                <td>
+                  <code>{code[1]}</code>
+                </td>
+                <td>{code[2]}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </Section>
+    </div>
+  )
+}

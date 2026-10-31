@@ -3,6 +3,7 @@ import type { Config } from '../shared/Api.ts'
 import { decimal } from '../shared/Memo.ts'
 import { fixture } from './api.ts'
 import { mach, short } from './format.ts'
+import { Docs } from './Docs.tsx'
 import { message, useConfig, useWallet } from './hooks.ts'
 import { Home } from './Home.tsx'
 import { New } from './New.tsx'
@@ -45,6 +46,9 @@ function Header(props: { config: Config | undefined; crumb: string | undefined; 
         <Link className={props.path === '/new' ? 'nav-link nav-on' : 'nav-link'} to="/new">
           <span className="index">[N]</span> Start a swarm
         </Link>
+        <Link className={props.path === '/docs' ? 'nav-link nav-on' : 'nav-link'} to="/docs">
+          <span className="index">[D]</span> API and MCP
+        </Link>
       </nav>
       <p className="brand">
         <Link className="wordmark" to="/">
@@ -79,6 +83,9 @@ function Footer(props: { config: Config | undefined }) {
         </a>
         : models, machines and payments in MACH.
       </p>
+      <p>
+        <Link to="/docs">API and MCP</Link> · <a href="/openapi.json">openapi.json</a>
+      </p>
       {fixture && <p className="tag tag-on">Fixture data</p>}
     </footer>
   )
@@ -92,7 +99,7 @@ export function App() {
   const swarm = /^\/s\/([^/]+)\/?$/.exec(path)?.[1]
 
   useEffect(() => {
-    if (!swarm) document.title = path === '/new' ? 'Start a swarm · Swarms' : 'Swarms'
+    if (!swarm) document.title = path === '/new' ? 'Start a swarm · Swarms' : path === '/docs' ? 'API and MCP · Swarms' : 'Swarms'
   }, [path, swarm])
 
   useEffect(() => {
@@ -100,6 +107,7 @@ export function App() {
       const target = event.target as HTMLElement | null
       if (event.metaKey || event.ctrlKey || event.altKey || target?.closest('input, textarea, select, [contenteditable]')) return
       if (event.key === 'n' || event.key === 'N') navigate('/new')
+      if (event.key === 'd' || event.key === 'D') navigate('/docs')
     }
     addEventListener('keydown', listener)
     return () => removeEventListener('keydown', listener)
@@ -107,12 +115,14 @@ export function App() {
 
   return (
     <div className="app">
-      <Header config={config} crumb={swarm ? crumb : path === '/new' ? 'New' : undefined} path={path} />
+      <Header config={config} crumb={swarm ? crumb : path === '/new' ? 'New' : path === '/docs' ? 'Docs' : undefined} path={path} />
       <main>
         {path === '/' ? (
           <Home />
         ) : path === '/new' ? (
           <New config={config} />
+        ) : path === '/docs' ? (
+          <Docs config={config} />
         ) : swarm ? (
           <Swarm config={config} id={decodeURIComponent(swarm)} key={swarm} onTitle={onTitle} />
         ) : (
