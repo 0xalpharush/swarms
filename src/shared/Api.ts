@@ -122,9 +122,57 @@ export type Config = {
   tokens: { address: `0x${string}`; id: Token; symbol: string }[]
 }
 
-export type Requested = { authorizeAccessKey: unknown; pledge: string }
+export type Device = {
+  expiresAt: number
+  interval: number
+  userCode: string
+  verificationUri: string
+  verificationUriFull: string
+}
 
-export type Pledged = { pledge: Pledge; swarm: Summary }
+export type Requested = { authorizeAccessKey: unknown; device?: Device; pledge: string }
+
+export type Pledged = { pledge: Pledge; status: Pledge['status']; swarm: Summary }
+
+export type Pending = { amount: string; device: Device | null; note: string | null; pledge: string; status: 'pending' }
+
+export type Running = { n: number; startedAt: number }
+
+export type Brief = Omit<Round, 'message'> & { excerpt: string | null }
+
+export type Overview = Summary & {
+  budgets: Budget[]
+  contributions: Contribution[]
+  hands: Hand[]
+  history: Brief[]
+  notes: Note[]
+  pledges: Pledge[]
+  running: Running | null
+}
+
+export type Answered = { answer: Answer | null; running: Running | null; status: Status; swarm: string; title: string }
+
+export type Page = { entries: Entry[]; next: number }
+
+export type Hit = {
+  at: number | null
+  entry: Pick<Entry, 'kind' | 'seq'> | null
+  kind: 'swarm' | 'report' | 'note' | 'feed'
+  round: number | null
+  snippet: string
+  swarm: { id: string; status: Status; title: string }
+}
+
+export type Found = { hits: Hit[]; terms: string[] }
+
+export type Waited = {
+  changed: boolean
+  reason: 'ended' | 'idle' | 'timeout'
+  round: Round | null
+  running: Running | null
+  swarm: Summary
+  waited: number
+}
 
 export type BudgetRequested = { authorizeAccessKey: unknown; budget: string }
 

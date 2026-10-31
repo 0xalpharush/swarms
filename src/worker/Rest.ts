@@ -1,0 +1,116 @@
+import { Hono } from 'hono'
+import { cors } from 'hono/cors'
+import type { Contributed, Pending, Pledged } from '../shared/Api.ts'
+import * as Mcp from './Mcp.ts'
+import * as OpenApi from './OpenApi.ts'
+import * as Operations from './Operations.ts'
+import * as Problem from './Problem.ts'
+
+export const app = new Hono<{ Bindings: Cloudflare.Env }>()
+
+export async function body(request: Request): Promise<Record<string, unknown>> {
+  const parsed: unknown = await request.json().catch(() => ({}))
+  return typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed) ? (parsed as Record<string, unknown>) : {}
+}
+
+export function stream(result: Problem.Result<Response>) {
+  return result.ok ? new Response(result.value.body, result.value) : Problem.json(result)
+}
+
+export function contributed(result: Problem.Result<{ contributed: Contributed; created: boolean }>) {
+  return result.ok ? Response.json(result.value.contributed, { status: result.value.created ? 201 : 200 }) : Problem.json(result)
+}
+
+export function settled(result: Problem.Result<Pledged | Pending>) {
+  return Problem.respond(result, result.ok && result.value.status === 'pending' ? 202 : 201)
+}
+
+app.use('/v1/*', cors())
+app.use('/openapi.json', cors())
+app.use('/mcp', cors({ exposeHeaders: ['mcp-protocol-version', 'mcp-session-id'] }))
+
+app.get('/openapi.json', (c) => c.json(OpenApi.document(new URL(c.req.url).origin)))
+
+app.all('/mcp', (c) => Mcp.handle(c.req.raw, c.env))
+
+app.get('/v1/config', (c) => c.json(Operations.config(c.env)))
+
+app.get('/v1/swarms', async (c) => Problem.respond(await Operations.list(c.env, c.req.query())))
+
+app.post('/v1/swarms', async (c) => Problem.respond(await Operations.create(c.env, await body(c.req.raw)), 201))
+
+app.get('/v1/search', async (c) =>
+  Problem.respond(await Operations.search(c.env, { ...c.req.query(), query: c.req.query('q') ?? c.req.query('query') })),
+)
+
+app.get('/v1/swarms/:id', async (c) => Problem.respond(await Operations.get(c.env, { swarm: c.req.param('id') })))
+
+app.get('/v1/swarms/:id/answer', async (c) => Problem.respond(await Operations.answer(c.env, { swarm: c.req.param('id') })))
+
+app.get('/v1/swarms/:id/rounds', async (c) => Problem.respond(await Operations.rounds(c.env, { swarm: c.req.param('id') })))
+
+app.get('/v1/swarms/:id/rounds/:round', async (c) => {
+  const result = await Operations.rounds(c.env, { round: c.req.param('round'), swarm: c.req.param('id') })
+  return result.ok ? c.json(result.value.rounds[0]) : Problem.json(result)
+})
+
+app.get('/v1/swarms/:id/feed', async (c) =>
+  Problem.respond(await Operations.feed(c.env, { ...c.req.query(), swarm: c.req.param('id') })),
+)
+
+app.get('/v1/swarms/:id/search', async (c) =>
+  Problem.respond(
+    await Operations.search(c.env, {
+      ...c.req.query(),
+      query: c.req.query('q') ?? c.req.query('query'),
+      swarm: c.req.param('id'),
+    }),
+  ),
+)
+
+app.get('/v1/swarms/:id/live', async (c) =>
+  stream(await Operations.live(c.env, { swarm: c.req.param('id') }, c.req.raw.signal)),
+)
+
+app.get('/v1/swarms/:id/wait', async (c) =>
+  Problem.respond(await Operations.wait(c.env, { ...c.req.query(), swarm: c.req.param('id') }, c.req.raw.signal)),
+)
+
+app.post('/v1/swarms/:id/contributions', async (c) =>
+  contributed(await Operations.contribute(c.env, { ...(await body(c.req.raw)), swarm: c.req.param('id') })),
+)
+
+app.post('/v1/swarms/:id/budgets', async (c) =>
+  Problem.respond(await Operations.budget(c.env, { ...(await body(c.req.raw)), swarm: c.req.param('id') }), 201),
+)
+
+app.post('/v1/swarms/:id/budgets/:budget', async (c) =>
+  Problem.respond(
+    await Operations.allow(c.env, { ...(await body(c.req.raw)), budget: c.req.param('budget'), swarm: c.req.param('id') }),
+    201,
+  ),
+)
+
+app.get('/v1/swarms/:id/pledges', async (c) => Problem.respond(await Operations.pledges(c.env, { swarm: c.req.param('id') })))
+
+app.post('/v1/swarms/:id/pledges', async (c) =>
+  Problem.respond(await Operations.pledge(c.env, { ...(await body(c.req.raw)), swarm: c.req.param('id') }), 201),
+)
+
+app.get('/v1/swarms/:id/pledges/:pledge', async (c) =>
+  Problem.respond(
+    await Operations.status(
+      c.env,
+      { ...c.req.query(), pledge: c.req.param('pledge'), swarm: c.req.param('id') },
+      c.req.raw.signal,
+    ),
+  ),
+)
+
+app.post('/v1/swarms/:id/pledges/:pledge', async (c) =>
+  settled(
+    await Operations.approve(c.env, { ...(await body(c.req.raw)), pledge: c.req.param('pledge'), swarm: c.req.param('id') }),
+  ),
+)
+
+app.all('/v1/*', () => Problem.json({ code: 'not_found', detail: 'No such route. See /openapi.json.', status: 404 }))

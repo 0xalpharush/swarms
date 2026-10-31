@@ -464,5 +464,5 @@ export async function confirm(key: string, pledge: string): Promise<Pledged> {
     if (swarm.script.length === 0) swarm.script = translation
   }
   settle(swarm)
-  return delay({ pledge: pledged, swarm: summary(swarm) }, 600)
+  return delay({ pledge: pledged, status: 'active', swarm: summary(swarm) }, 600)
 }

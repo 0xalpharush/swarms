@@ -139,11 +139,17 @@ export function summary(row: Row, current?: bigint): Summary {
   }
 }
 
-export async function list(env: Cloudflare.Env) {
+export async function list(env: Cloudflare.Env, status?: Summary['status']) {
   const { results } = await env.DB.prepare(
-    `select * from (${totals}) where raised > 0 or daily > 0 order by updated_at desc limit 100`,
-  ).all<Row>()
+    `select * from (${totals}) where (raised > 0 or daily > 0)${status ? ' and status = ?' : ''} order by updated_at desc limit 100`,
+  )
+    .bind(...(status ? [status] : []))
+    .all<Row>()
   return results
+}
+
+export async function exists(env: Cloudflare.Env, id: string) {
+  return (await env.DB.prepare('select 1 from swarms where id = ?').bind(id).first()) !== null
 }
 
 export async function find(env: Cloudflare.Env, id: string) {

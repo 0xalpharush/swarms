@@ -1,6 +1,10 @@
+import type { Device } from '../shared/Api.ts'
+
 export type Result<value> = { ok: true; value: value } | { detail: string; ok: false; status: number }
 
-export type Requested = { authorizeAccessKey: unknown; id: string }
+export type Requested = { authorizeAccessKey: unknown; device?: Device; id: string }
+
+export type Completed = { key: string; status: 'completed' } | { status: 'pending' }
 
 export type Me = {
   wallet: `0x${string}`
@@ -64,7 +68,7 @@ async function send<value>(env: Cloudflare.Env, path: string, init: Init = {}): 
 
 export function request(
   env: Cloudflare.Env,
-  input: { days: number; deposit: number; limit: number; token?: 'mach' | 'ousd'; topUp: number },
+  input: { days: number; deposit: number; device?: boolean; limit: number; token?: 'mach' | 'ousd'; topUp: number },
 ) {
   return send<Requested>(env, '/api/keys/request', { body: input })
 }
@@ -78,7 +82,7 @@ export function complete(
   env: Cloudflare.Env,
   input: { id: string; keyAuthorization?: unknown; name: string; transaction?: string },
 ) {
-  return send<{ key: string }>(env, '/api/keys/complete', { body: input })
+  return send<Completed>(env, '/api/keys/complete', { body: input })
 }
 
 export function me(env: Cloudflare.Env, key: string) {

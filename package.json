@@ -13,6 +13,7 @@
     "gen:types": "wrangler types worker-configuration.d.ts"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.2",
     "accounts": "0.21.0",
     "hono": "^4.13.14",
     "ox": "0.14.56",

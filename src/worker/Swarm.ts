@@ -8,6 +8,7 @@ import * as Budget from './Budget.ts'
 import * as Chain from './Chain.ts'
 import * as Gateway from './Gateway.ts'
 import * as Seal from './Seal.ts'
+import * as Search from './Search.ts'
 import * as Store from './Store.ts'
 import * as Vault from './Vault.ts'
 
@@ -128,7 +129,17 @@ export class Swarm extends DurableObject<Cloudflare.Env> {
       .toArray()
       .reverse()
       .map(entry)
-    const rounds = sql
+    return {
+      feed,
+      hands: this.kv.get<Hand[]>('hands') ?? [],
+      left: this.kv.get<string>('left') ?? null,
+      rounds: this.rounds(),
+      steered: this.steered(),
+    }
+  }
+
+  rounds(): Round[] {
+    return this.ctx.storage.sql
       .exec<Record<string, SqlStorageValue>>(
         'SELECT n, started_at, ended_at, status, message, spent FROM rounds ORDER BY n',
       )
@@ -141,20 +152,28 @@ export class Swarm extends DurableObject<Cloudflare.Env> {
         startedAt: Number(row['started_at']),
         status: String(row['status']) as Round['status'],
       }))
-    return {
-      feed,
-      hands: this.kv.get<Hand[]>('hands') ?? [],
-      left: this.kv.get<string>('left') ?? null,
-      rounds,
-      steered: this.steered(),
-    }
   }
 
-  feed(after: number): Entry[] {
+  feed(after: number, filter: { kind?: Kind | undefined; limit?: number | undefined } = {}): Entry[] {
     return this.ctx.storage.sql
       .exec<Record<string, SqlStorageValue>>(
-        'SELECT seq, at, round, kind, text, detail FROM feed WHERE seq > ? ORDER BY seq LIMIT 200',
+        `SELECT seq, at, round, kind, text, detail FROM feed WHERE seq > ?${filter.kind ? ' AND kind = ?' : ''} ORDER BY seq LIMIT ?`,
         after,
+        ...(filter.kind ? [filter.kind] : []),
+        filter.limit ?? 200,
+      )
+      .toArray()
+      .map(entry)
+  }
+
+  search(terms: string[], limit: number): Entry[] {
+    if (!terms.length) return []
+    const score = terms.map(() => "(instr(lower(text || ' ' || coalesce(detail, '')), ?) > 0)").join(' + ')
+    return this.ctx.storage.sql
+      .exec<Record<string, SqlStorageValue>>(
+        `SELECT seq, at, round, kind, text, detail FROM (SELECT *, ${score} AS score FROM feed) WHERE score > 0 ORDER BY score DESC, seq DESC LIMIT ?`,
+        ...terms,
+        limit,
       )
       .toArray()
       .map(entry)
@@ -333,6 +352,8 @@ export class Swarm extends DurableObject<Cloudflare.Env> {
     this.kv.delete('started')
     if (status === 'completed' && message)
       await Store.update(this.env, row.id, { answer: JSON.stringify(Answer.parse(n, message, Date.now())) })
+    const ended = this.rounds().find((round) => round.n === n)
+    if (ended) await Search.report(this.env, row.id, ended).catch((error: unknown) => console.error('Indexing the round report failed', error))
     this.log(
       status === 'completed' ? 'status' : 'error',
       `Round ${n} ${status}, spending ${dollars(spent)}.`,
@@ -471,6 +492,10 @@ export class Swarm extends DurableObject<Cloudflare.Env> {
     })
     if (!completed.ok) {
       this.log('error', "The gateway refused the swarm's own key.", completed.detail)
+      return undefined
+    }
+    if (completed.value.status !== 'completed') {
+      this.log('error', "The gateway did not complete the swarm's own key.")
       return undefined
     }
     this.kv.put('poolKey', await Seal.seal(this.env.SWARMS_SECRET, completed.value.key))
