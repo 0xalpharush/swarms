@@ -140,7 +140,7 @@ export type Linked = {
   wallet: `0x${string}`
 }
 
-export type Terms = { charged: string | null; earned: string | null; price: string | null; requests: number }
+export type Terms = { channels: string | null; charged: string | null; earned: string | null; price: string | null; requests: number }
 
 export type Lent = { at: number; connected: boolean; label: string; name: string } & Terms
 

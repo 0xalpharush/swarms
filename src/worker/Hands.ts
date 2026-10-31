@@ -49,16 +49,26 @@ export async function forget(env: Cloudflare.Env, swarm: string, name: string) {
 
 export const share = 5n
 
+const symbols: Record<string, string> = { ousd: 'OUSD', usdce: 'USDC.e' }
+
 export function terms(listed: Listed | undefined): Terms {
-  const pricing = listed?.['pricing'] as { describe?: unknown; payee?: unknown } | null | undefined
+  const pricing = listed?.['pricing'] as { currency?: unknown; describe?: unknown; payee?: unknown } | null | undefined
   const charges = listed?.['charges'] as { count?: unknown; usd?: unknown } | null | undefined
+  const channels = Array.isArray(listed?.['channels']) ? (listed['channels'] as { accepted?: unknown; settled?: unknown }[]) : []
   const earned = listed?.['earned']
   const paid = listed?.['paid']
   const count = typeof charges?.count === 'number' ? charges.count : 0
+  const sum = (field: 'accepted' | 'settled') => channels.reduce((total, channel) => total + (typeof channel[field] === 'number' ? channel[field] : 0), 0)
+  const currency = typeof pricing?.currency === 'string' ? symbols[pricing.currency] : undefined
   return {
+    channels: channels.length
+      ? `${usd(sum('accepted'))} paid straight to its owner over ${channels.length} channel${channels.length === 1 ? '' : 's'}, ${usd(sum('settled'))} settled on Tempo`
+      : null,
     charged: count ? `${usd(charges?.usd)} for ${count} operation${count === 1 ? '' : 's'}` : null,
     earned: typeof earned === 'number' && earned > 0 ? `${usd(earned)}${typeof paid === 'number' ? `, ${usd(paid)} paid out` : ''}` : null,
-    price: pricing ? `${typeof pricing.describe === 'string' && pricing.describe ? pricing.describe : 'priced by its owner'}${typeof pricing.payee === 'string' ? ` (paid to ${pricing.payee.slice(0, 6)}…${pricing.payee.slice(-4)})` : ''}` : null,
+    price: pricing
+      ? `${typeof pricing.describe === 'string' && pricing.describe ? pricing.describe : 'priced by its owner'}${typeof pricing.payee === 'string' ? ` (paid to ${pricing.payee.slice(0, 6)}…${pricing.payee.slice(-4)}${currency ? ` in ${currency}` : ''})` : ''}`
+      : null,
     requests: typeof listed?.['requests'] === 'number' ? listed['requests'] : 0,
   }
 }

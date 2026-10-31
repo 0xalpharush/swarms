@@ -193,6 +193,7 @@ const schemas = {
   ),
   Lent: object({
     at: time,
+    channels: nullable({ description: "What the swarm paid the hand's owner over its own MPP channels and how much of it settled on Tempo, as the gateway reports it.", type: 'string' }),
     charged: nullable({ description: 'What the hand has charged this swarm, as the gateway reports it.', type: 'string' }),
     connected: { type: 'boolean' },
     earned: nullable({ description: "What the hand's owner has earned, as the gateway reports it.", type: 'string' }),

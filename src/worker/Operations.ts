@@ -1,4 +1,4 @@
-import { encodeFunctionData, parseEventLogs } from 'viem'
+import { encodeFunctionData, isAddress, parseEventLogs } from 'viem'
 import type { Address, Hex } from 'viem'
 import { getTransactionReceipt } from 'viem/actions'
 import { Abis } from 'viem/tempo'
@@ -658,6 +658,8 @@ export async function pay(env: Cloudflare.Env, swarm: string, authorization: str
     attempt: typeof input['attempt'] === 'number' ? input['attempt'] : undefined,
     challenge: challenge as string | string[],
     channels: Array.isArray(input['channels']) ? (input['channels'] as Snapshot[]) : undefined,
+    hand: typeof input['hand'] === 'string' ? input['hand'].slice(0, 64) : undefined,
+    recipient: typeof input['recipient'] === 'string' && isAddress(input['recipient']) ? input['recipient'] : undefined,
     rejected: typeof input['rejected'] === 'object' && input['rejected'] !== null ? (input['rejected'] as { detail: string; status: number }) : undefined,
     secret,
   })

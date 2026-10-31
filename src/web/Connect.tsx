@@ -33,7 +33,7 @@ export function Connect(props: { swarm: Summary }) {
     try {
       const hand = await Api.hand(props.swarm.id, label.trim())
       setIssued(hand)
-      setLent((current) => [{ at: Date.now(), charged: null, connected: false, earned: null, label: hand.label, name: hand.name, price: null, requests: 0 }, ...current])
+      setLent((current) => [{ at: Date.now(), channels: null, charged: null, connected: false, earned: null, label: hand.label, name: hand.name, price: null, requests: 0 }, ...current])
       setState({})
     } catch (error) {
       setState({ error: message(error) })
@@ -95,7 +95,7 @@ export function Connect(props: { swarm: Summary }) {
           {lent.slice(0, 8).map((hand) => (
             <li data-connected={hand.connected} key={hand.name}>
               <span>{hand.name}</span>
-              <span>{[hand.price ?? 'free', `${hand.requests} request${hand.requests === 1 ? '' : 's'}`, hand.charged && `${hand.charged} charged`, hand.earned && `${hand.earned} earned`].filter(Boolean).join(' · ')}</span>
+              <span>{[hand.price ?? 'free', `${hand.requests} request${hand.requests === 1 ? '' : 's'}`, hand.charged && `${hand.charged} charged`, hand.earned && `${hand.earned} earned`, hand.channels].filter(Boolean).join(' · ')}</span>
               <span>{hand.connected ? 'Connected' : 'Offline'}</span>
             </li>
           ))}

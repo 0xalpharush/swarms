@@ -16,6 +16,7 @@ export type Snapshot = {
   closing?: boolean | undefined
   currency?: string | null | undefined
   deposit: string
+  payee?: string | null | undefined
   requiredCumulative: string
   settled?: string | undefined
   spent: string
@@ -57,7 +58,7 @@ const escrowAbi = [
   { inputs: [descriptor], name: 'requestClose', outputs: [], stateMutability: 'nonpayable', type: 'function' },
 ] as const
 
-export function offer(challenge: string | readonly string[], currency: Address) {
+export function offer(challenge: string | readonly string[], currency: Address, recipient: Address = Chain.recipient) {
   const headers = new Headers()
   for (const value of typeof challenge === 'string' ? [challenge] : challenge) headers.append('www-authenticate', value)
   const response = new Response(null, { headers, status: 402 })
@@ -69,13 +70,16 @@ export function offer(challenge: string | readonly string[], currency: Address) 
       !!request.currency &&
       isAddressEqual(request.currency as Address, currency) &&
       !!request.recipient &&
-      isAddressEqual(request.recipient as Address, Chain.recipient) &&
+      isAddressEqual(request.recipient as Address, recipient) &&
       request.methodDetails?.chainId === Chain.chain.id &&
       BigInt(request.amount ?? '0') <= Chain.cap
     )
   })
   if (!found) return undefined
-  return { amount: BigInt((found.request as { amount: string }).amount), response }
+  return {
+    amount: BigInt((found.request as { amount: string }).amount),
+    response: new Response(null, { headers: { 'www-authenticate': Challenge.serialize(found) }, status: 402 }),
+  }
 }
 
 export function client(env: Cloudflare.Env, kv: SyncKvStorage, id: string, account: Account, currency: Address): Client {
