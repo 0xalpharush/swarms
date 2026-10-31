@@ -2,10 +2,20 @@ import { Hono } from 'hono'
 import * as Operations from './Operations.ts'
 import * as Problem from './Problem.ts'
 import * as Rest from './Rest.ts'
+import * as XFrames from './XFrames.ts'
 
 export { Swarm } from './Swarm.ts'
 
 const app = new Hono<{ Bindings: Cloudflare.Env }>()
+
+app.get('/x', (c) => XFrames.start(new URL(c.req.url).origin))
+
+app.get('/x/card.svg', (c) => XFrames.card(c.req.query('title') ?? 'Fund a research swarm'))
+
+app.get('/x/s/:id', async (c) => {
+  const result = await Operations.get(c.env, { swarm: c.req.param('id') })
+  return result.ok ? XFrames.swarm(new URL(c.req.url).origin, result.value) : Problem.json(result)
+})
 
 app.get('/api/config', (c) => c.json(Operations.config(c.env)))
 
@@ -63,3 +73,4 @@ app.all('/api/*', () => Problem.json({ code: 'not_found', detail: 'No such route
 app.route('/', Rest.app)
 
 export default app
+

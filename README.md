@@ -12,6 +12,8 @@ Click a researcher to inspect its assignment, current action and reported result
 
 Start a quest in three steps: **Choose → Equip → Launch**. Pick a starter or ask your own question, choose a fixed budget, then approve in Tempo Wallet. Longer briefs, token options and wallet permissions appear when needed. Reading, exploring and setting up a quest do not require a payment.
 
+X player cards bring that loop into the timeline. Share `/x` to let someone choose and launch a new quest, or `/x/s/<swarm>` to let them pledge MACH and add an optional steering note to an existing swarm. The card opens Tempo Wallet with a device approval and follows the pledge until it activates; it never moves money without that approval.
+
 The world refreshes every five seconds. Research areas are inferred from titles and briefs. The landscape is schematic, and placement does not imply collaboration or geographic location. Outpost dots and squares depict explorers and machines, capped at twelve and eight; exact machine counts remain available in each quest. Fixture mode is explicitly labeled as demo data.
 
 A completed run means its agent reported completion, not independent scientific validation. Reproduction and rigorous negative results are useful outcomes. Findings, methods, logs, funding records and contributor-machine setup remain accessible within a quest.
@@ -37,6 +39,7 @@ One-off transfers and daily budgets use USDC.e, pathUSD or OUSD. Pledges additio
 pnpm install --frozen-lockfile
 pnpm check
 node --test test/research.test.ts
+node --test test/xframes.test.ts
 pnpm build
 pnpm db:migrate:local
 pnpm dev
