@@ -1863,6 +1863,13 @@ kbd::after {
 .answer {
   display: grid;
   gap: var(--space-4);
+  min-width: 0;
+}
+
+.answer > *,
+.answer-block,
+.swarm-intro {
+  min-width: 0;
 }
 
 .answer-meta {
@@ -1979,6 +1986,7 @@ kbd::after {
 }
 
 .markdown code {
+  overflow-wrap: anywhere;
   font-family: var(--mono);
   font-size: 0.82em;
   padding: 1px 4px;
