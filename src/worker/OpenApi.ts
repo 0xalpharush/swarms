@@ -79,6 +79,8 @@ const schemas = {
     title: string,
   }),
   Brief: object({
+    base: nullable({ description: 'The head of the repository when the round started; diff the last of commits against it for the round.', type: 'string' }),
+    commits: { description: 'Commits the round pushed to the repository, newest first.', items: string, type: 'array' },
     endedAt: nullable(time),
     excerpt: nullable({ description: 'The start of the report as plain text.', type: 'string' }),
     n: integer,
@@ -106,6 +108,10 @@ const schemas = {
   ),
   Budgeted: object({ budget: ref('Budget'), swarm: ref('Summary') }),
   BudgetRequested: object({ authorizeAccessKey, budget: string }),
+  Code: object(
+    { app: string, name: string, owner: address },
+    'The public repository that keeps the swarm\'s code, read without a key from the gateway at /p/<owner>/<app>/git/<name>/files, read, log and diff.',
+  ),
   Config: object({
     budget: object({ days: integer, max: usd, min: usd, period: integer }),
     chainId: integer,
@@ -114,6 +120,7 @@ const schemas = {
     mach: string,
     minPledge: mach,
     perWorker: mach,
+    repoAt: { ...usd, description: 'What a swarm must hold before its lead creates its $1 code repository.' },
     reserve: mach,
     rpc: string,
     tokens: { items: object({ address, id: currency, pool: { description: 'Whether the swarm can pool it: transfers and budgets take pool tokens, pledges take all.', type: 'boolean' }, symbol: string }), type: 'array' },
@@ -126,7 +133,7 @@ const schemas = {
       budget: nullable({ description: 'The budget a pull came from.', type: 'string' }),
       contributor: address,
       hash: { description: 'The transaction.', type: 'string' },
-      kind: { enum: ['transfer', 'pull'], type: 'string' },
+      kind: { description: 'transfer, a pull from a daily budget, or a pull from a stablecoin pledge.', enum: ['transfer', 'pull', 'pledge'], type: 'string' },
       note: nullable(string),
       token,
     },
@@ -211,6 +218,7 @@ const schemas = {
       ref('Summary'),
       object({
         budgets: { items: ref('Budget'), type: 'array' },
+        code: nullable(ref('Code')),
         contributions: { items: ref('Contribution'), type: 'array' },
         hands: { items: ref('Hand'), type: 'array' },
         history: { items: ref('Brief'), type: 'array' },
@@ -262,6 +270,8 @@ const schemas = {
     type: 'object',
   },
   Round: object({
+    base: nullable({ description: 'The head of the repository when the round started; diff the last of commits against it for the round.', type: 'string' }),
+    commits: { description: 'Commits the round pushed to the repository, newest first.', items: string, type: 'array' },
     endedAt: nullable(time),
     message: nullable({ description: 'The full report, markdown.', type: 'string' }),
     n: integer,
@@ -452,7 +462,7 @@ export function document(origin: string) {
         },
         post: {
           description:
-            "Issues a hand for a contributor's own machine: a unique name under the swarm's own gateway key, with the nanocode CLI command and a nanocode-ts snippet that attach it. The swarm's lead agent and explorers use connected hands in rounds paid from the swarm's wallet, and are told they belong to contributors.",
+            "Issues a hand for a contributor's own machine: a unique name under the swarm's gateway app, with the nanocode CLI command and a nanocode-ts snippet that attach it. The swarm's lead agent and explorers use connected hands in every round, and are told they belong to contributors.",
           operationId: 'issueHand',
           parameters: [swarm],
           requestBody: { content: { 'application/json': { schema: input(Operations.schema.hand.omit({ swarm: true })) } } },

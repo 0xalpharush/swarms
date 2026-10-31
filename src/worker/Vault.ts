@@ -1,4 +1,3 @@
-import { KeyAuthorization } from 'ox/tempo'
 import { erc20Abi, parseEventLogs } from 'viem'
 import type { Address, Hex } from 'viem'
 import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts'
@@ -57,26 +56,6 @@ export async function swap(env: Cloudflare.Env, owner: ReturnType<typeof Account
     .filter((log) => log.address.toLowerCase() === tokenOut.toLowerCase() && log.args.to.toLowerCase() === owner.address.toLowerCase())
     .reduce((sum, log) => sum + log.args.amount, 0n)
   return { fee: fee(receipt), hash: receipt.transactionHash, minimum, quote, received }
-}
-
-export async function authorize(
-  env: Cloudflare.Env,
-  owner: ReturnType<typeof Account.fromSecp256k1>,
-  request: {
-    address: Address
-    expiry: number
-    limits: { limit: Hex; token: Address }[]
-    scopes: KeyAuthorization.Scope[]
-  },
-) {
-  const signed = await Actions.accessKey.signAuthorization(Chain.client(env), {
-    accessKey: { address: request.address, type: 'p256' },
-    account: owner,
-    expiry: request.expiry,
-    limits: request.limits.map((limit) => ({ limit: BigInt(limit.limit), token: limit.token })),
-    scopes: request.scopes,
-  })
-  return KeyAuthorization.toRpc(signed)
 }
 
 export async function send(

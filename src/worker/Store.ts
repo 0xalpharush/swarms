@@ -1,4 +1,4 @@
-import type { Answer, Budget, Contribution, Currency, Note, Pledge, Summary, Token } from '../shared/Api.ts'
+import type { Answer, Budget, Contribution, Currency, Note, Pledge, Summary } from '../shared/Api.ts'
 import * as Memo from '../shared/Memo.ts'
 
 export type Row = {
@@ -13,6 +13,7 @@ export type Row = {
   pool_spent: number
   raised: number
   remaining: number
+  repo: string | null
   rounds: number
   sealed_wallet: string | null
   spent: number
@@ -48,7 +49,7 @@ export type Gift = {
   note: string | null
   note_id: string | null
   swarm: string
-  token: Token
+  token: Contribution['token']
 }
 
 export type Allowance = {
@@ -71,14 +72,14 @@ export type Allowance = {
   pulled: string
   pulled_at: number | null
   sealed_key: string
-  status: 'pending' | 'active' | 'revoked' | 'expired' | 'ended'
+  status: 'pending' | 'active' | 'revoked' | 'expired' | 'ended' | 'spent'
   swarm: string
-  token: Token
+  token: Currency
   updated_at: number
 }
 
 export type Fields = Partial<
-  Pick<Row, 'answer' | 'machines' | 'pool_left' | 'pool_spent' | 'rounds' | 'status' | 'workers'>
+  Pick<Row, 'answer' | 'machines' | 'pool_left' | 'pool_spent' | 'repo' | 'rounds' | 'status' | 'workers'>
 >
 
 export type Changes = Partial<
@@ -98,19 +99,26 @@ export const maxParallel = 4
 
 export const stock = reserve + perWorker * BigInt(maxParallel - 1)
 
+export const repoAt = 1_500_000n
+
+export const repoCost = 1_000_000n
+
 export const budget = { days: 30, max: 100_000_000n, min: minPledge, period: 86_400 } as const
 
 const totals = `select s.*,
   coalesce((select sum(cast(amount as integer)) from pledges where swarm = s.id and status != 'pending'), 0)
-    + coalesce((select sum(cast(amount as integer)) from contributions where swarm = s.id), 0) as raised,
-  coalesce((select sum(cast(spent as integer)) from pledges where swarm = s.id and status != 'pending'), 0) + s.pool_spent as spent,
-  coalesce((select sum(max(cast(amount as integer) - cast(spent as integer), 0)) from pledges where swarm = s.id and status = 'active'), 0) + s.pool_left as remaining,
+    + coalesce((select sum(cast(amount as integer)) from budgets where swarm = s.id and period = 0 and status != 'pending'), 0)
+    + coalesce((select sum(cast(amount as integer)) from contributions where swarm = s.id and kind != 'pledge'), 0) as raised,
+  coalesce((select sum(cast(spent as integer)) from pledges where swarm = s.id and status != 'pending'), 0)
+    + coalesce((select sum(cast(pulled as integer)) from budgets where swarm = s.id and token = 'mach' and status != 'pending'), 0) + s.pool_spent as spent,
+  coalesce((select sum(max(cast(amount as integer) - cast(spent as integer), 0)) from pledges where swarm = s.id and status = 'active'), 0)
+    + coalesce((select sum(max(cast(amount as integer) - cast(pulled as integer), 0)) from budgets where swarm = s.id and period = 0 and status = 'active'), 0) + s.pool_left as remaining,
   (select count(*) from (
     select contributor from pledges where swarm = s.id and status != 'pending'
     union select contributor from contributions where swarm = s.id
     union select contributor from budgets where swarm = s.id and status != 'pending'
   )) as contributors,
-  coalesce((select sum(cast(amount as integer) * 86400 / period) from budgets where swarm = s.id and status = 'active'), 0) as daily
+  coalesce((select sum(cast(amount as integer) * 86400 / period) from budgets where swarm = s.id and status = 'active' and period > 0), 0) as daily
   from swarms s`
 
 export function parallel(remaining: bigint) {
@@ -186,39 +194,6 @@ export async function update(env: Cloudflare.Env, id: string, fields: Fields) {
     .run()
 }
 
-export async function request(
-  env: Cloudflare.Env,
-  input: Pick<Backing, 'amount' | 'id' | 'note' | 'note_id' | 'request' | 'swarm' | 'token'>,
-) {
-  const now = Date.now()
-  await env.DB.prepare(
-    'insert into pledges (id, swarm, request, amount, token, note, note_id, created_at, updated_at) values (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-  )
-    .bind(input.id, input.swarm, input.request, input.amount, input.token, input.note, input.note_id, now, now)
-    .run()
-}
-
-export async function backing(env: Cloudflare.Env, swarm: string, id: string) {
-  return env.DB.prepare('select * from pledges where swarm = ? and id = ?').bind(swarm, id).first<Backing>()
-}
-
-export async function activate(
-  env: Cloudflare.Env,
-  id: string,
-  input: { contributor: string; sealed_key: string },
-) {
-  const result = await env.DB.prepare(
-    "update pledges set contributor = ?, sealed_key = ?, status = 'active', updated_at = ? where id = ? and status = 'pending'",
-  )
-    .bind(input.contributor.toLowerCase(), input.sealed_key, Date.now(), id)
-    .run()
-  return result.meta.changes > 0
-}
-
-export async function forget(env: Cloudflare.Env, id: string) {
-  await env.DB.prepare("delete from pledges where id = ? and status = 'pending'").bind(id).run()
-}
-
 export async function spend(env: Cloudflare.Env, id: string, spent: bigint, status?: Pledge['status']) {
   await env.DB.prepare(
     'update pledges set spent = ?, status = coalesce(?, status), updated_at = ? where id = ?',
@@ -228,30 +203,47 @@ export async function spend(env: Cloudflare.Env, id: string, spent: bigint, stat
 }
 
 export async function active(env: Cloudflare.Env, swarm: string) {
-  const { results } = await env.DB.prepare(
-    "select * from pledges where swarm = ? and status = 'active' order by cast(amount as integer) - cast(spent as integer) desc, created_at",
-  )
+  const { results } = await env.DB.prepare("select * from pledges where swarm = ? and status = 'active'")
     .bind(swarm)
     .all<Backing>()
   return results
 }
 
 export async function pledges(env: Cloudflare.Env, swarm: string): Promise<Pledge[]> {
-  const { results } = await env.DB.prepare(
-    "select * from pledges where swarm = ? and status != 'pending' order by created_at desc limit 200",
-  )
-    .bind(swarm)
-    .all<Backing>()
-  return results.map((row) => ({
+  const [legacy, held] = await Promise.all([
+    env.DB.prepare("select * from pledges where swarm = ? and status != 'pending' order by created_at desc limit 200")
+      .bind(swarm)
+      .all<Backing>(),
+    env.DB.prepare("select * from budgets where swarm = ? and period = 0 and status != 'pending' order by created_at desc limit 200")
+      .bind(swarm)
+      .all<Allowance>(),
+  ])
+  return [
+    ...held.results.map((row) => pledge(row)),
+    ...legacy.results.map((row) => ({
+      amount: Memo.decimal(BigInt(row.amount)),
+      at: row.created_at,
+      contributor: row.contributor,
+      id: row.id,
+      note: row.note,
+      spent: Memo.decimal(BigInt(row.spent)),
+      status: row.status === 'pending' ? ('active' as const) : row.status,
+      token: row.token,
+    })),
+  ]
+}
+
+export function pledge(row: Allowance): Pledge {
+  return {
     amount: Memo.decimal(BigInt(row.amount)),
     at: row.created_at,
-    contributor: row.contributor,
+    contributor: row.contributor ?? '0x',
     id: row.id,
     note: row.note,
-    spent: Memo.decimal(BigInt(row.spent)),
-    status: row.status === 'pending' ? 'active' : row.status,
+    spent: Memo.decimal(BigInt(row.pulled)),
+    status: row.status === 'pending' || row.status === 'active' ? 'active' : row.status === 'spent' ? 'spent' : 'ended',
     token: row.token,
-  }))
+  }
 }
 
 export async function give(env: Cloudflare.Env, input: Omit<Gift, 'created_at'>) {
@@ -372,6 +364,10 @@ export async function approve(
   return result.meta.changes > 0
 }
 
+export async function forget(env: Cloudflare.Env, id: string) {
+  await env.DB.prepare("delete from budgets where id = ? and status = 'pending'").bind(id).run()
+}
+
 export async function change(env: Cloudflare.Env, id: string, changes: Changes) {
   const entries = Object.entries(changes)
   await env.DB.prepare(
@@ -383,7 +379,16 @@ export async function change(env: Cloudflare.Env, id: string, changes: Changes) 
 
 export async function allowances(env: Cloudflare.Env, swarm: string) {
   const { results } = await env.DB.prepare(
-    "select * from budgets where swarm = ? and status = 'active' order by coalesce(pulled_at, 0), created_at",
+    "select * from budgets where swarm = ? and status = 'active' and token != 'mach' order by coalesce(pulled_at, 0), created_at",
+  )
+    .bind(swarm)
+    .all<Allowance>()
+  return results
+}
+
+export async function keys(env: Cloudflare.Env, swarm: string) {
+  const { results } = await env.DB.prepare(
+    "select * from budgets where swarm = ? and status = 'active' and token = 'mach' order by created_at",
   )
     .bind(swarm)
     .all<Allowance>()
@@ -414,18 +419,20 @@ export function view(row: Allowance, now = Date.now()): Budget {
     status:
       row.status === 'pending'
         ? 'active'
-        : row.status === 'active' && row.expires_at <= now
-          ? 'expired'
-          : row.status === 'active' && row.next_at !== null && row.next_at > now
-            ? 'waiting'
-            : row.status,
-    token: row.token,
+        : row.status === 'spent'
+          ? 'ended'
+          : row.status === 'active' && row.expires_at <= now
+            ? 'expired'
+            : row.status === 'active' && row.next_at !== null && row.next_at > now
+              ? 'waiting'
+              : row.status,
+    token: row.token as Budget['token'],
   }
 }
 
 export async function budgets(env: Cloudflare.Env, swarm: string): Promise<Budget[]> {
   const { results } = await env.DB.prepare(
-    "select * from budgets where swarm = ? and status != 'pending' order by created_at desc limit 200",
+    "select * from budgets where swarm = ? and period > 0 and status != 'pending' order by created_at desc limit 200",
   )
     .bind(swarm)
     .all<Allowance>()
@@ -443,7 +450,9 @@ export async function notes(
     `select note_id as id, min(note) as note, sum(weight) as weight, count(distinct contributor) as backers from (
       select note_id, note, cast(amount as integer) as weight, contributor from pledges where swarm = ?1 and status != 'pending' and note_id is not null
       union all
-      select note_id, note, cast(amount as integer) as weight, contributor from contributions where swarm = ?1 and note_id is not null
+      select note_id, note, cast(amount as integer) as weight, contributor from budgets where swarm = ?1 and period = 0 and status != 'pending' and note_id is not null
+      union all
+      select note_id, note, cast(amount as integer) as weight, contributor from contributions where swarm = ?1 and kind != 'pledge' and note_id is not null
     ) group by note_id order by weight desc limit 50`,
   )
     .bind(swarm)

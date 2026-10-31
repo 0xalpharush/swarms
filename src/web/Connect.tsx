@@ -100,7 +100,6 @@ export function Connect(props: { swarm: Summary }) {
           ))}
         </ul>
       )}
-      <p className="fine">Rounds paid by a MACH pledge run on that contributor's own gateway key and cannot reach lent machines.</p>
     </div>
   )
 }

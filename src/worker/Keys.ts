@@ -1,11 +1,11 @@
 import { KeyAuthorization, SignatureEnvelope } from 'ox/tempo'
 import type { TxEnvelopeTempo } from 'ox/tempo'
-import { encodeFunctionData, erc20Abi, keccak256, stringToHex, toHex } from 'viem'
+import { encodeFunctionData, erc20Abi, isAddressEqual, keccak256, stringToHex, toHex } from 'viem'
 import type { Address, Hex } from 'viem'
 import { generatePrivateKey } from 'viem/accounts'
 import { prepareTransactionRequest, readContract, sendRawTransactionSync, signTransaction } from 'viem/actions'
-import { Abis, Account, Actions, Transaction } from 'viem/tempo'
-import type { Token } from '../shared/Api.ts'
+import { Abis, Account, Actions, KeyAuthorizationManager, Transaction } from 'viem/tempo'
+import type { Currency } from '../shared/Api.ts'
 import * as Chain from './Chain.ts'
 import * as Seal from './Seal.ts'
 import type * as Store from './Store.ts'
@@ -15,14 +15,14 @@ export type Request = {
   chainId: Hex
   expiry: number
   keyType: 'secp256k1'
-  limits: { limit: Hex; period: number; token: Address }[]
+  limits: { limit: Hex; period?: number; token: Address }[]
   publicKey: Hex
-  scopes: { address: Address; recipients: Address[]; selector: Hex }[]
+  scopes: { address: Address; recipients?: Address[]; selector: Hex }[]
 }
 
 export type Approved = { contributor: Address; keyAuthorization: KeyAuthorization.Rpc; limit: bigint; published: boolean }
 
-export type State = { balance: bigint; left: bigint; periodEnd: number | null; revoked: boolean }
+export type State = { balance: bigint; left: bigint; periodEnd: number | null; published: boolean; revoked: boolean }
 
 export type Pulled =
   | { amount: bigint; fee: bigint; hash: Hex; ok: true }
@@ -30,23 +30,25 @@ export type Pulled =
 
 const transferWithMemo = '0x95777d59'
 
+const session = ['0xedc53b00', '0xdc48471e', '0x675402e5', '0x41e2c664'].map((selector) => ({ address: Chain.escrow, selector: selector as Hex }))
+
 export const smallest = 5_000n
 
 export async function request(
   env: Cloudflare.Env,
-  input: { amount: bigint; days: number; period: number; recipient: Address; token: Token },
+  input: { amount: bigint; days: number; period: number; recipient: Address; token: Currency },
 ) {
   const key = generatePrivateKey()
   const access = Account.fromSecp256k1(key)
-  const token = Chain.tokens[input.token].address
+  const token = Chain.currencies[input.token].address
   const authorizeAccessKey: Request = {
     address: access.address.toLowerCase() as Address,
     chainId: toHex(Chain.chain.id),
     expiry: Math.floor(Date.now() / 1000) + input.days * 86_400,
     keyType: 'secp256k1',
-    limits: [{ limit: toHex(input.amount), period: input.period, token }],
+    limits: [{ limit: toHex(input.amount), ...(input.period ? { period: input.period } : {}), token }],
     publicKey: access.publicKey,
-    scopes: [{ address: token, recipients: [input.recipient], selector: transferWithMemo }],
+    scopes: input.token === 'mach' ? session : [{ address: token, recipients: [input.recipient], selector: transferWithMemo }],
   }
   return { authorizeAccessKey, sealed: await Seal.seal(env.SWARMS_SECRET, key) }
 }
@@ -61,7 +63,7 @@ export async function approve(
   const verified = await verify(env, input.keyAuthorization, expected)
   if (typeof verified === 'string') return verified
   if (verified.admin)
-    return 'An admin key approved this budget, so its key goes on Tempo in a transaction that admin key signs: send that transaction as transaction.'
+    return 'An admin key approved this key, so it goes on Tempo in a transaction that admin key signs: send that transaction as transaction.'
   return { ...verified, published: false }
 }
 
@@ -79,7 +81,7 @@ async function install(env: Cloudflare.Env, expected: Request, serialized: Hex):
   const verified = await verify(env, KeyAuthorization.toRpc(transaction.keyAuthorization), expected)
   if (typeof verified === 'string') return verified
   if (transaction.from?.toLowerCase() !== verified.contributor.toLowerCase())
-    return 'The transaction must come from the wallet the budget is for.'
+    return 'The transaction must come from the wallet the key is for.'
 
   const receipt = await sendRawTransactionSync(Chain.client(env), { serializedTransaction: serialized }).catch(
     (error: unknown) => error as Error,
@@ -108,7 +110,7 @@ async function verify(env: Cloudflare.Env, value: unknown, expected: Request) {
         limits[0]?.token.toLowerCase() === limit.token.toLowerCase() &&
         BigInt(limits[0].limit) > 0n &&
         BigInt(limits[0].limit) <= BigInt(limit.limit) &&
-        Number(limits[0].period ?? 0) === limit.period &&
+        Number(limits[0].period ?? 0) === (limit.period ?? 0) &&
         JSON.stringify(canonical(signed.scopes)) === JSON.stringify(canonical(expected.scopes)) &&
         SignatureEnvelope.verify(signed.signature, { address: signer, payload })
       if (!matches || !limits[0]) return undefined
@@ -123,11 +125,11 @@ async function verify(env: Cloudflare.Env, value: unknown, expected: Request) {
     }
   })()
   if (!checked)
-    return 'The key authorization does not match the budget request, or its signer may not add keys to the wallet.'
+    return 'The key authorization does not match the request, or its signer may not add keys to the wallet.'
 
   const admin = checked.signer !== checked.contributor
   if (admin && !(await Actions.accessKey.isAdmin(Chain.client(env), { accessKey: checked.signer, account: checked.contributor })))
-    return 'The key authorization does not match the budget request, or its signer may not add keys to the wallet.'
+    return 'The key authorization does not match the request, or its signer may not add keys to the wallet.'
   return { ...checked, admin }
 }
 
@@ -144,20 +146,37 @@ function canonical(scopes: readonly { address: string; recipients?: readonly str
 export async function state(env: Cloudflare.Env, allowance: Store.Allowance): Promise<State> {
   const client = Chain.client(env)
   const account = allowance.contributor as Address
-  const token = Chain.tokens[allowance.token].address
-  const balance = readContract(client, { abi: erc20Abi, address: token, args: [account], functionName: 'balanceOf' })
-  if (!allowance.published) return { balance: await balance, left: BigInt(allowance.amount), periodEnd: null, revoked: false }
-
-  const [limit, metadata] = await Promise.all([
-    Actions.accessKey.getRemainingLimit(client, { accessKey: allowance.access_key, account, token }),
-    Actions.accessKey.getMetadata(client, { accessKey: allowance.access_key, account }),
+  const token = Chain.currencies[allowance.token].address
+  const [balance, metadata] = await Promise.all([
+    readContract(client, { abi: erc20Abi, address: token, args: [account], functionName: 'balanceOf' }),
+    Actions.accessKey.getMetadata(client, { accessKey: allowance.access_key, account }).catch(() => undefined),
   ])
+  if (!metadata || !isAddressEqual(metadata.address, allowance.access_key))
+    return { balance, left: allowance.published ? 0n : BigInt(allowance.amount), periodEnd: null, published: false, revoked: !!allowance.published }
+
+  const limit = await Actions.accessKey.getRemainingLimit(client, { accessKey: allowance.access_key, account, token })
   return {
-    balance: await balance,
-    left: limit.remaining,
+    balance,
+    left: metadata.isRevoked || allowance.expires_at <= Date.now() ? 0n : limit.remaining,
     periodEnd: limit.periodEnd ? Number(limit.periodEnd) * 1000 : null,
+    published: true,
     revoked: metadata.isRevoked,
   }
+}
+
+export function balance(env: Cloudflare.Env, account: Address, token: Currency) {
+  return readContract(Chain.client(env), { abi: erc20Abi, address: Chain.currencies[token].address, args: [account], functionName: 'balanceOf' })
+}
+
+export async function account(env: Cloudflare.Env, allowance: Store.Allowance) {
+  const key = (await Seal.open(env.SWARMS_SECRET, allowance.sealed_key)) as Hex
+  const keyAuthorizationManager = KeyAuthorizationManager.memory()
+  if (!allowance.published && allowance.key_authorization)
+    await keyAuthorizationManager.set(
+      { accessKey: allowance.access_key, address: allowance.contributor as Address, chainId: Chain.chain.id },
+      KeyAuthorization.fromRpc(JSON.parse(allowance.key_authorization) as KeyAuthorization.Rpc),
+    )
+  return { account: Account.fromSecp256k1(key, { access: allowance.contributor as Address, keyAuthorizationManager }), key }
 }
 
 export function memo(swarm: string, budget: string) {
@@ -172,7 +191,7 @@ export async function pull(
   const client = Chain.client(env)
   const key = (await Seal.open(env.SWARMS_SECRET, allowance.sealed_key)) as Hex
   const account = Account.fromSecp256k1(key, { access: allowance.contributor as Address })
-  const token = Chain.tokens[allowance.token].address
+  const token = Chain.currencies[allowance.token].address
   const authorization =
     allowance.published || !allowance.key_authorization
       ? undefined
@@ -201,7 +220,7 @@ export async function pull(
     const most = (prepared.gas * prepared.maxFeePerGas + 999_999_999_999n) / 1_000_000_000_000n
     if (amount + most > input.room) {
       amount = input.room - most
-      if (amount < smallest) return { detail: 'What is left today does not cover a transfer and its fee.', ok: false, reason: 'limit' }
+      if (amount < smallest) return { detail: 'What is left does not cover a transfer and its fee.', ok: false, reason: 'limit' }
       prepared = await prepare(amount)
     }
     const receipt = await sendRawTransactionSync(client, {

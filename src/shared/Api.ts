@@ -44,7 +44,7 @@ export type Contribution = {
   budget: string | null
   contributor: `0x${string}`
   hash: `0x${string}`
-  kind: 'transfer' | 'pull'
+  kind: 'transfer' | 'pull' | 'pledge'
   note: string | null
   token: Token
 }
@@ -75,6 +75,8 @@ export type Note = {
 }
 
 export type Round = {
+  base: string | null
+  commits: string[]
   endedAt: number | null
   message: string | null
   n: number
@@ -95,6 +97,8 @@ export type Entry = {
 }
 
 export type Hand = { connected: boolean; name: string }
+
+export type Code = { app: string; name: string; owner: string }
 
 export type Researcher = {
   id: string
@@ -158,6 +162,7 @@ export type Live =
   | { type: 'end' | 'idle' }
 
 export type Detail = Summary & {
+  code: Code | null
   reason: string | null
   researchers: Researcher[]
   budgets: Budget[]
@@ -177,6 +182,7 @@ export type Config = {
   mach: `0x${string}`
   minPledge: string
   perWorker: string
+  repoAt: string
   reserve: string
   rpc: string
   tokens: { address: `0x${string}`; id: Currency; pool: boolean; symbol: string }[]
@@ -201,6 +207,7 @@ export type Running = { n: number; startedAt: number }
 export type Brief = Omit<Round, 'message'> & { excerpt: string | null }
 
 export type Overview = Summary & {
+  code: Code | null
   reason: string | null
   researchers: Researcher[]
   budgets: Budget[]

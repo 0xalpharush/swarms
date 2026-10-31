@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { lazy, Suspense, useEffect, useRef, useState } from 'react'
 import * as Answer from '../shared/Answer.ts'
 import type { Config, Detail, Entry, Note, Round } from '../shared/Api.ts'
 import * as Api from './api.ts'
@@ -21,6 +21,8 @@ function merge(previous: Entry[], next: readonly Entry[]) {
   return [...previous, ...fresh].sort((a, b) => a.seq - b.seq).slice(-500)
 }
 
+
+const Code = lazy(() => import('./Code.tsx').then((module) => ({ default: module.Code })))
 
 const rounds = { cancelled: 'Cancelled', completed: 'Completed', failed: 'Failed', running: 'Running' } as const satisfies Record<Round['status'], string>
 
@@ -107,6 +109,7 @@ export function Swarm(props: { config: Config | undefined; id: string }) {
       )}
       <div>
         <div className="mission-extras">
+          <details className="game-details"><summary>Code{swarm.code ? ` · ${swarm.code.name}` : ''}</summary><Repository config={props.config} swarm={swarm} /></details>
           <details className="game-details"><summary>The research question</summary><p>{swarm.goal}</p></details>
           <details className="game-details"><summary>Activity log</summary><Feed entries={entries} live={live} /></details>
           <details className="game-details"><summary>Machines · {swarm.hands.filter((hand) => hand.connected).length} connected</summary><Machines hands={swarm.hands} live={live} /><Connect swarm={swarm} /></details>
@@ -134,6 +137,21 @@ function Meta(props: { swarm: Detail }) {
       )}
       <span>Started {ago(props.swarm.createdAt, now)}</span>
     </p>
+  )
+}
+
+function Repository(props: { config: Config | undefined; swarm: Detail }) {
+  const code = props.swarm.code
+  if (!code || !props.config)
+    return (
+      <p className="empty">
+        The swarm keeps its code in a public repository once it holds {usd(props.config?.repoAt ?? '1.5')}: the repository costs $1 of its money, once, and each round pushes what it made. It holds {usd(props.swarm.remaining)} now.
+      </p>
+    )
+  return (
+    <Suspense fallback={<p className="empty">Loading the code…</p>}>
+      <Code gateway={props.config.gateway} repo={code} rounds={props.swarm.history} />
+    </Suspense>
   )
 }
 

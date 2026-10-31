@@ -114,6 +114,7 @@ function build(input: {
     contributions,
     contributors: 0,
     createdAt: at(input.age),
+    code: null,
     cursor: 0,
     daily: '0',
     feed,
@@ -251,7 +252,7 @@ const fixtures: Live[] = [
     hands: ['sb-3f9a2c1d', 'sb-77ab01e2', 'sb-c41d9e07'],
     history: [
       {
-        endedAt: at(150),
+        base: null, commits: [], endedAt: at(150),
         message: 'Round 1: harness and shortlist.\n\nThe gateway lists 31 text models; 19 call tools and qualify. I built the harness on two python:3.12-slim machines and ran a 20-task smoke test on each model.\n\nShortlist for full runs: GLM-5.3, Kimi K2.7, DeepSeek V4.1 Flash, Qwen3-Coder, gpt-oss-120b, Llama 4 Scout.\nDropped: 13 models that solved fewer than 2 of 20.\n\nSpent 0.41 MACH, most of it on the smoke test.',
         n: 1,
         spent: '0.412800',
@@ -259,14 +260,14 @@ const fixtures: Live[] = [
         status: 'completed',
       },
       {
-        endedAt: at(48),
+        base: null, commits: [], endedAt: at(48),
         message: 'Round 2: SWE-bench Lite.\n\nFour explorers, each on its own machine, ran 75 tasks per model.\n\nKimi K2.7       118/300  39%  0.0031 MACH per solved task\nGLM-5.3         124/300  41%  0.0020\nDeepSeek V4.1   109/300  36%  0.0006\ngpt-oss-120b     92/300  31%  0.0011\n\nQwen3-Coder timed out on 40 tasks; it gets a dedicated machine next round, as the top note asks.',
         n: 2,
         spent: '0.981200',
         startedAt: at(146),
         status: 'completed',
       },
-      { endedAt: null, message: null, n: 3, spent: '0.479412', startedAt: at(46), status: 'running' },
+      { base: null, commits: [], endedAt: null, message: null, n: 3, spent: '0.479412', startedAt: at(46), status: 'running' },
     ],
     budgets: [
       [2, '1.000000', 'usdce', '2.400000', '0.360000', 'active', 160, 'Report cost per solved task, not per token'],
@@ -310,8 +311,8 @@ const fixtures: Live[] = [
     goal: 'Find the fastest and the cheapest way to parse a terabyte of newline-delimited JSON logs on rented machines. Compare serde_json, simd-json and sonic-rs across machine sizes and report GiB/s and MACH per TiB.',
     hands: ['sb-91e0aa4f', 'sb-5c2b7d10'],
     history: [
-      { endedAt: at(31), message: 'Round 1: generated 64 GiB of synthetic access logs and a harness that streams them through each parser.\nsonic-rs 1.55 GiB/s, simd-json 1.36 GiB/s, serde_json 0.41 GiB/s on 8 CPUs.', n: 1, spent: '0.180000', startedAt: at(66), status: 'completed' },
-      { endedAt: null, message: null, n: 2, spent: '0.052100', startedAt: at(29), status: 'running' },
+      { base: null, commits: [], endedAt: at(31), message: 'Round 1: generated 64 GiB of synthetic access logs and a harness that streams them through each parser.\nsonic-rs 1.55 GiB/s, simd-json 1.36 GiB/s, serde_json 0.41 GiB/s on 8 CPUs.', n: 1, spent: '0.180000', startedAt: at(66), status: 'completed' },
+      { base: null, commits: [], endedAt: null, message: null, n: 2, spent: '0.052100', startedAt: at(29), status: 'running' },
     ],
     budgets: [[4, '0.250000', 'pathusd', '0.180000', '0.070000', 'active', 40, 'Measure cost per GiB, not just throughput']],
     gifts: [[4, '0.180000', 'pathusd', 38, 'Measure cost per GiB, not just throughput', 'pull']],
@@ -333,7 +334,7 @@ const fixtures: Live[] = [
     age: 30,
     goal: 'Translate The Rust Programming Language into Greek, chapter by chapter, with a shared glossary so terms stay consistent. Publish each chapter to the bucket as it is finished.',
     hands: ['sb-0e4ab219'],
-    history: [{ endedAt: null, message: null, n: 1, spent: '0.120000', startedAt: at(28), status: 'running' }],
+    history: [{ base: null, commits: [], endedAt: null, message: null, n: 1, spent: '0.120000', startedAt: at(28), status: 'running' }],
     id: 'rust-book-el',
     lines: [['status', 'Round 1 started with 0.60 MACH left and room for 4 parallel explorers.'], ...translation],
     pledges: [[2, '0.600000', 29, 'Keep code blocks in English']],
@@ -348,8 +349,8 @@ const fixtures: Live[] = [
     age: 400,
     goal: "Write a field guide to Tempo's stablecoin DEX for developers: how orders, flips and swaps work, what they cost, and runnable examples for each.",
     history: [
-      { endedAt: at(330), message: 'Round 1: read the DEX precompile docs and traced 40 swaps on mainnet. Drafted the chapters on orders and flips.', n: 1, spent: '0.402000', startedAt: at(388), status: 'completed' },
-      { endedAt: at(260), message: 'Round 2: wrote runnable viem examples for place, flip and swap, and a fee table from real transactions.\nThe guide is in the bucket at field-guide/dex.md.', n: 2, spent: '0.394210', startedAt: at(328), status: 'completed' },
+      { base: null, commits: [], endedAt: at(330), message: 'Round 1: read the DEX precompile docs and traced 40 swaps on mainnet. Drafted the chapters on orders and flips.', n: 1, spent: '0.402000', startedAt: at(388), status: 'completed' },
+      { base: null, commits: [], endedAt: at(260), message: 'Round 2: wrote runnable viem examples for place, flip and swap, and a fee table from real transactions.\nThe guide is in the bucket at field-guide/dex.md.', n: 2, spent: '0.394210', startedAt: at(328), status: 'completed' },
     ],
     id: 'dex-guide',
     lines: [
@@ -381,11 +382,11 @@ const fixtures: Live[] = [
     age: 1440,
     goal: "Map the MEV in Tempo's first million blocks: which strategies exist, how much they extract, and who pays for it.",
     history: [
-      { endedAt: at(1380), message: 'Round 1: indexed 1,000,000 blocks into the bucket (14 GiB of receipts).', n: 1, spent: '0.512000', startedAt: at(1428), status: 'completed' },
-      { endedAt: at(1290), message: 'Round 2: classified 48,113 candidate bundles; 61% DEX arbitrage, 23% liquidations, 16% sandwiches.', n: 2, spent: '0.630000', startedAt: at(1378), status: 'completed' },
-      { endedAt: at(1210), message: 'Round 3 failed: the classifier ran out of memory on a 2 GiB machine. Retrying on 8 GiB.', n: 3, spent: '0.401120', startedAt: at(1288), status: 'failed' },
+      { base: null, commits: [], endedAt: at(1380), message: 'Round 1: indexed 1,000,000 blocks into the bucket (14 GiB of receipts).', n: 1, spent: '0.512000', startedAt: at(1428), status: 'completed' },
+      { base: null, commits: [], endedAt: at(1290), message: 'Round 2: classified 48,113 candidate bundles; 61% DEX arbitrage, 23% liquidations, 16% sandwiches.', n: 2, spent: '0.630000', startedAt: at(1378), status: 'completed' },
+      { base: null, commits: [], endedAt: at(1210), message: 'Round 3 failed: the classifier ran out of memory on a 2 GiB machine. Retrying on 8 GiB.', n: 3, spent: '0.401120', startedAt: at(1288), status: 'failed' },
       {
-        endedAt: at(1100),
+        base: null, commits: [], endedAt: at(1100),
         message: "Final report.\n\n1. Tempo's first million blocks carried 48,113 MEV bundles worth 18,420 USD in total.\n2. Arbitrage between the stablecoin DEX and outside venues is 61% of it and mostly harmless: it keeps pegs tight.\n3. Sandwiches are 16% of bundles but 38% of value, concentrated in 4 searchers.\n4. Payment lanes left no room for sandwiches on transfers; every sandwich hit a DEX swap with slippage above 0.5%.\n\nData, notebooks and the classifier are in the bucket under mev/.",
         n: 4,
         spent: '0.405000',
@@ -447,7 +448,7 @@ function summary(swarm: Live): Summary {
 }
 
 function detail(swarm: Live): Detail {
-  return { ...summary(swarm), budgets: swarm.budgets, contributions: swarm.contributions, feed: swarm.feed.slice(-200), hands: swarm.hands, history: swarm.history, notes: swarm.notes, pledges: swarm.pledges, reason: swarm.status === 'paused' ? 'Paused: the money is used up. A contribution, budget or pledge starts the next round.' : null, researchers: demoTeam(swarm) }
+  return { ...summary(swarm), budgets: swarm.budgets, code: swarm.code, contributions: swarm.contributions, feed: swarm.feed.slice(-200), hands: swarm.hands, history: swarm.history, notes: swarm.notes, pledges: swarm.pledges, reason: swarm.status === 'paused' ? 'Paused: the money is used up. A contribution, budget or pledge starts the next round.' : null, researchers: demoTeam(swarm) }
 }
 
 function demoTeam(swarm: Live): Researcher[] {
@@ -468,6 +469,7 @@ export function config(): Promise<Config> {
     mach: '0x20c000000000000000000000f37de3740adec032',
     minPledge: '0.100000',
     perWorker: '0.100000',
+    repoAt: '1.500000',
     reserve: '0.010000',
     rpc: 'https://rpc.tempo.xyz',
     tokens: [
@@ -520,7 +522,7 @@ export async function confirm(key: string, pledge: string): Promise<Pledged> {
     swarm.status = 'running'
     swarm.rounds++
     swarm.workers = 1
-    swarm.history.push({ endedAt: null, message: null, n: swarm.rounds, spent: '0', startedAt: Date.now(), status: 'running' })
+    swarm.history.push({ base: null, commits: [], endedAt: null, message: null, n: swarm.rounds, spent: '0', startedAt: Date.now(), status: 'running' })
     push(swarm, 'status', `Round ${swarm.rounds} started.`, null, Date.now())
     if (swarm.script.length === 0) swarm.script = translation
   }
@@ -533,7 +535,7 @@ function begin(swarm: Live) {
   swarm.status = 'running'
   swarm.rounds++
   swarm.workers = 1
-  swarm.history.push({ endedAt: null, message: null, n: swarm.rounds, spent: '0', startedAt: Date.now(), status: 'running' })
+  swarm.history.push({ base: null, commits: [], endedAt: null, message: null, n: swarm.rounds, spent: '0', startedAt: Date.now(), status: 'running' })
   push(swarm, 'status', `Round ${swarm.rounds} started.`, null, Date.now())
   if (swarm.script.length === 0) swarm.script = translation
 }

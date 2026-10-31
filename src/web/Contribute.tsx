@@ -127,7 +127,7 @@ export function Box(props: { config: Config | undefined; note: string; noteRef: 
   return (
     <div className="pledge" id="pledge" ref={props.noteRef}>
       <h3 className="label">{heading}</h3>
-      {props.swarm.status === 'done' && <p className="fine">It takes no more money. What it did not spend went back: pledges through their channels, and the pool to everyone who sent or was pulled, in proportion.</p>}
+      {props.swarm.status === 'done' && <p className="fine">It takes no more money. What it did not spend went back: each key's channel closed into its wallet, and the swarm's wallet to everyone who sent or was pulled, in proportion.</p>}
       {props.swarm.status !== 'done' && (
         <>
           <Amount config={props.config} label={mode === 'budget' ? 'Per day' : 'Amount'} least={least ?? smallest} onChange={setAmount} suffix={mode === 'budget' ? `${symbol} a day` : symbol} value={amount} />

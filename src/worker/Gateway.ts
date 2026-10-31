@@ -1,19 +1,4 @@
-import type { Currency, Device } from '../shared/Api.ts'
-
 export type Result<value> = { ok: true; value: value } | { detail: string; ok: false; status: number }
-
-export type Requested = { authorizeAccessKey: unknown; device?: Device; id: string }
-
-export type Completed = { key: string; status: 'completed' } | { status: 'pending' }
-
-export type Me = {
-  wallet: `0x${string}`
-  usage: {
-    channel: { available: string; deposit: string; id: string; spent: string } | null
-    limit: { remaining: string | null; total: string }
-    wallet: { balance: string | null }
-  }
-}
 
 export type Report = {
   error?: { message?: string } | string
@@ -40,12 +25,18 @@ export type Hands = { hands: { connected: boolean; name: string }[] }
 
 export type Minted = { command: string; short: string; tab?: string; token: string; url: string }
 
-type Init = { body?: unknown; key?: string; method?: string }
+export type Commit = { date?: string | null; message: string; parents?: string[]; sha: string }
+
+type Init = { app?: string; body?: unknown; key?: string; method?: string }
+
+export function app(swarm: string) {
+  return `swarm-${swarm}`
+}
 
 async function send<value>(env: Cloudflare.Env, path: string, init: Init = {}): Promise<Result<value>> {
-  const headers = new Headers({ accept: 'application/json' })
+  const headers = new Headers({ accept: 'application/json', authorization: 'Bearer ' + (init.key ?? env.SWARMS_GATEWAY_KEY) })
   if (init.body !== undefined) headers.set('content-type', 'application/json')
-  if (init.key) headers.set('authorization', 'Bearer ' + init.key)
+  if (init.app) headers.set('gateway-app', init.app)
 
   const response = await fetch(env.GATEWAY_URL + path, {
     body: init.body === undefined ? null : JSON.stringify(init.body),
@@ -70,91 +61,68 @@ async function send<value>(env: Cloudflare.Env, path: string, init: Init = {}): 
   return { ok: true, value: parsed as value }
 }
 
-export function request(
-  env: Cloudflare.Env,
-  input: { days: number; deposit: number; device?: boolean; limit: number; search?: number; token?: Currency; topUp: number },
-) {
-  return send<Requested>(env, '/api/keys/request', { body: input })
-}
-
-export async function topUp(env: Cloudflare.Env, key: string, amount: number) {
-  const topped = await send<Me | undefined>(env, '/api/keys/topup', { body: { amount }, key })
-  return topped.ok && !topped.value?.usage ? me(env, key) : (topped as Result<Me>)
-}
-
-export function complete(
-  env: Cloudflare.Env,
-  input: { id: string; keyAuthorization?: unknown; name: string; transaction?: string },
-) {
-  return send<Completed>(env, '/api/keys/complete', { body: input })
-}
-
-export function me(env: Cloudflare.Env, key: string) {
-  return send<Me>(env, '/api/keys/me', { key })
+export function me(env: Cloudflare.Env) {
+  return send<{ wallet: `0x${string}` }>(env, '/api/keys/me')
 }
 
 export function revoke(env: Cloudflare.Env, key: string) {
   return send<unknown>(env, '/api/keys/revoke', { body: {}, key })
 }
 
-export function agent(env: Cloudflare.Env, key: string, input: { name: string }) {
+export function agent(env: Cloudflare.Env, swarm: string, input: { name: string; payer: { secret: string; url: string } }) {
   return send<{ id: string }>(env, '/v1/agents', {
-    body: { harness: 'codex', name: input.name, thinking: 'low' },
-    key,
+    app: app(swarm),
+    body: { harness: 'codex', name: input.name, payer: input.payer, thinking: 'low' },
   })
 }
 
-export function prompt(
-  env: Cloudflare.Env,
-  key: string,
-  agent: string,
-  input: { prompt: string; steer: boolean },
-) {
-  return send<{ request_id: string; status: string }>(env, `/v1/agents/${agent}/turns`, {
-    body: input,
-    key,
+export function repay(env: Cloudflare.Env, swarm: string, agent: string, payer: { secret: string; url: string }) {
+  return send<unknown>(env, `/v1/agents/${agent}`, { app: app(swarm), body: { payer }, method: 'PATCH' })
+}
+
+export function prompt(env: Cloudflare.Env, swarm: string, agent: string, input: { prompt: string; steer: boolean }) {
+  return send<{ request_id: string; status: string }>(env, `/v1/agents/${agent}/turns`, { app: app(swarm), body: input })
+}
+
+export function turn(env: Cloudflare.Env, swarm: string, agent: string, turn: string) {
+  return send<Report>(env, `/v1/agents/${agent}/turns/${turn}`, { app: app(swarm) })
+}
+
+export function events(env: Cloudflare.Env, swarm: string, agent: string, after: number) {
+  return send<Page>(env, `/v1/agents/${agent}/events?after=${after}&limit=128`, { app: app(swarm) })
+}
+
+export function sandboxes(env: Cloudflare.Env, swarm: string) {
+  return send<{ sandboxes: { hand?: string | null; sandboxId: string; status: string }[] }>(env, '/v1/compute/list', {
+    app: app(swarm),
+    body: {},
   })
 }
 
-export function turn(env: Cloudflare.Env, key: string, agent: string, turn: string) {
-  return send<Report>(env, `/v1/agents/${agent}/turns/${turn}`, { key })
+export function terminate(env: Cloudflare.Env, swarm: string, sandboxId: string) {
+  return send<unknown>(env, '/v1/compute/terminate', { app: app(swarm), body: { sandboxId } })
 }
 
-export function cancel(env: Cloudflare.Env, key: string, agent: string, turn: string) {
-  return send<unknown>(env, `/v1/agents/${agent}/turns/${turn}/cancel`, { body: {}, key })
-}
-
-export function events(env: Cloudflare.Env, key: string, agent: string, after: number) {
-  return send<Page>(env, `/v1/agents/${agent}/events?after=${after}&limit=128`, { key })
-}
-
-export function sandboxes(env: Cloudflare.Env, key: string) {
-  return send<{ sandboxes: { hand?: string | null; sandboxId: string; status: string }[] }>(
-    env,
-    '/v1/compute/list',
-    { body: {}, key },
-  )
-}
-
-export function terminate(env: Cloudflare.Env, key: string, sandboxId: string) {
-  return send<unknown>(env, '/v1/compute/terminate', { body: { sandboxId }, key })
-}
-
-export function stream(env: Cloudflare.Env, key: string, agent: string, after: number, signal: AbortSignal) {
+export function stream(env: Cloudflare.Env, swarm: string, agent: string, after: number, signal: AbortSignal) {
   return fetch(`${env.GATEWAY_URL}/v1/agents/${agent}/events?after=${after}&live=1`, {
-    headers: { accept: 'text/event-stream', authorization: 'Bearer ' + key },
+    headers: { accept: 'text/event-stream', authorization: 'Bearer ' + env.SWARMS_GATEWAY_KEY, 'gateway-app': app(swarm) },
     signal,
   })
 }
 
-export function hands(env: Cloudflare.Env, key: string) {
-  return send<Hands>(env, '/v1/hands', { key })
+export function hands(env: Cloudflare.Env, swarm: string) {
+  return send<Hands>(env, '/v1/hands', { app: app(swarm) })
 }
 
-export function hand(env: Cloudflare.Env, key: string, name: string) {
-  return send<Minted>(env, `/v1/hands?name=${encodeURIComponent(name)}`, { key, method: 'POST' })
+export function hand(env: Cloudflare.Env, swarm: string, name: string) {
+  return send<Minted>(env, `/v1/hands?name=${encodeURIComponent(name)}`, { app: app(swarm), method: 'POST' })
 }
 
-export function detach(env: Cloudflare.Env, key: string, name: string) {
-  return send<{ disconnected: boolean }>(env, `/v1/hands/${encodeURIComponent(name)}`, { key, method: 'DELETE' })
+export function detach(env: Cloudflare.Env, swarm: string, name: string) {
+  return send<{ disconnected: boolean }>(env, `/v1/hands/${encodeURIComponent(name)}`, { app: app(swarm), method: 'DELETE' })
+}
+
+export async function code<value>(env: Cloudflare.Env, owner: string, swarm: string, path: string) {
+  const response = await fetch(`${env.GATEWAY_URL}/p/${owner}/${app(swarm)}/git${path}`, { headers: { accept: 'application/json' } })
+  return response.ok ? ((await response.json()) as value) : undefined
 }

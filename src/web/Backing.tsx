@@ -82,7 +82,7 @@ export function Contributions(props: { config: Config | undefined; contributions
           <Who address={contribution.contributor} at={contribution.at} config={props.config} />
           <p className="pledge-figures">
             <span>{money(contribution.amount, contribution.token)}</span>
-            <span className="tag">{contribution.kind === 'pull' ? 'Pulled from a budget' : 'Sent once'}</span>
+            <span className="tag">{contribution.kind === 'pull' ? 'Pulled from a budget' : contribution.kind === 'pledge' ? 'Pulled from a pledge' : 'Sent once'}</span>
             {props.config && (
               <a href={`${props.config.explorer}/tx/${contribution.hash}`} rel="noreferrer" target="_blank">
                 Transfer ↗

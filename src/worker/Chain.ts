@@ -7,6 +7,12 @@ export const mach: Address = '0x20c000000000000000000000f37de3740ADec032'
 
 export const chain = tempo
 
+export const escrow: Address = '0x4d50500000000000000000000000000000000000'
+
+export const recipient: Address = '0x40def0Cf3B5d28B6e9a7976BA10591e515AfECFE'
+
+export const cap = 1_000_000n
+
 export const tokens = {
   ousd: { address: '0x20c0000000000000000000006a37DA5C996874BE', symbol: 'OUSD' },
   pathusd: { address: '0x20c0000000000000000000000000000000000000', symbol: 'pathUSD' },

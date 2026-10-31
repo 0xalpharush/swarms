@@ -2490,3 +2490,96 @@ kbd::after {
 .pledge-figures a {
   color: var(--grey-600);
 }
+
+.code-browse {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--gutter);
+  padding: var(--space-3) 0;
+}
+
+@media (min-width: 900px) {
+  .code-browse {
+    grid-template-columns: minmax(200px, 1fr) 3fr;
+  }
+}
+
+.code-tree {
+  height: 360px;
+  border: 1px solid var(--grey-300);
+  border-radius: var(--radius-small);
+  background: var(--grey-100);
+  --trees-theme-list-active-selection-bg: var(--grey-800);
+  --trees-theme-list-active-selection-fg: var(--white);
+  --trees-theme-list-hover-bg: var(--grey-200);
+}
+
+.code-file {
+  min-width: 0;
+  max-height: 520px;
+  overflow: auto;
+  border: 1px solid var(--grey-300);
+  border-radius: var(--radius-small);
+}
+
+.code-file > .empty,
+.code-file > .error {
+  padding: var(--space-3);
+}
+
+.code-view {
+  --diffs-font-family: var(--mono);
+  --diffs-header-font-family: var(--mono);
+  --diffs-font-size: 12px;
+}
+
+.commits {
+  border-top: 1px solid var(--grey-300);
+}
+
+.commit {
+  border-bottom: 1px solid var(--grey-200);
+}
+
+.commit-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px 12px;
+  width: 100%;
+  padding: 12px 0;
+  border: 0;
+  background: none;
+  font-family: var(--mono);
+  font-size: var(--size-small);
+  letter-spacing: 0.02em;
+  text-align: left;
+  cursor: pointer;
+}
+
+.commit-sha,
+.commit-ago {
+  color: var(--grey-500);
+}
+
+.commit-message {
+  font-family: var(--serif);
+  font-size: var(--size-large);
+  letter-spacing: 0;
+}
+
+.commit-ago {
+  margin-left: auto;
+}
+
+.commit[data-open='true'] .commit-message {
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 0.2em;
+}
+
+.code-diff {
+  display: grid;
+  gap: 12px;
+  padding-bottom: var(--space-3);
+}

@@ -7,7 +7,7 @@ export const origin = location.origin
 
 const tools = [
   ['swarms_list', 'Funded swarms with status, money, rounds and latest answer. Filter by status.'],
-  ['swarm_get', 'One swarm: goal, money, latest answer, every round with an excerpt, notes, pledges, transfers, budgets, machines.'],
+  ['swarm_get', 'One swarm: goal, money, latest answer, every round with an excerpt and its commits, notes, pledges, transfers, budgets, machines, code repository.'],
   ['swarm_answer', 'The latest answer: the newest completed round report, with done and next.'],
   ['swarm_rounds', 'Every round with its full report, or one round.'],
   ['swarm_feed', 'The activity log: tool calls, shell commands, machines, messages, money, steering, errors.'],
@@ -24,7 +24,7 @@ const tools = [
 const routes = [
   ['GET', '/v1/swarms', 'Funded swarms, most recently active first.', '?status=funding|running|paused|done'],
   ['POST', '/v1/swarms', 'Create a swarm.', '{ title, goal }'],
-  ['GET', '/v1/swarms/:id', 'Summary, latest answer, rounds with excerpts, notes, pledges, transfers, budgets, machines.', ''],
+  ['GET', '/v1/swarms/:id', 'Summary, latest answer, rounds with excerpts and commits, notes, pledges, transfers, budgets, machines, code repository.', ''],
   ['GET', '/v1/swarms/:id/answer', 'The latest answer and the round running now.', ''],
   ['GET', '/v1/swarms/:id/rounds', 'Every round with its full report, or one round.', '/rounds/:n'],
   ['GET', '/v1/swarms/:id/feed', 'The activity log, 200 a page.', '?after=<seq>&kind=<kind>&limit=<n>'],
@@ -48,7 +48,7 @@ const codes = [
   ['403', 'access_denied', 'The contributor declined the pledge in Tempo Wallet.'],
   ['404', 'not_found', 'No swarm, pledge, budget, round or route has this id, or Tempo has no receipt for the transaction yet.'],
   ['409', 'conflict', 'The swarm is done, the pledge or budget is already approved, or the transaction is already counted.'],
-  ['409', 'insufficient_balance', 'The wallet holds less MACH than the pledge; the pledge is dropped.'],
+  ['409', 'insufficient_balance', 'The wallet holds less of the token than the pledge; the pledge is dropped.'],
   ['410', 'expired', 'The Tempo Wallet link expired before anyone approved it.'],
   ['502', 'upstream_failed', 'The Tempo gateway or Tempo Wallet failed.'],
 ] as const
@@ -212,7 +212,7 @@ export function Docs(props: { config: Config | undefined }) {
         intro={
           <>
             <p>
-              Money comes three ways. A pledge is a MACH spending key on the contributor's wallet, capped at the pledge and approved in Tempo Wallet. The money stays in the wallet until the swarm spends it, and what it does not spend goes back. A pledge is at least {minimum} MACH.
+              Money comes three ways. A pledge is a spending key on the contributor's wallet, in MACH or a stablecoin, capped at the pledge, approved in Tempo Wallet and held by this app, which pays the swarm's requests from it. The money stays in the wallet until the swarm spends it, and what it does not spend goes back. A pledge is at least {minimum} MACH.
             </p>
             <p>A transfer or a daily budget puts USDC.e, pathUSD or OUSD in the swarm's own wallet. When the swarm is done, what it did not spend goes back to those contributors pro rata.</p>
             <p className="fine">Without a browser, request a pledge with device: true and show the link and code to the person who approves.</p>
@@ -254,7 +254,7 @@ export function Docs(props: { config: Config | undefined }) {
             <p>
               Lend a swarm your own machine as a nanocode hand. Its lead agent and explorers run commands and read and write files there, and are told it belongs to a contributor: they work in a folder of their own and ask in their report before anything destructive.
             </p>
-            <p className="fine">Hands live under the swarm's own gateway key, so they serve rounds paid from the swarm's wallet. Rounds paid by a MACH pledge run on that contributor's key and cannot reach them.</p>
+            <p className="fine">Hands live under the swarm's own gateway app, so every round can use them, whichever contribution pays for it.</p>
           </>
         }
         title="Hands"

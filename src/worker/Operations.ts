@@ -33,16 +33,15 @@ import type {
 import * as Answer from '../shared/Answer.ts'
 import * as Connect from '../shared/Connect.ts'
 import * as Memo from '../shared/Memo.ts'
-import * as Budget from './Budget.ts'
 import * as Chain from './Chain.ts'
 import * as Devices from './Devices.ts'
-import * as Gateway from './Gateway.ts'
 import * as Hands from './Hands.ts'
+import * as Keys from './Keys.ts'
 import * as Problem from './Problem.ts'
-import * as Seal from './Seal.ts'
 import * as Search from './Search.ts'
 import * as Store from './Store.ts'
-import type { Swarm } from './Swarm.ts'
+import type { Snapshot } from './Payer.ts'
+import type { Paid, Swarm } from './Swarm.ts'
 import * as Vault from './Vault.ts'
 
 export const statuses = ['funding', 'running', 'paused', 'done'] as const satisfies readonly Status[]
@@ -54,6 +53,8 @@ export const sources = ['swarm', 'report', 'note', 'feed'] as const satisfies re
 export const maxWait = 55
 
 const id = z.string().trim().min(1).max(64).describe('The swarm id, the last part of its page URL /s/<id>.')
+
+const pledgeDays = 7
 
 const pledgeId = z.string().trim().min(1).max(64).describe('The pledge id that swarm_pledge or the pledge request returned.')
 
@@ -278,6 +279,7 @@ export function config(env: Cloudflare.Env): Config {
     mach: Chain.mach,
     minPledge: Memo.decimal(Store.minPledge),
     perWorker: Memo.decimal(Store.perWorker),
+    repoAt: Memo.decimal(Store.repoAt),
     reserve: Memo.decimal(Store.reserve),
     rpc: env.TEMPO_RPC,
     tokens: Chain.pledgeable.map((id) => ({
@@ -325,6 +327,7 @@ export async function detail(env: Cloudflare.Env, input: Input<'swarm'>): Promis
   return Problem.ok({
     ...Store.summary(row, view.left === null ? undefined : Memo.units(view.left)),
     budgets,
+    code: view.code,
     contributions,
     feed: view.feed,
     reason: view.reason,
@@ -354,9 +357,12 @@ export async function get(env: Cloudflare.Env, input: Input<'swarm'>): Promise<P
   return Problem.ok({
     ...Store.summary(row, view.left === null ? undefined : Memo.units(view.left)),
     budgets,
+    code: view.code,
     contributions,
     hands: view.hands,
     history: view.rounds.map((round) => ({
+      base: round.base,
+      commits: round.commits,
       endedAt: round.endedAt,
       excerpt: round.message ? Answer.excerpt(Answer.parse(round.n, round.message, 0).text) : null,
       n: round.n,
@@ -607,39 +613,55 @@ export async function pledge(env: Cloudflare.Env, input: Input<'pledge'>): Promi
   const parsed = parse(schema.pledge, input)
   if (!parsed.ok) return parsed
   const request = parsed.value
-  const row = await Store.find(env, request.swarm)
-  if (!row) return missing()
-  if (row.status === 'done') return Problem.fail(409, 'conflict', 'This swarm is done.')
+  const found = await Store.find(env, request.swarm)
+  if (!found) return missing()
+  if (found.status === 'done') return Problem.fail(409, 'conflict', 'This swarm is done.')
+  const row = await provisioned(env, found)
 
-  const atomics = units(request.amount)
-  const deposit = Number(atomics) / 1e6
-  const requested = await Gateway.request(env, {
-    days: 7,
-    deposit,
-    device: request.device,
-    limit: Math.max(1, Math.ceil(deposit)),
-    token: request.token,
-    topUp: 0,
-  })
-  if (!requested.ok)
-    return Problem.fail(502, 'upstream_failed', `The gateway did not start a key: ${requested.detail}`)
-  const device = requested.value.device
-  if (request.device && !device)
-    return Problem.fail(502, 'upstream_failed', 'The gateway did not register the key request with Tempo Wallet.')
+  const amount = units(request.amount)
+  const requested = await Keys.request(env, { amount, days: pledgeDays, period: 0, recipient: row.wallet, token: request.token })
+  const device = request.device ? await Devices.register(requested.authorizeAccessKey, Chain.chain.id, env.SWARMS_URL) : undefined
+  if (request.device && !device) return Problem.fail(502, 'upstream_failed', 'Tempo Wallet did not register the approval request.')
 
   const note = request.note || null
   const id = identifier()
-  await Store.request(env, {
-    amount: String(atomics),
+  await Store.allow(env, {
+    access_key: requested.authorizeAccessKey.address,
+    amount: String(amount),
+    authorization: JSON.stringify(requested.authorizeAccessKey),
+    expires_at: requested.authorizeAccessKey.expiry * 1000,
     id,
     note,
     note_id: note ? await Store.noteId(note) : null,
-    request: requested.value.id,
+    period: 0,
+    sealed_key: requested.sealed,
     swarm: row.id,
     token: request.token,
   })
   if (device) await Devices.save(env, id, device)
-  return Problem.ok({ authorizeAccessKey: requested.value.authorizeAccessKey, ...(device ? { device } : {}), pledge: id })
+  return Problem.ok({
+    authorizeAccessKey: requested.authorizeAccessKey,
+    ...(device
+      ? { device: { expiresAt: device.expiresAt, interval: device.interval, userCode: device.userCode, verificationUri: device.verificationUri, verificationUriFull: device.verificationUriFull } }
+      : {}),
+    pledge: id,
+  })
+}
+
+export async function pay(env: Cloudflare.Env, swarm: string, authorization: string, input: Record<string, unknown>): Promise<Paid> {
+  const secret = /^Bearer (.+)$/.exec(authorization)?.[1]
+  const challenge = input['challenge']
+  if (!secret || !(typeof challenge === 'string' || (Array.isArray(challenge) && challenge.every((value) => typeof value === 'string'))))
+    return { code: 'unauthorized', detail: 'Send the payer secret as a bearer token, and the challenge.', status: 401 }
+  if (!(await Store.exists(env, swarm))) return { code: 'unauthorized', detail: 'No swarm has this id.', status: 401 }
+  return stub(env, swarm).pay({
+    app: typeof input['app'] === 'string' ? input['app'] : undefined,
+    attempt: typeof input['attempt'] === 'number' ? input['attempt'] : undefined,
+    challenge: challenge as string | string[],
+    channels: Array.isArray(input['channels']) ? (input['channels'] as Snapshot[]) : undefined,
+    rejected: typeof input['rejected'] === 'object' && input['rejected'] !== null ? (input['rejected'] as { detail: string; status: number }) : undefined,
+    secret,
+  })
 }
 
 export async function contribute(
@@ -739,7 +761,7 @@ export async function budget(env: Cloudflare.Env, input: Input<'budget'>): Promi
   const row = await provisioned(env, found)
 
   const amount = units(request.amount)
-  const requested = await Budget.request(env, {
+  const requested = await Keys.request(env, {
     amount,
     days: Store.budget.days,
     period: Store.budget.period,
@@ -771,10 +793,10 @@ export async function allow(env: Cloudflare.Env, input: Input<'allowance'>): Pro
   if (request.keyAuthorization === undefined && request.transaction === undefined)
     return Problem.fail(400, 'invalid_request', 'Send the keyAuthorization Tempo Wallet returned, or a signed transaction carrying it.')
   const [row, allowance] = await Promise.all([Store.find(env, request.swarm), Store.allowance(env, request.swarm, request.budget)])
-  if (!row || !allowance) return Problem.fail(404, 'not_found', 'No budget has this id.')
+  if (!row || !allowance || !allowance.period) return Problem.fail(404, 'not_found', 'No budget has this id.')
   if (allowance.status !== 'pending') return Problem.fail(409, 'conflict', 'This budget is already approved.')
 
-  const approved = await Budget.approve(env, JSON.parse(allowance.authorization) as Budget.Request, {
+  const approved = await Keys.approve(env, JSON.parse(allowance.authorization) as Keys.Request, {
     keyAuthorization: request.keyAuthorization,
     transaction: request.transaction as Hex | undefined,
   })
@@ -815,21 +837,10 @@ export async function approve(env: Cloudflare.Env, input: Input<'approval'>): Pr
     return polled
   }
 
-  const [row, backing] = await Promise.all([Store.find(env, approval.swarm), Store.backing(env, approval.swarm, approval.pledge)])
-  if (!row || !backing) return Problem.fail(404, 'not_found', 'No pledge has this id.')
-  if (backing.status !== 'pending') return Problem.fail(409, 'conflict', 'This pledge is already approved.')
-
-  const completed = await Gateway.complete(env, {
-    id: backing.request,
-    ...(approval.keyAuthorization === undefined ? {} : { keyAuthorization: approval.keyAuthorization }),
-    name: name(row),
-    ...(approval.transaction === undefined ? {} : { transaction: approval.transaction }),
-  })
-  if (!completed.ok)
-    return Problem.fail(400, 'invalid_request', `The gateway refused the approval: ${completed.detail}`)
-  if (completed.value.status !== 'completed')
-    return Problem.fail(400, 'invalid_request', 'The gateway did not complete the key.')
-  return activate(env, row, backing, completed.value.key)
+  const [row, key] = await Promise.all([Store.find(env, approval.swarm), Store.allowance(env, approval.swarm, approval.pledge)])
+  if (!row || !key || key.period) return Problem.fail(404, 'not_found', 'No pledge has this id.')
+  if (key.status !== 'pending') return Problem.fail(409, 'conflict', 'This pledge is already approved.')
+  return activate(env, row, key, { keyAuthorization: approval.keyAuthorization, transaction: approval.transaction as Hex | undefined })
 }
 
 export async function status(
@@ -850,103 +861,88 @@ export async function status(
 }
 
 async function poll(env: Cloudflare.Env, input: { pledge: string; swarm: string }): Promise<Problem.Result<Pledged | Pending>> {
-  const [row, backing] = await Promise.all([Store.find(env, input.swarm), Store.backing(env, input.swarm, input.pledge)])
-  if (!row || !backing) return Problem.fail(404, 'not_found', 'No pledge has this id.')
-  if (backing.status !== 'pending') return Problem.ok(pledged(row, backing))
-  const device = await Devices.find(env, backing.id)
-  if (!device) return Problem.ok(pending(backing, null))
+  const [row, key] = await Promise.all([Store.find(env, input.swarm), Store.allowance(env, input.swarm, input.pledge)])
+  if (!row || !key || key.period) return Problem.fail(404, 'not_found', 'No pledge has this id.')
+  if (key.status !== 'pending') return Problem.ok(pledged(row, key))
+  const device = await Devices.find(env, key.id)
+  if (!device) return Problem.ok(pending(key, null))
 
-  const completed = await Gateway.complete(env, { id: backing.request, name: name(row) })
-  if (completed.ok)
-    return completed.value.status === 'completed'
-      ? activate(env, row, backing, completed.value.key)
-      : Problem.ok(pending(backing, device))
-  if (completed.status === 403) {
-    await forget(env, backing.id)
-    return Problem.fail(403, 'access_denied', 'The pledge was declined in Tempo Wallet.')
+  const polled = await Devices.poll(env, key.id)
+  if (polled.status === 'pending') return Problem.ok(pending(key, device))
+  if (polled.status === 'approved') return activate(env, row, key, { keyAuthorization: polled.keyAuthorization })
+  if (polled.status === 'denied') {
+    await forget(env, key.id)
+    return Problem.fail(403, 'access_denied', polled.detail)
   }
-  if (completed.status !== 404)
-    return Problem.fail(502, 'upstream_failed', `The gateway did not report on the approval: ${completed.detail}`)
 
-  const [now, again] = await Promise.all([Store.find(env, input.swarm), Store.backing(env, input.swarm, input.pledge)])
-  if (now && again && again.status !== 'pending') return Problem.ok(pledged(now, again))
-  if (Date.now() < device.expiresAt) return Problem.ok(pending(backing, device))
-  await forget(env, backing.id)
+  const again = await Store.allowance(env, input.swarm, input.pledge)
+  if (again && again.status !== 'pending') return Problem.ok(pledged(row, again))
+  if (polled.status === 'failed' && Date.now() < device.expiresAt)
+    return Problem.fail(502, 'upstream_failed', `Tempo Wallet did not report on the approval: ${polled.detail}`)
+  await forget(env, key.id)
   return Problem.fail(410, 'expired', 'The Tempo Wallet approval expired before anyone approved it. Pledge again.')
 }
 
 async function activate(
   env: Cloudflare.Env,
   row: Store.Row,
-  backing: Store.Backing,
-  key: string,
+  key: Store.Allowance,
+  input: { keyAuthorization?: unknown; transaction?: Hex | undefined },
 ): Promise<Problem.Result<Pledged>> {
-  const me = await Gateway.me(env, key)
-  if (!me.ok) return Problem.fail(502, 'upstream_failed', `The gateway did not describe the key: ${me.detail}`)
+  const approved = await Keys.approve(env, JSON.parse(key.authorization) as Keys.Request, input)
+  if (typeof approved === 'string') return Problem.fail(400, 'invalid_request', approved)
 
-  const amount = Memo.decimal(BigInt(backing.amount))
-  const balance = me.value.usage.wallet.balance
-  if (balance !== null && Memo.units(balance) < BigInt(backing.amount)) {
-    await Promise.all([Gateway.revoke(env, key), forget(env, backing.id)])
+  const symbol = Chain.currencies[key.token].symbol
+  const balance = await Keys.balance(env, approved.contributor, key.token).catch(() => undefined)
+  if (balance !== undefined && balance < approved.limit) {
+    await forget(env, key.id)
     return Problem.fail(
       409,
       'insufficient_balance',
-      `The wallet holds ${balance} ${Chain.currencies[backing.token].symbol}, less than the ${amount} ${Chain.currencies[backing.token].symbol} pledge. Add some and pledge again.`,
+      `The wallet holds ${Memo.decimal(balance)} ${symbol}, less than the ${Memo.decimal(approved.limit)} ${symbol} pledge. Add some and pledge again.`,
     )
   }
 
-  const contributor = me.value.wallet
-  const activated = await Store.activate(env, backing.id, {
-    contributor,
-    sealed_key: await Seal.seal(env.SWARMS_SECRET, key),
+  const activated = await Store.approve(env, key.id, {
+    amount: String(approved.limit),
+    contributor: approved.contributor,
+    key_authorization: JSON.stringify(approved.keyAuthorization),
+    published: approved.published,
   })
   if (!activated) {
-    await Gateway.revoke(env, key)
-    return Problem.fail(409, 'conflict', 'This pledge is already approved.')
+    const again = await Store.allowance(env, row.id, key.id)
+    return again && again.status !== 'pending' ? Problem.ok(pledged(row, again)) : Problem.fail(409, 'conflict', 'This pledge is already approved.')
   }
-  await stub(env, row.id).pledged({ amount, contributor, note: backing.note, noteId: backing.note_id, swarm: row.id, token: backing.token })
-  if (backing.note && backing.note_id) await logged(Search.note(env, row.id, backing.note_id, backing.note))
-
-  const updated = (await Store.find(env, row.id)) ?? row
-  return Problem.ok({
-    pledge: { amount, at: backing.created_at, contributor, id: backing.id, note: backing.note, spent: '0.000000', status: 'active', token: backing.token },
-    status: 'active',
-    swarm: Store.summary(updated),
+  await Devices.forget(env, key.id)
+  await stub(env, row.id).pledged({
+    amount: Memo.decimal(approved.limit),
+    contributor: approved.contributor,
+    note: key.note,
+    noteId: key.note_id,
+    swarm: row.id,
+    token: key.token,
   })
+  if (key.note && key.note_id) await logged(Search.note(env, row.id, key.note_id, key.note))
+
+  const [updated, saved] = await Promise.all([Store.find(env, row.id), Store.allowance(env, row.id, key.id)])
+  return Problem.ok(pledged(updated ?? row, saved ?? key))
 }
 
 async function forget(env: Cloudflare.Env, pledge: string) {
   await Promise.all([Store.forget(env, pledge), Devices.forget(env, pledge)])
 }
 
-function name(row: Store.Row) {
-  return `Swarms: ${row.title}`.slice(0, 64)
+function pledged(row: Store.Row, key: Store.Allowance): Pledged {
+  const pledge = Store.pledge(key)
+  return { pledge, status: pledge.status, swarm: Store.summary(row) }
 }
 
-function pledged(row: Store.Row, backing: Store.Backing): Pledged {
-  const status = backing.status === 'pending' ? 'active' : backing.status
+function pending(key: Store.Allowance, device: Pending['device']): Pending {
   return {
-    pledge: {
-      amount: Memo.decimal(BigInt(backing.amount)),
-      at: backing.created_at,
-      contributor: backing.contributor,
-      id: backing.id,
-      note: backing.note,
-      spent: Memo.decimal(BigInt(backing.spent)),
-      status,
-      token: backing.token,
-    },
-    status,
-    swarm: Store.summary(row),
-  }
-}
-
-function pending(backing: Store.Backing, device: Pending['device']): Pending {
-  return {
-    amount: Memo.decimal(BigInt(backing.amount)),
+    amount: Memo.decimal(BigInt(key.amount)),
     device,
-    note: backing.note,
-    pledge: backing.id,
+    note: key.note,
+    pledge: key.id,
     status: 'pending',
   }
 }

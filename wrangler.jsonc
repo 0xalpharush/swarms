@@ -12,9 +12,10 @@
   "observability": { "enabled": true },
   "vars": {
     "GATEWAY_URL": "https://gateway.tempo-dev.workers.dev",
+    "SWARMS_URL": "https://swarms.tempo-dev.workers.dev",
     "TEMPO_RPC": "https://rpc.tempo.xyz"
   },
-  "secrets": { "required": ["SWARMS_SECRET"] },
+  "secrets": { "required": ["SWARMS_GATEWAY_KEY", "SWARMS_SECRET"] },
   "d1_databases": [
     {
       "binding": "DB",
