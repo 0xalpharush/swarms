@@ -77,8 +77,6 @@ const maxFailures = 3
 
 const settleMs = 15_000
 
-const kickMs = 60_000
-
 const unfundedMs = 15 * 60_000
 
 const refundMs = 60_000
@@ -155,14 +153,6 @@ export class Swarm extends DurableObject<Cloudflare.Env> {
     if (!token) return []
     const listed = await Gateway.hands(this.env, token)
     return listed.ok ? listed.value.hands.filter((hand) => hand.connected).map((hand) => hand.name) : []
-  }
-
-  async kick() {
-    const now = Date.now()
-    if (this.kv.get<string>('turn') || now - (this.kv.get<number>('kicked') ?? 0) < kickMs) return
-    this.kv.put('kicked', now)
-    const alarm = await this.ctx.storage.getAlarm()
-    if (alarm === null || alarm > now + kickMs) await this.ctx.storage.setAlarm(now)
   }
 
   async view(): Promise<View> {
@@ -414,6 +404,19 @@ export class Swarm extends DurableObject<Cloudflare.Env> {
     if (status === 'completed' && /STATUS:\s*done/i.test(message ?? '')) {
       await this.done(row, 'The lead agent reports the goal is met.')
       return Date.now() + refundMs
+    }
+    if (status !== 'completed' && /HTTP 402|billing_error/.test(message ?? '')) {
+      this.kv.put('failures', 0)
+      if (current?.kind === 'pledge') {
+        await this.release(current.backing, current.token, 'spent')
+        return Date.now() + settleMs
+      }
+      await this.pause(
+        row,
+        'paused',
+        `Paused: the next model call has to hold more than the ${dollars(money.left)} left, so the gateway refused it. New money continues from here.`,
+      )
+      return null
     }
     if (failures >= maxFailures) {
       this.kv.put('failures', 0)
