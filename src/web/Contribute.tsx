@@ -1,4 +1,4 @@
-import { type RefObject, useState } from 'react'
+import { type RefObject, useEffect, useState } from 'react'
 import type { Config, Currency, Detail, Token } from '../shared/Api.ts'
 import { decimal, maxNote, memo, units } from '../shared/Memo.ts'
 import * as Api from './api.ts'
@@ -17,9 +17,20 @@ const modes = [
 
 const smallest = '0.01'
 
-function initial(): Mode {
-  const asked = new URLSearchParams(location.search).get('give')
-  return modes.find(([key]) => key === asked)?.[0] ?? 'send'
+const funds = { budget: 'budget', pledge: 'pledge', transfer: 'send' } as const satisfies Record<string, Mode>
+
+function asked() {
+  const query = new URLSearchParams(location.search)
+  const fund = query.get('fund')
+  const mode: Mode = fund && fund in funds ? funds[fund as keyof typeof funds] : 'send'
+  const token = query.get('token')?.toLowerCase()
+  const amount = query.get('amount')?.trim()
+  return {
+    amount: amount && /^\d+(\.\d{1,6})?$/.test(amount) ? amount : '0.25',
+    mode,
+    note: query.get('note')?.slice(0, maxNote) ?? '',
+    token: (token && token in symbols && (mode === 'pledge' || token !== 'mach') ? token : mode === 'pledge' ? 'mach' : 'usdce') as Currency,
+  }
 }
 
 const working = {
@@ -56,9 +67,15 @@ async function recorded(swarm: string, hash: string, note: string) {
 }
 
 export function Box(props: { config: Config | undefined; note: string; noteRef: RefObject<HTMLDivElement | null>; onDone: () => void; onNote: (note: string) => void; swarm: Detail }) {
-  const [mode, setMode] = useState<Mode>(initial)
-  const [amount, setAmount] = useState('0.25')
-  const [token, setToken] = useState<Currency>(() => (initial() === 'pledge' ? 'mach' : 'usdce'))
+  const [prefill] = useState(asked)
+  const [mode, setMode] = useState<Mode>(prefill.mode)
+  const [amount, setAmount] = useState(prefill.amount)
+  const [token, setToken] = useState<Currency>(prefill.token)
+  const onNote = props.onNote
+
+  useEffect(() => {
+    if (prefill.note) onNote(prefill.note)
+  }, [onNote, prefill.note])
   const [state, setState] = useState<State>({})
   const busy = state.step !== undefined
   const least = mode === 'send' ? smallest : mode === 'budget' ? props.config?.budget.min : props.config?.minPledge
