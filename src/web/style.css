@@ -408,8 +408,8 @@ kbd::after {
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: var(--gutter);
-  height: var(--header-height);
-  padding: 0 var(--margin);
+  min-height: var(--header-height);
+  padding: 8px var(--margin);
   background: rgba(255, 255, 255, 0.86);
   backdrop-filter: blur(24px);
 }
