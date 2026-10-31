@@ -96,6 +96,21 @@ export type Entry = {
 
 export type Hand = { connected: boolean; name: string }
 
+export type Lent = { at: number; connected: boolean; label: string; name: string }
+
+export type Issued = {
+  cli: string
+  command: string
+  label: string
+  library: string
+  name: string
+  npm: string
+  swarm: string
+  tab: string | null
+  token: string
+  url: string
+}
+
 export type Live =
   | { round: number; type: 'round' }
   | { delta: string; item: string; offset: number | null; type: 'text' | 'thinking' }

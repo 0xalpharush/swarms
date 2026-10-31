@@ -10,8 +10,9 @@ function instructions(origin: string) {
   return [
     `Swarms (${origin}) are crowdfunded, long-running AI agents on the Tempo gateway. Anyone starts a swarm with a title and a goal. It waits in status funding until someone funds it, and then works in rounds, spending on models and Modal machines: each round is one turn of a lead agent, with up to ${Store.maxParallel - 1} explorer subagents and machines beside it when enough money is left, and ends with a report. The newest completed report is the swarm's answer. A swarm runs until the lead reports the goal met (done) or its money runs out (paused, and new money resumes it).`,
     "Money comes three ways. A pledge is a spending key in MACH (the default) or OUSD, USDC.e or pathUSD that the contributor approves in Tempo Wallet, capped at the pledge: the money stays in their wallet until the swarm spends it, and what it does not spend goes back when the pledge ends. A transfer sends USDC.e, pathUSD or OUSD to the swarm's own wallet, and a daily budget lets the swarm pull up to an amount a day from the contributor's wallet; when the swarm is done, what its wallet did not spend goes back to those contributors pro rata. Transfers and budgets are made on the swarm's page or over the REST API. Contributors steer with money: any of the three may carry a note, money with the same note backs it together, every round reads the notes ranked by the money behind them, and a note that arrives while a round runs steers that round at once.",
+    "Contributors can also lend a swarm their own machine as a hand: swarm_hand issues one and returns the nanocode command (nc hand '<url>' --token <token>) and a nanocode-ts snippet (Hand.connect) to run on that machine. The swarm's lead agent and its explorers then run commands there in rounds paid from the swarm's wallet, and are told the machine belongs to a contributor. Issue a hand only when the user asks, and make sure they know the swarm's agents will run commands on the machine.",
     'To answer questions about what the swarms found or did, search first (swarms_search with keywords; set swarm to include that swarm\'s feed of tool calls, commands, machines and messages), then read what matched with swarm_rounds, swarm_answer, swarm_get or swarm_feed, and cite the swarm and round. swarms_list shows the funded swarms. Reading is free and needs no account.',
-    `Pledge only when the user asks to: swarm_pledge returns a Tempo Wallet link and user code to show the user, who approves on any device; then swarm_pledge_status with wait reports when it is active. A pledge is at least ${Memo.decimal(Store.minPledge)} of its token. swarm_wait waits up to ${Operations.maxWait} s for a running round to end.`,
+    `Fund only when the user asks to. swarm_pledge returns a Tempo Wallet link and user code to show the user, who approves on any device; then swarm_pledge_status with wait reports when it is active. swarm_budget returns a link to the swarm's page, where the user approves a daily budget in Tempo Wallet. swarm_contribute counts a transfer the user already sent to the swarm's wallet. A pledge is at least ${Memo.decimal(Store.minPledge)} of its token. swarm_wait waits up to ${Operations.maxWait} s for a running round to end.`,
   ].join('\n\n')
 }
 
@@ -132,6 +133,43 @@ function create(env: Cloudflare.Env, origin: string) {
         pledge: requested.pledge,
         swarm: input.swarm,
       })),
+  )
+
+  server.registerTool(
+    'swarm_contribute',
+    {
+      annotations: { destructiveHint: false, idempotentHint: true, openWorldHint: true, readOnlyHint: false },
+      description:
+        "Count a transfer the user already sent: a transferWithMemo of USDC.e, pathUSD or OUSD from their wallet to the swarm's wallet (swarm_get's wallet). Pass the transaction hash. A note counts only when the transfer's memo is keccak256(\"note:<swarm>:<note>\"); without a note any memo works (the page uses keccak256(\"swarm:<swarm>\")). A hash counts once; one counted without a note can get its note later. What the swarm does not spend goes back to its transfer and budget contributors pro rata when it is done.",
+      inputSchema: Operations.schema.contribution.shape,
+    },
+    async (input) => reply(await Operations.contribute(env, input), (value) => value.contributed),
+  )
+
+  server.registerTool(
+    'swarm_budget',
+    {
+      annotations: { destructiveHint: false, idempotentHint: true, openWorldHint: false, readOnlyHint: true },
+      description:
+        "Prepare a daily budget: the swarm may pull up to amount of a stablecoin (usdce, pathusd or ousd) a day from the user's wallet into its own, for 30 days, through a key that can only pay the swarm. Approving it needs Tempo Wallet in a browser, which has no device flow here, so this returns a link to the swarm's page with the budget filled in: show it to the user, who approves there. Call it only when the user asks to fund the swarm daily.",
+      inputSchema: Operations.schema.budget.shape,
+    },
+    async (input) =>
+      reply(await Operations.link(env, input, origin), (value) => ({
+        ...value,
+        message: `Open ${value.link} and approve the daily budget of ${value.amount} ${value.token} in Tempo Wallet.`,
+      })),
+  )
+
+  server.registerTool(
+    'swarm_hand',
+    {
+      annotations: { destructiveHint: false, idempotentHint: false, openWorldHint: true, readOnlyHint: false },
+      description:
+        "Issue a hand so the user can lend their own machine to a swarm. Returns a unique hand name, the CLI command to run on that machine (cli: nc hand '<url>' --token <token>; command installs nanocode first) and a nanocode-ts library snippet (library, after npm) that attaches with Hand.connect. Once it runs, the swarm's lead agent and explorers can run commands and read and write files there in rounds paid from the swarm's wallet (transfers and daily budgets), and are told it belongs to a contributor and to ask before anything destructive. The token is shown once: anyone holding it can attach a machine under that name. Stopping the command detaches the machine. Call it only when the user asks, and tell them what the swarm's agents will be able to do on it.",
+      inputSchema: Operations.schema.hand.shape,
+    },
+    async (input) => reply(await Operations.hand(env, input)),
   )
 
   server.registerTool(

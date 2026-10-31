@@ -36,6 +36,8 @@ export type Page = { events: Event[]; has_more: boolean; next_cursor: number }
 
 export type Hands = { hands: { connected: boolean; name: string }[] }
 
+export type Minted = { command: string; short: string; tab?: string; token: string; url: string }
+
 type Init = { body?: unknown; key?: string; method?: string }
 
 async function send<value>(env: Cloudflare.Env, path: string, init: Init = {}): Promise<Result<value>> {
@@ -145,4 +147,12 @@ export function stream(env: Cloudflare.Env, key: string, agent: string, after: n
 
 export function hands(env: Cloudflare.Env, key: string) {
   return send<Hands>(env, '/v1/hands', { key })
+}
+
+export function hand(env: Cloudflare.Env, key: string, name: string) {
+  return send<Minted>(env, `/v1/hands?name=${encodeURIComponent(name)}`, { key, method: 'POST' })
+}
+
+export function detach(env: Cloudflare.Env, key: string, name: string) {
+  return send<{ disconnected: boolean }>(env, `/v1/hands/${encodeURIComponent(name)}`, { key, method: 'DELETE' })
 }

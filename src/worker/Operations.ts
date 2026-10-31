@@ -13,7 +13,9 @@ import type {
   Entry,
   Found,
   Hit,
+  Issued,
   Kind,
+  Lent,
   Overview,
   Page,
   Pending,
@@ -27,11 +29,13 @@ import type {
   Waited,
 } from '../shared/Api.ts'
 import * as Answer from '../shared/Answer.ts'
+import * as Connect from '../shared/Connect.ts'
 import * as Memo from '../shared/Memo.ts'
 import * as Budget from './Budget.ts'
 import * as Chain from './Chain.ts'
 import * as Devices from './Devices.ts'
 import * as Gateway from './Gateway.ts'
+import * as Hands from './Hands.ts'
 import * as Problem from './Problem.ts'
 import * as Seal from './Seal.ts'
 import * as Search from './Search.ts'
@@ -116,6 +120,16 @@ export const schema = {
       .max(2000)
       .describe('What the swarm should find out or build, what done looks like and what each round should report.'),
     title: z.string().trim().min(3).max(80).describe('A short name for the swarm.'),
+  }),
+  hand: z.object({
+    label: z
+      .string()
+      .trim()
+      .max(32)
+      .regex(/^[\p{L}\p{N} ._-]*$/u, 'Use letters, digits, spaces, dots, underscores and hyphens.')
+      .optional()
+      .describe('A short name for the machine, such as "georgios-mbp". The hand name is made from it plus a random suffix.'),
+    swarm: id,
   }),
   feed: z.object({
     after: z.coerce.number().int().min(0).default(0).describe('Return entries after this seq; pass the previous page\'s next.'),
@@ -454,6 +468,68 @@ export async function wait(env: Cloudflare.Env, input: Input<'wait'>, signal?: A
     await sleep(Math.min(2000, deadline - Date.now()), signal)
     all = await stub(env, swarm).rounds()
   }
+}
+
+export async function hand(env: Cloudflare.Env, input: Input<'hand'>): Promise<Problem.Result<Issued>> {
+  const parsed = parse(schema.hand, input)
+  if (!parsed.ok) return parsed
+  const found = await Store.find(env, parsed.value.swarm)
+  if (!found) return missing()
+  if (found.status === 'done') return Problem.fail(409, 'conflict', 'This swarm is done.')
+  if ((await Hands.count(env, found.id)) >= Hands.limit)
+    return Problem.fail(409, 'conflict', `This swarm has ${Hands.limit} hands already.`)
+  const row = await provisioned(env, found)
+
+  const label = parsed.value.label ?? ''
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const name = await Hands.issue(env, row.id, label)
+    if (!name) break
+    const minted = await stub(env, row.id).hand(row.id, name)
+    if (minted.ok)
+      return Problem.ok({
+        cli: Connect.cli(minted.value),
+        command: minted.value.command,
+        label,
+        library: Connect.library({ name, token: minted.value.token, url: minted.value.url }),
+        name,
+        npm: Connect.install,
+        swarm: row.id,
+        tab: minted.value.tab ?? null,
+        token: minted.value.token,
+        url: minted.value.url,
+      })
+    await Hands.forget(env, row.id, name)
+    if (minted.status !== 409) return Problem.fail(502, 'upstream_failed', `The gateway did not issue the hand: ${minted.detail}`)
+  }
+  return Problem.fail(502, 'unavailable', 'No free hand name was found. Try again.')
+}
+
+export async function hands(env: Cloudflare.Env, input: Input<'swarm'>): Promise<Problem.Result<{ hands: Lent[] }>> {
+  const parsed = parse(schema.swarm, input)
+  if (!parsed.ok) return parsed
+  if (!(await Store.exists(env, parsed.value.swarm))) return missing()
+
+  const rows = await Hands.list(env, parsed.value.swarm)
+  const connected = rows.length ? new Set(await stub(env, parsed.value.swarm).lent()) : new Set<string>()
+  return Problem.ok({ hands: Hands.lent(rows, connected) })
+}
+
+export async function link(
+  env: Cloudflare.Env,
+  input: Input<'budget'>,
+  origin: string,
+): Promise<Problem.Result<{ link: string; token: string; amount: string; note: string | null; swarm: string }>> {
+  const parsed = parse(schema.budget, input)
+  if (!parsed.ok) return parsed
+  const request = parsed.value
+  const row = await Store.find(env, request.swarm)
+  if (!row) return missing()
+  if (row.status === 'done') return Problem.fail(409, 'conflict', 'This swarm is done.')
+
+  const amount = Memo.decimal(units(request.amount))
+  const note = request.note || null
+  const query = new URLSearchParams({ amount, fund: 'budget', token: request.token, ...(note ? { note } : {}) })
+  return Problem.ok({ amount, link: `${origin}/s/${row.id}?${query}`, note, swarm: row.id, token: request.token })
 }
 
 export async function pledges(env: Cloudflare.Env, input: Input<'swarm'>): Promise<Problem.Result<{ pledges: Pledge[] }>> {

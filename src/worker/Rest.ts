@@ -91,6 +91,12 @@ app.post('/v1/swarms/:id/budgets/:budget', async (c) =>
   ),
 )
 
+app.get('/v1/swarms/:id/hands', async (c) => Problem.respond(await Operations.hands(c.env, { swarm: c.req.param('id') })))
+
+app.post('/v1/swarms/:id/hands', async (c) =>
+  Problem.respond(await Operations.hand(c.env, { ...(await body(c.req.raw)), swarm: c.req.param('id') }), 201),
+)
+
 app.get('/v1/swarms/:id/pledges', async (c) => Problem.respond(await Operations.pledges(c.env, { swarm: c.req.param('id') })))
 
 app.post('/v1/swarms/:id/pledges', async (c) =>

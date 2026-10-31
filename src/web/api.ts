@@ -1,4 +1,4 @@
-import type { BudgetRequested, Budgeted, Config, Contributed, Currency, Detail, Entry, Pledged, Problem, Requested, Summary, Token } from '../shared/Api.ts'
+import type { BudgetRequested, Budgeted, Config, Contributed, Currency, Detail, Entry, Issued, Lent, Pledged, Problem, Requested, Summary, Token } from '../shared/Api.ts'
 import * as Fixtures from './fixtures.ts'
 
 export const fixture = new URLSearchParams(location.search).has('fixture')
@@ -64,6 +64,16 @@ export function budget(id: string, input: { amount: string; note?: string; token
 
 export function allow(id: string, budget: string, keyAuthorization: unknown) {
   return fixture ? Fixtures.allow(id, budget) : request<Budgeted>(`${path(id)}/budgets/${encodeURIComponent(budget)}`, { keyAuthorization })
+}
+
+export function hands(id: string) {
+  return fixture ? Promise.resolve({ hands: [] as Lent[] }) : request<{ hands: Lent[] }>(`${path(id)}/hands`)
+}
+
+export function hand(id: string, label: string) {
+  return fixture
+    ? Promise.reject(new Failure({ detail: 'Hands need the live site.' }, 503))
+    : request<Issued>(`${path(id)}/hands`, label ? { label } : {})
 }
 
 export function confirm(id: string, pledge: string, keyAuthorization: unknown) {

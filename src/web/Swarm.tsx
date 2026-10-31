@@ -4,6 +4,7 @@ import type { Config, Detail, Entry, Note, Round } from '../shared/Api.ts'
 import * as Api from './api.ts'
 import { Feed } from './Feed.tsx'
 import { Budgets, Contributions, Pledges } from './Backing.tsx'
+import { Connect } from './Connect.tsx'
 import { Box } from './Contribute.tsx'
 import { ago, duration, mach, percent, short, usd } from './format.ts'
 import { type Draft, useLive, useMedia, useNow, usePoll } from './hooks.ts'
@@ -125,6 +126,7 @@ export function Swarm(props: { config: Config | undefined; id: string; onTitle: 
         <aside className="swarm-side">
           <Ledger config={props.config} swarm={swarm} />
           <Box config={props.config} note={note} noteRef={box} onDone={reload} onNote={setNote} swarm={swarm} />
+          <Connect swarm={swarm} />
         </aside>
       </section>
 

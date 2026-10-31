@@ -155,6 +155,27 @@ const schemas = {
     terms: { description: 'The words searched for.', items: string, type: 'array' },
   }),
   Hand: object({ connected: { type: 'boolean' }, name: string }),
+  Issued: object(
+    {
+      cli: { description: "Run on the machine to lend it: nc hand '<url>' --token <token>.", type: 'string' },
+      command: { description: 'The same, after installing nanocode.', type: 'string' },
+      label: string,
+      library: { description: 'A Node module that attaches the hand with nanocode-ts Hand.connect.', type: 'string' },
+      name: { description: 'The hand name, unique in the swarm.', type: 'string' },
+      npm: { description: 'Installs nanocode-ts for the library form.', type: 'string' },
+      swarm: string,
+      tab: nullable({ description: 'nanocode.xyz/hand with the URL and token, to attach a browser tab.', type: 'string' }),
+      token: { description: 'The hand token. Anyone holding it can attach a machine under this name.', type: 'string' },
+      url: { description: 'The hand socket.', type: 'string' },
+    },
+    "A hand for a contributor's machine.",
+  ),
+  Lent: object({
+    at: time,
+    connected: { type: 'boolean' },
+    label: string,
+    name: string,
+  }),
   Hit: object({
     at: nullable(time),
     entry: nullable(object({ kind: { enum: [...Operations.kinds], type: 'string' }, seq: integer })),
@@ -405,6 +426,23 @@ export function document(origin: string) {
             ...failures(400, 404, 409, 502),
           },
           summary: 'Count a transfer',
+        },
+      },
+      '/v1/swarms/{id}/hands': {
+        get: {
+          operationId: 'listHands',
+          parameters: [swarm],
+          responses: { ...ok(object({ hands: { items: ref('Lent'), type: 'array' } }), 'Hands issued for contributor machines, newest first.'), ...failures(404) },
+          summary: 'List contributor hands',
+        },
+        post: {
+          description:
+            "Issues a hand for a contributor's own machine: a unique name under the swarm's own gateway key, with the nanocode CLI command and a nanocode-ts snippet that attach it. The swarm's lead agent and explorers use connected hands in rounds paid from the swarm's wallet, and are told they belong to contributors.",
+          operationId: 'issueHand',
+          parameters: [swarm],
+          requestBody: { content: { 'application/json': { schema: input(Operations.schema.hand.omit({ swarm: true })) } } },
+          responses: { ...ok(ref('Issued'), 'The hand.', '201'), ...failures(400, 404, 409, 502) },
+          summary: 'Issue a hand',
         },
       },
       '/v1/swarms/{id}/pledges': {

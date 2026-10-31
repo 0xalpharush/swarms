@@ -1,5 +1,6 @@
 import { type ReactNode, useState } from 'react'
 import type { Config } from '../shared/Api.ts'
+import * as Connect from '../shared/Connect.ts'
 import { mach } from './format.ts'
 
 export const origin = location.origin
@@ -14,6 +15,9 @@ const tools = [
   ['swarm_create', 'Start a swarm with a title and a goal. It waits until money comes in.'],
   ['swarm_pledge', 'Pledge MACH, with an optional note. Returns a Tempo Wallet link and code for the user.'],
   ['swarm_pledge_status', 'Polls a pending pledge and activates it once the user approves.'],
+  ['swarm_contribute', "Counts a transfer the user already sent to the swarm's wallet."],
+  ['swarm_budget', "A link to the swarm's page with a daily budget filled in, to approve in Tempo Wallet."],
+  ['swarm_hand', 'Issues a hand to lend a machine: the nc hand command and a nanocode-ts snippet.'],
   ['swarm_wait', 'Waits up to 55 s for the running round to end and returns its report.'],
 ] as const
 
@@ -30,6 +34,8 @@ const routes = [
   ['GET', '/v1/swarms/:id/search', 'Search one swarm, its feed included.', '?q=<words>'],
   ['GET', '/v1/swarms/:id/pledges', 'Approved pledges, newest first.', ''],
   ['POST', '/v1/swarms/:id/pledges', 'Start a pledge.', '{ amount, note?, device? }'],
+  ['GET', '/v1/swarms/:id/hands', 'Hands issued for contributor machines, and which are connected.', ''],
+  ['POST', '/v1/swarms/:id/hands', 'Issue a hand to lend a machine.', '{ label? }'],
   ['GET', '/v1/swarms/:id/pledges/:pledge', 'Pledge status; polls Tempo Wallet while pending.', '?wait=<s>'],
   ['POST', '/v1/swarms/:id/pledges/:pledge', 'Approve with a key authorization or transaction, or poll.', '{ keyAuthorization } | { transaction } | {}'],
   ['POST', '/v1/swarms/:id/contributions', "Count a transfer of USDC.e, pathUSD or OUSD to the swarm's wallet.", '{ hash, note? }'],
@@ -240,7 +246,38 @@ export function Docs(props: { config: Config | undefined }) {
         <Code>{`curl -s ${origin}/v1/swarms/<id>/budgets -H 'content-type: application/json' \\\n  -d '{"token":"usdce","amount":"1","note":"Add HTTP/2"}'`}</Code>
       </Section>
 
-      <Section id="errors" index="4" intro={<p>Every error is problem JSON: {'{ code, detail, status }'}. Branch on code; detail is for people.</p>} title="Errors">
+      <Section
+        id="hands"
+        index="4"
+        intro={
+          <>
+            <p>
+              Lend a swarm your own machine as a nanocode hand. Its lead agent and explorers run commands and read and write files there, and are told it belongs to a contributor: they work in a folder of their own and ask in their report before anything destructive.
+            </p>
+            <p className="fine">Hands live under the swarm's own gateway key, so they serve rounds paid from the swarm's wallet. Rounds paid by a MACH pledge run on that contributor's key and cannot reach them.</p>
+          </>
+        }
+        title="Hands"
+      >
+        <h3 className="docs-head">1. Issue</h3>
+        <Code>{`curl -s ${origin}/v1/swarms/<id>/hands -H 'content-type: application/json' -d '{"label":"my-laptop"}'`}</Code>
+        <p className="docs-text">
+          The answer has a unique <code>name</code>, the <code>token</code>, the socket <code>url</code>, and both forms below filled in. The token is shown once; anyone holding it can attach a machine under that name.
+        </p>
+        <h3 className="docs-head">2. Run the CLI</h3>
+        <Code>{`curl -fsSL https://nanocode.xyz/install | sh\nnc hand '<url>' --token <token> -C ~/swarm-work`}</Code>
+        <p className="docs-text">
+          The hand starts in <code>-C</code>'s folder and reconnects until you stop it, or until the swarm is done.
+        </p>
+        <h3 className="docs-head">Or use nanocode-ts</h3>
+        <Code>{Connect.install}</Code>
+        <Code label="hand.mjs">{Connect.library({ name: '<name>', token: '<token>', url: '<url>' })}</Code>
+        <p className="docs-text">
+          This serves nanocode's in-memory shell. Pass any <code>workspace</code> to <code>Hand.connect</code> to serve something else.
+        </p>
+      </Section>
+
+      <Section id="errors" index="5" intro={<p>Every error is problem JSON: {'{ code, detail, status }'}. Branch on code; detail is for people.</p>} title="Errors">
         <table className="docs-table">
           <tbody>
             {codes.map((code) => (
