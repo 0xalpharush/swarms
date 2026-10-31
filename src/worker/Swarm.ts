@@ -796,7 +796,7 @@ export class Swarm extends DurableObject<Cloudflare.Env> {
       if (previous.has(hand.name)) continue
       const guest = issued.get(hand.name)
       if (guest) joined.push({ ...guest, terms: Hands.terms(hand) })
-      if (guest && 'cap' in hand && this.kv.get<string>('turn')) await Gateway.cap(this.env, row.id, hand.name, Memo.decimal(BigInt(this.kv.get<string>('handCap') ?? '0')))
+      if (guest && 'cap' in hand && this.kv.get<string>('turn')) await Gateway.cap(this.env, row.id, hand.name, Number(Memo.decimal(BigInt(this.kv.get<string>('handCap') ?? '0'))))
       this.log(
         'machine',
         guest
@@ -1131,7 +1131,7 @@ export class Swarm extends DurableObject<Cloudflare.Env> {
     this.kv.put('handCap', String(amount))
     const listed = await Gateway.hands(this.env, row.id)
     if (!listed.ok) return
-    for (const hand of listed.value.hands.filter((found) => 'cap' in found)) await Gateway.cap(this.env, row.id, hand.name, Memo.decimal(amount))
+    for (const hand of listed.value.hands.filter((found) => found.connected && 'cap' in found)) await Gateway.cap(this.env, row.id, hand.name, Number(Memo.decimal(amount)))
   }
 
   async welcome(swarm: string, joined: Guest[]) {

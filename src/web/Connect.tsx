@@ -77,14 +77,14 @@ export function Connect(props: { swarm: Summary }) {
           {form === 'cli' ? (
             <>
               <Code>{issued.cli}</Code>
-              <p className="fine">Start it in a folder you are happy to share, or add -C &lt;folder&gt;. Without nanocode, this installs it and runs the same hand:</p>
+              <p className="fine">Start it in a folder you are happy to share, or add -C &lt;folder&gt;. To charge for what it holds, add --pricing prices.json with your payee address, a description and price rules, such as {'{'}"payee":"0x…","describe":"Q3 data, $0.01 a file","rules":[{'{'}"paths":["data/**"],"ops":["read"],"usd":0.01{'}'}]{'}'}. Without nanocode, this installs it and runs the same hand:</p>
               <Code>{issued.command}</Code>
             </>
           ) : (
             <>
               <Code>{issued.npm}</Code>
               <Code label="hand.mjs">{issued.library}</Code>
-              <p className="fine">This hand runs nanocode's in-memory shell. Pass your own workspace to Hand.connect to serve something else.</p>
+              <p className="fine">This hand runs nanocode's in-memory shell. Pass your own workspace to Hand.connect to serve something else, and pricing ({'{'} payee, describe, price(operation) {'}'}) to charge for it.</p>
             </>
           )}
         </div>

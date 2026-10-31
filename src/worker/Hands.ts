@@ -50,13 +50,21 @@ export async function forget(env: Cloudflare.Env, swarm: string, name: string) {
 export const share = 5n
 
 export function terms(listed: Listed | undefined): Terms {
-  const text = (value: unknown) => (typeof value === 'string' ? value : typeof value === 'number' ? String(value) : null)
+  const pricing = listed?.['pricing'] as { describe?: unknown; payee?: unknown } | null | undefined
+  const charges = listed?.['charges'] as { count?: unknown; usd?: unknown } | null | undefined
+  const earned = listed?.['earned']
+  const paid = listed?.['paid']
+  const count = typeof charges?.count === 'number' ? charges.count : 0
   return {
-    charged: text(listed?.['charged']),
-    earned: text(listed?.['earned']),
-    price: text(listed?.['price']) ?? text(listed?.['pricing']),
+    charged: count ? `${usd(charges?.usd)} for ${count} operation${count === 1 ? '' : 's'}` : null,
+    earned: typeof earned === 'number' && earned > 0 ? `${usd(earned)}${typeof paid === 'number' ? `, ${usd(paid)} paid out` : ''}` : null,
+    price: pricing ? `${typeof pricing.describe === 'string' && pricing.describe ? pricing.describe : 'priced by its owner'}${typeof pricing.payee === 'string' ? ` (paid to ${pricing.payee.slice(0, 6)}…${pricing.payee.slice(-4)})` : ''}` : null,
     requests: typeof listed?.['requests'] === 'number' ? listed['requests'] : 0,
   }
+}
+
+function usd(value: unknown) {
+  return '$' + (typeof value === 'number' ? Number(value.toFixed(6)) : 0)
 }
 
 export function lent(rows: readonly Row[], listed: readonly Listed[]): Lent[] {

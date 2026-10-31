@@ -120,8 +120,8 @@ export function hand(env: Cloudflare.Env, swarm: string, name: string) {
   return send<Minted>(env, `/v1/hands?name=${encodeURIComponent(name)}`, { app: app(swarm), method: 'POST' })
 }
 
-export function cap(env: Cloudflare.Env, swarm: string, name: string, usd: string) {
-  return send<unknown>(env, `/v1/hands/${encodeURIComponent(name)}`, { app: app(swarm), body: { cap: usd }, method: 'PATCH' })
+export function cap(env: Cloudflare.Env, swarm: string, name: string, usd: number) {
+  return send<unknown>(env, `/v1/hands/${encodeURIComponent(name)}/cap`, { app: app(swarm), body: { usd } })
 }
 
 export function detach(env: Cloudflare.Env, swarm: string, name: string) {
