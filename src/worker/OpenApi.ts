@@ -193,9 +193,13 @@ const schemas = {
   ),
   Lent: object({
     at: time,
+    charged: nullable({ description: 'What the hand has charged this swarm, as the gateway reports it.', type: 'string' }),
     connected: { type: 'boolean' },
+    earned: nullable({ description: "What the hand's owner has earned, as the gateway reports it.", type: 'string' }),
     label: string,
     name: string,
+    price: nullable({ description: "The prices the hand set for itself, as the gateway summarizes them; null when it charges nothing.", type: 'string' }),
+    requests: { description: 'Requests the gateway dispatched to the hand.', type: 'integer' },
   }),
   Hit: object({
     at: nullable(time),

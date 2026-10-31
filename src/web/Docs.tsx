@@ -254,7 +254,7 @@ export function Docs(props: { config: Config | undefined }) {
             <p>
               Lend a swarm your own machine as a nanocode hand. Its lead agent and explorers run commands and read and write files there, and are told it belongs to a contributor: they work in a folder of their own and ask in their report before anything destructive.
             </p>
-            <p className="fine">Hands live under the swarm's own gateway app, so every round can use them, whichever contribution pays for it.</p>
+            <p className="fine">Hands live under the swarm's own gateway app, so every round can use them, whichever contribution pays for it. A hand can set its own prices, such as a price per file; the swarm pays them through the gateway from its money, and caps what each hand may charge in a round at a fifth of what the round may spend.</p>
           </>
         }
         title="Hands"

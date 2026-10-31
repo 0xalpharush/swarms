@@ -33,7 +33,7 @@ export function Connect(props: { swarm: Summary }) {
     try {
       const hand = await Api.hand(props.swarm.id, label.trim())
       setIssued(hand)
-      setLent((current) => [{ at: Date.now(), connected: false, label: hand.label, name: hand.name }, ...current])
+      setLent((current) => [{ at: Date.now(), charged: null, connected: false, earned: null, label: hand.label, name: hand.name, price: null, requests: 0 }, ...current])
       setState({})
     } catch (error) {
       setState({ error: message(error) })
@@ -44,7 +44,7 @@ export function Connect(props: { swarm: Summary }) {
     <div className="pledge connect" id="connect">
       <h3 className="label">Connect your machine</h3>
       <p className="fine">
-        Lend this swarm your computer as a nanocode hand. Its lead agent and explorers run commands and read and write files there in rounds paid from the swarm's wallet, and are told the machine is yours and to ask before anything destructive. Stop the command to take it back.
+        Lend this swarm your computer and what is on it as a nanocode hand. Its lead agent and explorers run commands and read and write files there, and are told the machine and its data are yours and to ask before anything destructive. Your hand can set its own prices, such as a price per file; the swarm pays them through the gateway from its money, and caps what each hand may charge in a round at a fifth of what the round may spend. Stop the command to take it back.
       </p>
       {done && <p className="fine">This swarm is done and takes no more hands.</p>}
       {!done && !issued && (
@@ -95,6 +95,7 @@ export function Connect(props: { swarm: Summary }) {
           {lent.slice(0, 8).map((hand) => (
             <li data-connected={hand.connected} key={hand.name}>
               <span>{hand.name}</span>
+              <span>{[hand.price ?? 'free', `${hand.requests} request${hand.requests === 1 ? '' : 's'}`, hand.charged && `${hand.charged} charged`, hand.earned && `${hand.earned} earned`].filter(Boolean).join(' · ')}</span>
               <span>{hand.connected ? 'Connected' : 'Offline'}</span>
             </li>
           ))}

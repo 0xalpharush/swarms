@@ -1,4 +1,5 @@
-import type { Lent } from '../shared/Api.ts'
+import type { Lent, Terms } from '../shared/Api.ts'
+import type { Listed } from './Gateway.ts'
 
 export type Row = { created_at: number; label: string; name: string; swarm: string }
 
@@ -46,6 +47,21 @@ export async function forget(env: Cloudflare.Env, swarm: string, name: string) {
   await env.DB.prepare('delete from hands where swarm = ? and name = ?').bind(swarm, name).run()
 }
 
-export function lent(rows: readonly Row[], connected: ReadonlySet<string>): Lent[] {
-  return rows.map((row) => ({ at: row.created_at, connected: connected.has(row.name), label: row.label, name: row.name }))
+export const share = 5n
+
+export function terms(listed: Listed | undefined): Terms {
+  const text = (value: unknown) => (typeof value === 'string' ? value : typeof value === 'number' ? String(value) : null)
+  return {
+    charged: text(listed?.['charged']),
+    earned: text(listed?.['earned']),
+    price: text(listed?.['price']) ?? text(listed?.['pricing']),
+    requests: typeof listed?.['requests'] === 'number' ? listed['requests'] : 0,
+  }
+}
+
+export function lent(rows: readonly Row[], listed: readonly Listed[]): Lent[] {
+  return rows.map((row) => {
+    const found = listed.find((hand) => hand.name === row.name)
+    return { at: row.created_at, connected: !!found?.connected, label: row.label, name: row.name, ...terms(found) }
+  })
 }

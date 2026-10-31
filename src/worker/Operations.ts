@@ -536,8 +536,7 @@ export async function hands(env: Cloudflare.Env, input: Input<'swarm'>): Promise
   if (!(await Store.exists(env, parsed.value.swarm))) return missing()
 
   const rows = await Hands.list(env, parsed.value.swarm)
-  const connected = rows.length ? new Set(await stub(env, parsed.value.swarm).lent()) : new Set<string>()
-  return Problem.ok({ hands: Hands.lent(rows, connected) })
+  return Problem.ok({ hands: Hands.lent(rows, rows.length ? await stub(env, parsed.value.swarm).lent() : []) })
 }
 
 export async function transfer(env: Cloudflare.Env, input: Input<'transfer'>, origin: string): Promise<Problem.Result<Prepared>> {

@@ -21,7 +21,9 @@ export type Event = {
 
 export type Page = { events: Event[]; has_more: boolean; next_cursor: number }
 
-export type Hands = { hands: { connected: boolean; name: string }[] }
+export type Listed = { connected: boolean; name: string } & Record<string, unknown>
+
+export type Hands = { hands: Listed[] }
 
 export type Minted = { command: string; short: string; tab?: string; token: string; url: string }
 
@@ -116,6 +118,10 @@ export function hands(env: Cloudflare.Env, swarm: string) {
 
 export function hand(env: Cloudflare.Env, swarm: string, name: string) {
   return send<Minted>(env, `/v1/hands?name=${encodeURIComponent(name)}`, { app: app(swarm), method: 'POST' })
+}
+
+export function cap(env: Cloudflare.Env, swarm: string, name: string, usd: string) {
+  return send<unknown>(env, `/v1/hands/${encodeURIComponent(name)}`, { app: app(swarm), body: { cap: usd }, method: 'PATCH' })
 }
 
 export function detach(env: Cloudflare.Env, swarm: string, name: string) {
