@@ -97,6 +97,8 @@ export function Broadcast(props: { live: Live; onEntries: (entries: readonly Ent
   const initial = useMemo(asked, [])
   const [chosen, setChosen] = useState<number | undefined>(initial.round)
   const [focus, setFocus] = useState(initial.who)
+  const [directing, setDirecting] = useState(initial.who === 'lead')
+  const cut = useRef(0)
   const tick = useNow(1000)
   const round = swarm.history.find((item) => item.n === chosen) ?? swarm.history.at(-1)
   const number = round?.n ?? 1
@@ -165,7 +167,27 @@ export function Broadcast(props: { live: Live; onEntries: (entries: readonly Ent
     }
   }, [swarm.id, number, member.id, started])
 
+  const latest = useMemo(() => {
+    let best = { at: 0, who: 'lead' }
+    for (const [who, stream] of Object.entries(props.live.streams)) if (stream.at > best.at) best = { at: stream.at, who }
+    const last = entries.at(-1)
+    if (last && last.seq === 0 && last.at > best.at) best = { at: last.at, who: speaker(last.who) }
+    return best.who
+  }, [props.live.streams, entries])
+
+  const ids = party.map((item) => item.id).join(' ')
+  useEffect(() => {
+    if (!directing || !onAir || latest === focus || !ids.split(' ').includes(latest)) return
+    const wait = cut.current + 6000 - Date.now()
+    const timer = setTimeout(() => {
+      cut.current = Date.now()
+      setFocus(latest)
+    }, Math.max(0, wait))
+    return () => clearTimeout(timer)
+  }, [directing, onAir, latest, focus, ids])
+
   const select = (id: string) => {
+    setDirecting(false)
     setFocus(id)
     if (matchMedia('(max-width: 799px)').matches) requestAnimationFrame(() => document.getElementById('broadcast-stage')?.scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth', block: 'start' }))
   }
@@ -187,6 +209,7 @@ export function Broadcast(props: { live: Live; onEntries: (entries: readonly Ent
         <span>{duration((round.endedAt ?? tick) - round.startedAt)}</span>
         <span>{airing ? `${working} of ${members.length} explorer${members.length === 1 ? '' : 's'} at work` : `${members.length} explorer${members.length === 1 ? '' : 's'}`}</span>
         <Pulse entries={entries} end={round.endedAt ?? tick} start={round.startedAt} />
+        {onAir && <button aria-pressed={directing} className="director" onClick={() => setDirecting(!directing)} title="Cut to whoever is working, as a broadcast director would" type="button">{directing ? 'Following the action' : 'Follow the action'}</button>}
         <span className="broadcast-fuel">{round.status === 'running' ? `${usd(swarm.remaining)} left` : `${usd(round.spent)} spent`}</span>
       </header>
       <Rounds chosen={number} history={swarm.history} onChoose={(n) => { setChosen(n === swarm.history.at(-1)?.n ? undefined : n); setFocus('lead') }} />

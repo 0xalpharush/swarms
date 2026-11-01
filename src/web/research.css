@@ -180,6 +180,8 @@
 .broadcast-badge[data-live='true'] { background:#d93025; color:var(--white); }
 .broadcast-badge[data-live='true'] i { animation:broadcast-dot 1.4s ease-in-out infinite; }
 .broadcast-fuel { margin-left:auto; color:var(--black); }
+.director { padding:5px 10px; border:1px solid #c5d4b6; border-radius:999px; background:var(--white); font:11px var(--mono); color:#44523f; cursor:pointer; }
+.director[aria-pressed='true'] { background:#1a3d2c; border-color:#1a3d2c; color:var(--white); }
 .pulse { display:inline-flex; align-items:flex-end; gap:2px; width:110px; height:20px; }
 .pulse i { flex:1; min-height:2px; border-radius:1px; background:#b7cda1; }
 .broadcast[data-live='true'] .pulse i:last-child { background:#d93025; }
