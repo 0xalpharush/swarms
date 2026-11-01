@@ -92,7 +92,7 @@ export function Swarm(props: { config: Config | undefined; id: string }) {
       {swarm.status !== 'running' && <p className="banner">{swarm.status === 'done' ? 'Done. The answer below is what the swarm found.' : swarm.reason ?? (swarm.status === 'paused' ? 'Paused: the money is used up. A contribution, budget or pledge starts the next round.' : 'No money behind it yet. The first contribution starts round 1.')}</p>}
       {live && <Broadcast entries={entries} live={stream} onEntries={(next) => setEntries((previous) => merge(previous, next))} swarm={swarm} />}
       {(swarm.answer || live) && (
-        <section className="quest-findings">
+        <section className="quest-findings" id="answer">
           <h2 className="answer-head">{swarm.status === 'done' ? 'Answer' : 'Latest answer'}</h2>
           <Latest draft={draft} swarm={swarm} />
         </section>

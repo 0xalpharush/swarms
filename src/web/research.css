@@ -233,6 +233,11 @@
 .caret { display:inline-block; width:7px; height:1em; margin-left:2px; vertical-align:-2px; background:#3f7d4e; animation:caret 1s steps(1) infinite; }
 .stage-result { margin-top:22px; padding-top:16px; border-top:1px solid #e3e9dd; }
 .stage-result > .markdown { margin-top:10px; }
+.stage-result > summary { cursor:pointer; }
+.stage-answered { margin-top:18px; padding-top:14px; border-top:1px solid #e3e9dd; font-size:14px; color:var(--grey-600); }
+.moment-message { position:relative; }
+.moment-message[data-open='false'] { max-height:14em; overflow:hidden; -webkit-mask-image:linear-gradient(#000 70%,transparent); mask-image:linear-gradient(#000 70%,transparent); }
+.quest-findings { scroll-margin-top:85px; }
 .result-fields { margin-top:10px; }
 .result-fields dt { font:11px var(--mono); text-transform:uppercase; letter-spacing:.05em; color:#5c7350; }
 .result-fields dd { margin:4px 0 16px; font-size:15px; line-height:1.45; overflow-wrap:anywhere; }

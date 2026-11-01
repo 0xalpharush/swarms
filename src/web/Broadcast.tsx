@@ -5,7 +5,7 @@ import { ago, clock, duration, usd } from './format.ts'
 import { type Broadcast as Live, type Stream, speaker, useNow } from './hooks.ts'
 import { Markdown } from './Markdown.tsx'
 
-const labels = { pending: 'Joining', running: 'Exploring', completed: 'Reported', failed: 'Needs help', interrupted: 'Paused', closing: 'Stopping', closed: 'Stopped' } as const
+const labels = { pending: 'Joining', running: 'Exploring', completed: 'Reported', failed: 'Failed', interrupted: 'Paused', closing: 'Stopping', closed: 'Stopped' } as const
 
 const palette = ['#3f7d4e', '#8a5a2b', '#3d6a8f', '#8c3f5e', '#6b6a1f', '#5b4b8a', '#a0522d', '#2f7f7a']
 
@@ -127,6 +127,11 @@ export function Broadcast(props: { live: Live; onEntries: (entries: readonly Ent
   }, [chosen, member.id])
 
   useEffect(() => {
+    if (initial.round === undefined && initial.who === 'lead') return
+    requestAnimationFrame(() => document.getElementById('broadcast')?.scrollIntoView({ block: 'start' }))
+  }, [initial])
+
+  useEffect(() => {
     if (focus === 'lead' || party.some((item) => item.id === focus)) return
     const elsewhere = swarm.researchers.find((item) => item.id === focus)
     if (elsewhere && elsewhere.round !== number) setChosen(elsewhere.round)
@@ -175,7 +180,7 @@ export function Broadcast(props: { live: Live; onEntries: (entries: readonly Ent
     )
 
   return (
-    <section aria-label="Live research" className="broadcast" data-live={onAir}>
+    <section aria-label="Live research" className="broadcast" data-live={onAir} id="broadcast">
       <header className="broadcast-bar">
         <span className="broadcast-badge" data-live={onAir}><i />{onAir ? 'LIVE' : airing ? 'CONNECTING' : 'REPLAY'}</span>
         <h2>Round {number}</h2>
@@ -186,7 +191,7 @@ export function Broadcast(props: { live: Live; onEntries: (entries: readonly Ent
       </header>
       <Rounds chosen={number} history={swarm.history} onChoose={(n) => { setChosen(n === swarm.history.at(-1)?.n ? undefined : n); setFocus('lead') }} />
       <div className="broadcast-grid">
-        <Stage airing={airing} entries={entries.filter((entry) => speaker(entry.who) === member.id)} member={member} members={members} names={names} onFocus={select} path={path} round={round} stream={props.live.streams[member.id]} />
+        <Stage airing={airing} answered={swarm.answer?.round === number} entries={entries.filter((entry) => speaker(entry.who) === member.id)} member={member} members={members} names={names} onFocus={select} path={path} round={round} stream={props.live.streams[member.id]} />
         <aside aria-label="Directions" className="directions">
           <p className="label">Directions this round</p>
           <ol className="direction-list">
@@ -204,7 +209,7 @@ export function Broadcast(props: { live: Live; onEntries: (entries: readonly Ent
             })}
           </ol>
           {!members.length && <p className="direction-empty">{airing ? 'No explorers yet. The lead sends them out when a direction is worth a second pair of hands.' : 'No explorers were recorded for this round.'}</p>}
-          <Ticker entries={entries} names={names} onFocus={select} />
+          <Ticker entries={entries} live={airing} names={names} onFocus={select} />
         </aside>
       </div>
     </section>
@@ -239,7 +244,7 @@ function Pulse(props: { end: number; entries: readonly Entry[]; start: number })
   )
 }
 
-function Stage(props: { airing: boolean; entries: readonly Entry[]; member: Member; members: readonly Member[]; names: ReadonlyMap<string, string>; onFocus: (id: string) => void; path: readonly Member[]; round: Round; stream: Stream | undefined }) {
+function Stage(props: { airing: boolean; answered: boolean; entries: readonly Entry[]; member: Member; members: readonly Member[]; names: ReadonlyMap<string, string>; onFocus: (id: string) => void; path: readonly Member[]; round: Round; stream: Stream | undefined }) {
   const member = props.member
   const time = useNow(5000)
   const children = props.members.filter((item) => (member.id === 'lead' ? item.depth === 1 : item.parent === member.id))
@@ -266,11 +271,12 @@ function Stage(props: { airing: boolean; entries: readonly Entry[]; member: Memb
       )}
       <Timeline entries={props.entries} live={live} members={props.members} onFocus={props.onFocus} />
       {live && <Now member={member} stream={props.stream} />}
-      {result && (
-        <div className="stage-result">
-          <p className="label">{member.id === 'lead' ? 'Round report' : 'Result'}</p>
+      {result && member.id === 'lead' && props.answered && <p className="stage-answered">This round's report is the answer above. <a href="#answer">Read it ↑</a></p>}
+      {result && !(member.id === 'lead' && props.answered) && (
+        <details className="stage-result" open={member.id !== 'lead'}>
+          <summary className="label">{member.id === 'lead' ? 'Round report' : 'Result'}</summary>
           {fields ? <dl className="result-fields">{fields.map(([name, value]) => <div key={name}><dt>{name.replace(/_/g, ' ')}</dt><dd>{typeof value === 'string' ? <Markdown text={value} /> : <pre>{JSON.stringify(value, null, 2)}</pre>}</dd></div>)}</dl> : <Markdown text={result} />}
-        </div>
+        </details>
       )}
     </div>
   )
@@ -348,8 +354,8 @@ function Moment(props: { entry: Entry; onFocus: (id: string) => void; target: Me
       <time dateTime={new Date(entry.at).toISOString()}>{clock(entry.at)}</time>
       <span className="moment-kind">{kinds[entry.kind]}</span>
       <div className="moment-body">
-        {entry.kind === 'message' ? <Markdown text={entry.text} /> : entry.kind === 'output' ? <pre className="moment-output" data-open={open}>{detail ?? entry.text}</pre> : props.target ? <button className="moment-link" onClick={() => props.target && props.onFocus(props.target.id)} type="button">{entry.text} →</button> : <p className={entry.kind === 'thinking' ? 'moment-thought' : 'moment-text'}>{entry.text}</p>}
-        {entry.kind === 'output' && (detail ?? '').split('\n').length > 6 && <button className="entry-toggle" onClick={() => setOpen(!open)} type="button">{open ? '[−] less' : '[+] all of it'}</button>}
+        {entry.kind === 'message' ? <div className="moment-message" data-open={open}><Markdown text={entry.text} /></div> : entry.kind === 'output' ? <pre className="moment-output" data-open={open}>{detail ?? entry.text}</pre> : props.target ? <button className="moment-link" onClick={() => props.target && props.onFocus(props.target.id)} type="button">{entry.text} →</button> : <p className={entry.kind === 'thinking' ? 'moment-thought' : 'moment-text'}>{entry.text}</p>}
+        {((entry.kind === 'output' && (detail ?? '').split('\n').length > 6) || (entry.kind === 'message' && (entry.text.length > 700 || entry.text.split('\n').length > 10))) && <button className="entry-toggle" onClick={() => setOpen(!open)} type="button">{open ? '[−] less' : '[+] all of it'}</button>}
         {entry.kind !== 'output' && entry.kind !== 'message' && detail && (
           <>
             <button aria-expanded={open} className="entry-toggle" onClick={() => setOpen(!open)} type="button">{open ? '[−] detail' : entry.kind === 'tool' ? '[+] code' : '[+] detail'}</button>
@@ -361,12 +367,12 @@ function Moment(props: { entry: Entry; onFocus: (id: string) => void; target: Me
   )
 }
 
-function Ticker(props: { entries: readonly Entry[]; names: ReadonlyMap<string, string>; onFocus: (id: string) => void }) {
+function Ticker(props: { entries: readonly Entry[]; live: boolean; names: ReadonlyMap<string, string>; onFocus: (id: string) => void }) {
   const recent = props.entries.filter((entry) => entry.kind !== 'output').slice(-14)
   if (!recent.length) return null
   return (
     <div className="ticker">
-      <p className="label">Everyone, as it happens</p>
+      <p className="label">{props.live ? 'Everyone, as it happens' : 'Everyone, last moments of the round'}</p>
       <ol>
         {recent.map((entry) => {
           const who = speaker(entry.who)
