@@ -4,7 +4,7 @@ export type Step = { detail: string | null; kind: Kind; text: string }
 
 export type Buffers = { add(who: string | null, text: string): void; take(who: string | null): string }
 
-const quiet = new Set(['write_stdin', 'wait', 'wait_agent', 'list_agents'])
+const quiet = new Set(['write_stdin', 'wait', 'wait_agent', 'list_agents', 'spawn_agent'])
 
 export function clip(text: string, length: number) {
   return text.length > length ? text.slice(0, length - 1) + '…' : text

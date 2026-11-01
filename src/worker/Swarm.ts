@@ -1339,6 +1339,7 @@ function live(context: Viewing) {
   return new TransformStream<Uint8Array, Uint8Array>({
     start(controller) {
       controller.enqueue(send({ round: context.round, type: 'round' }))
+      for (const researcher of context.known.values()) if (researcher.round === context.round) controller.enqueue(send({ researcher, type: 'researcher' }))
     },
     transform(chunk, controller) {
       buffer += decoder.decode(chunk, { stream: true })
