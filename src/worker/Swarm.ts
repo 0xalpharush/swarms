@@ -126,6 +126,8 @@ const perCall = 40_000n
 
 const recentMs = 10_000
 
+const holdMs = 90_000
+
 const confirmMs = 8_000
 
 export class Swarm extends DurableObject<Cloudflare.Env> {
@@ -706,6 +708,7 @@ export class Swarm extends DurableObject<Cloudflare.Env> {
       if (!entry) throw new Error('mppx stored no channel for the open')
       this.kv.put(`channel:${source.id}`, { at: Date.now(), confirmed: false, deposit: String(deposit), descriptor: entry.descriptor, id: entry.channelId, signed: String(price) } satisfies Payer.Channel)
       this.kv.put('spent:' + source.id, String(price))
+      this.kv.put('paid:' + source.id, Date.now())
       if (payee) this.log('funds', `Opened a channel from the swarm's wallet to the owner of hand ${input.hand ?? 'a lent machine'} (${short(payee)}), which the gateway settles straight to them.`)
       return { authorization }
     }
@@ -733,7 +736,7 @@ export class Swarm extends DurableObject<Cloudflare.Env> {
       if (additional < shortfall) {
         const unspent = spent === undefined ? 0n : deposit - BigInt(spent)
         return {
-          busy: unspent >= perCall,
+          busy: unspent >= perCall || Date.now() - (this.kv.get<number>('paid:' + source.id) ?? 0) < holdMs,
           failed: `It can add ${Memo.decimal(room.amount)} now, less than the ${Memo.decimal(shortfall)} its channel needs (deposit ${Memo.decimal(deposit)}, spent ${Memo.decimal(BigInt(spent ?? '0'))}, accepted ${Memo.decimal(accepted)}, required ${Memo.decimal(BigInt(snapshot?.requiredCumulative ?? '0'))}, in flight ${Memo.decimal(pending)} over ${recent.length}, this request ${Memo.decimal(price)}).`,
           room,
           small: room.amount + Payer.max(unspent, 0n) >= perCall,
@@ -744,6 +747,7 @@ export class Swarm extends DurableObject<Cloudflare.Env> {
     const authorization = await mppx.createCredential(offered.response, { action: 'voucher', channelId: channel.id, cumulativeAmountRaw: String(need), descriptor: channel.descriptor })
     this.kv.put(`channel:${source.id}`, { ...channel, ...(topUp ? { at: Date.now(), confirmed: false } : {}), deposit: String(deposit + additional), signed: String(need) })
     this.kv.put('pending:' + source.id, [...recent, { amount: String(price), at: Date.now(), cumulative: String(need) }])
+    this.kv.put('paid:' + source.id, Date.now())
     return topUp ? { authorization, topUp } : { authorization }
   }
 
@@ -1516,8 +1520,8 @@ function lending(hands: Guest[], left: bigint) {
 function crew(parallel: number) {
   const explorers = parallel - 1
   if (!explorers)
-    return "This round's budget is small, so work alone: do not spawn explorers, run one thing at a time and use at most one machine. Every model call reserves up to about $0.04 until it finishes."
-  return `This round you may run up to ${explorers} explorer${explorers === 1 ? '' : 's'} in parallel with you: spawn_agent subagents, each taking its own angle on the goal, with at most one machine each. More money unlocks more explorers (one more per ${dollars(Store.perWorker)} left, up to ${Store.maxParallel - 1}). Every model call reserves up to about $0.04 until it finishes, so stay within that.`
+    return "This round's budget is small, so work alone: do not spawn explorers, run one thing at a time and use at most one machine. Every model call holds up to about $0.05 of it until it finishes, and every web search up to about $0.10."
+  return `This round you may run up to ${explorers} explorer${explorers === 1 ? '' : 's'} in parallel with you: spawn_agent subagents, each taking its own angle on the goal, with at most one machine each. More money unlocks more explorers (one more per ${dollars(Store.perWorker)} left, up to ${Store.maxParallel - 1}). Every model call holds up to about $0.05 until it finishes and every web search up to about $0.10, so explorers that all search at once can hold the whole budget: stagger them when money is short.`
 }
 
 function listed(notes: Note[]) {
