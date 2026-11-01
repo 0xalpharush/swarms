@@ -39,7 +39,7 @@ export function advance(previous: Researcher | undefined, update: unknown, conte
     const state = status?.['state']
     if (typeof state !== 'string' || !states.has(state as Researcher['state'])) return previous
     next.state = state as Researcher['state']
-    if (state === 'completed') { next.output = text(status?.['output'] ?? '', 4000) || next.output; next.action = 'Result delivered' }
+    if (state === 'completed') { next.output = text(status?.['output'] ?? '', 20_000) || next.output; next.action = 'Result delivered' }
     if (state === 'failed') next.action = text(status?.['error'] ?? 'Research stopped with an error', 180)
     if (state === 'interrupted' || state === 'closed' || state === 'closing') next.action = 'Research stopped'
   } else if (row['type'] === 'event') {
