@@ -2,6 +2,7 @@ import { useState } from 'react'
 import * as Answer from '../shared/Answer.ts'
 import type { Summary } from '../shared/Api.ts'
 import * as Api from './api.ts'
+import { OnAir } from './Broadcast.tsx'
 import { usd } from './format.ts'
 import { area, areas, type Area } from './research.ts'
 import { Link } from './router.tsx'
@@ -48,12 +49,15 @@ function Observatory(props: { swarm: Summary }) {
         <div><dt>Researchers</dt><dd>{swarm.workers}</dd></div>
         <div><dt>Left</dt><dd>{usd(swarm.remaining)}</dd></div>
       </dl>
-      <div className="observatory-finding">
-        <p className="label">{swarm.answer ? `Field note · round ${swarm.answer.round}` : 'Next discovery'}</p>
-        <p>{swarm.answer ? Answer.excerpt(swarm.answer.text, 140) : swarm.status === 'running' ? 'The team is on the case.' : 'Funding starts the first round.'}</p>
-      </div>
+      {swarm.status === 'running' && <OnAir id={swarm.id} />}
+      {(swarm.answer || swarm.status !== 'running') && (
+        <div className="observatory-finding">
+          <p className="label">{swarm.answer ? `Field note · round ${swarm.answer.round}` : 'Next discovery'}</p>
+          <p>{swarm.answer ? Answer.excerpt(swarm.answer.text, 140) : 'Funding starts the first round.'}</p>
+        </div>
+      )}
       <p className="actions">
-        <Link className="btn btn-high" to={`/s/${swarm.id}`}>Enter quest <span aria-hidden="true">→</span></Link>
+        <Link className="btn btn-high" to={`/s/${swarm.id}`}>{swarm.status === 'running' ? 'Watch live' : 'Enter quest'} <span aria-hidden="true">→</span></Link>
         {swarm.status !== 'done' && <Link className="btn btn-low" to={`/s/${swarm.id}#fund`}>Fund</Link>}
       </p>
       <details className="game-details"><summary>The question</summary><p>{swarm.goal}</p><Bar swarm={swarm} /></details>

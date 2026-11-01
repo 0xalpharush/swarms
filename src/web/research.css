@@ -261,6 +261,10 @@
 .broadcast-empty { padding:28px; text-align:center; }
 .broadcast-empty h2 { margin-top:14px; font-size:24px; font-weight:400; }
 .broadcast-empty > p:last-child { max-width:520px; margin:10px auto 0; color:var(--grey-600); line-height:1.45; }
+.onair { margin-top:24px; padding:12px 14px; border-left:3px solid #d93025; border-radius:0 10px 10px 0; background:#f7f9f4; }
+.onair-head { display:flex; flex-wrap:wrap; align-items:center; gap:8px; font:11px var(--mono); color:var(--grey-600); }
+.onair-head b { font-weight:400; }
+.onair-text { margin-top:8px; min-height:4.2em; font-style:italic; font-size:15px; line-height:1.4; color:#3f4d3b; display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden; overflow-wrap:anywhere; }
 @keyframes broadcast-dot { 0%,100% { opacity:1; } 50% { opacity:.35; } }
 @keyframes caret { 50% { opacity:0; } }
 @keyframes moment-in { from { background:#eef8e2; } to { background:transparent; } }
