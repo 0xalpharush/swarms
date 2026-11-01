@@ -26,7 +26,15 @@ app.post('/api/swarms', async (c) => Problem.respond(await Operations.create(c.e
 app.get('/api/swarms/:id', async (c) => Problem.respond(await Operations.detail(c.env, { swarm: c.req.param('id') })))
 
 app.get('/api/swarms/:id/feed', async (c) =>
-  Problem.respond(await Operations.feed(c.env, { after: c.req.query('after'), swarm: c.req.param('id') })),
+  Problem.respond(
+    await Operations.feed(c.env, {
+      after: c.req.query('after'),
+      limit: c.req.query('limit'),
+      round: c.req.query('round'),
+      swarm: c.req.param('id'),
+      who: c.req.query('who'),
+    }),
+  ),
 )
 
 app.get('/api/swarms/:id/live', async (c) =>

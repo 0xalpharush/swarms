@@ -1,25 +1,19 @@
 import { lazy, Suspense, useEffect, useRef, useState } from 'react'
 import * as Answer from '../shared/Answer.ts'
 import type { Config, Detail, Entry, Note, Round } from '../shared/Api.ts'
+import { merge } from '../shared/Trail.ts'
 import * as Api from './api.ts'
+import { Broadcast } from './Broadcast.tsx'
 import { Feed } from './Feed.tsx'
 import { Budgets, Contributions, Pledges } from './Backing.tsx'
 import { Connect } from './Connect.tsx'
 import { Box } from './Contribute.tsx'
 import { ago, duration, mach, percent, short, usd } from './format.ts'
-import { type Draft, useLive, useNow, usePoll } from './hooks.ts'
+import { type Draft, useBroadcast, useNow, usePoll } from './hooks.ts'
 import { Machines } from './Machines.tsx'
-import { Mission } from './Mission.tsx'
 import { Markdown } from './Markdown.tsx'
 import { Link } from './router.tsx'
 import { Bar, Status } from './Visual.tsx'
-
-function merge(previous: Entry[], next: readonly Entry[]) {
-  const known = new Set(previous.map((entry) => entry.seq))
-  const fresh = next.filter((entry) => !known.has(entry.seq))
-  if (fresh.length === 0) return previous
-  return [...previous, ...fresh].sort((a, b) => a.seq - b.seq).slice(-500)
-}
 
 
 const Code = lazy(() => import('./Code.tsx').then((module) => ({ default: module.Code })))
@@ -29,12 +23,13 @@ const rounds = { cancelled: 'Cancelled', completed: 'Completed', failed: 'Failed
 
 export function Swarm(props: { config: Config | undefined; id: string }) {
   const [detail, reload] = usePoll(() => Api.swarm(props.id), 5000, props.id)
-  const [entries, setEntries] = useState<Entry[]>([])
+  const [entries, setEntries] = useState<readonly Entry[]>([])
   const [note, setNote] = useState('')
   const last = useRef(0)
   const box = useRef<HTMLDivElement>(null)
   const loaded = detail.data !== undefined
-  const draft = useLive(props.id, detail.data?.status === 'running')
+  const stream = useBroadcast(props.id, detail.data?.status === 'running', (entry) => setEntries((previous) => merge(previous, [entry])))
+  const draft = stream.draft
 
   useEffect(() => {
     setEntries([])
@@ -46,7 +41,7 @@ export function Swarm(props: { config: Config | undefined; id: string }) {
   }, [detail.data])
 
   useEffect(() => {
-    last.current = entries.at(-1)?.seq ?? 0
+    last.current = entries.reduce((most, entry) => Math.max(most, entry.seq), 0)
   }, [entries])
 
   useEffect(() => {
@@ -95,13 +90,14 @@ export function Swarm(props: { config: Config | undefined; id: string }) {
     <article className="page swarm game-swarm" data-status={swarm.status}>
       <div className="quest-title"><div><Meta swarm={swarm} /><h1>{swarm.title}</h1></div><span className="quest-mode">{Api.fixture ? 'DEMO QUEST' : 'LIVE QUEST'}</span></div>
       {swarm.status !== 'running' && <p className="banner">{swarm.status === 'done' ? 'Done. The answer below is what the swarm found.' : swarm.reason ?? (swarm.status === 'paused' ? 'Paused: the money is used up. A contribution, budget or pledge starts the next round.' : 'No money behind it yet. The first contribution starts round 1.')}</p>}
+      {live && <Broadcast entries={entries} live={stream} onEntries={(next) => setEntries((previous) => merge(previous, next))} swarm={swarm} />}
       {(swarm.answer || live) && (
         <section className="quest-findings">
           <h2 className="answer-head">{swarm.status === 'done' ? 'Answer' : 'Latest answer'}</h2>
           <Latest draft={draft} swarm={swarm} />
         </section>
       )}
-      <Mission entries={entries} swarm={swarm} />
+      {!live && <Broadcast entries={entries} live={stream} onEntries={(next) => setEntries((previous) => merge(previous, next))} swarm={swarm} />}
       {swarm.status !== 'done' && (
         <section className="quest-funding" id="fund">
           <Box config={props.config} note={note} noteRef={box} onDone={reload} onNote={setNote} swarm={swarm} />
@@ -111,7 +107,7 @@ export function Swarm(props: { config: Config | undefined; id: string }) {
         <div className="mission-extras">
           <details className="game-details"><summary>Code{swarm.code ? ` · ${swarm.code.name}` : ''}</summary><Repository config={props.config} swarm={swarm} /></details>
           <details className="game-details"><summary>The research question</summary><p>{swarm.goal}</p></details>
-          <details className="game-details"><summary>Activity log</summary><Feed entries={entries} live={live} /></details>
+          <details className="game-details"><summary>Activity log</summary><Feed entries={entries} live={live} names={new Map(swarm.researchers.map((item) => [item.id, item.name]))} /></details>
           <details className="game-details"><summary>Machines · {swarm.hands.filter((hand) => hand.connected).length} connected</summary><Machines hands={swarm.hands} live={live} /><Connect swarm={swarm} /></details>
           <details className="game-details"><summary>Research rounds</summary><History draft={draft} history={swarm.history} /></details>
           <details className="game-details"><summary>Community notes</summary><Notes notes={swarm.notes} onBack={back} done={swarm.status === 'done'} /></details>

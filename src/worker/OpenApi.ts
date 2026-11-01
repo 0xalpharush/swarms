@@ -152,10 +152,12 @@ const schemas = {
   Entry: object({
     at: time,
     detail: nullable(string),
+    event: nullable({ description: 'The gateway event it came from, which a live entry shares with the stored one.', type: 'integer' }),
     kind: { enum: [...Operations.kinds], type: 'string' },
     round: integer,
-    seq: integer,
+    seq: { description: 'Its place in the feed, or 0 for an entry from the live stream not stored yet.', type: 'integer' },
     text: string,
+    who: nullable({ description: "The researcher it belongs to (an id from the swarm's researchers), or null for the lead.", type: 'string' }),
   }),
   Found: object({
     hits: { items: ref('Hit'), type: 'array' },
@@ -401,7 +403,7 @@ export function document(origin: string) {
       '/v1/swarms/{id}/live': {
         get: {
           description:
-            "Server-sent events of the running round as the lead writes: {type: round}, then text and thinking deltas ({type, item, delta, offset}) and whole messages ({type: message, item, text}), and {type: end} when the round ends. {type: idle} when nothing runs.",
+            "Server-sent events of the running round: {type: round}, then the lead's text and thinking deltas ({type, item, delta, offset}) and whole messages ({type: message, item, text}), every researcher's deltas ({type: delta, who, channel: text|thinking|input, item, delta, offset}), each feed entry as it happens ({type: entry, entry}, seq 0 until stored), each researcher's progress ({type: researcher, researcher}), and {type: end} when the round ends. {type: idle} when nothing runs.",
           operationId: 'live',
           parameters: [swarm],
           responses: {

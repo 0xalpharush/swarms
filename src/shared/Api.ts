@@ -85,15 +85,17 @@ export type Round = {
   status: 'running' | 'completed' | 'failed' | 'cancelled'
 }
 
-export type Kind = 'tool' | 'message' | 'thinking' | 'steer' | 'funds' | 'status' | 'machine' | 'error'
+export type Kind = 'tool' | 'output' | 'message' | 'thinking' | 'steer' | 'funds' | 'status' | 'machine' | 'error'
 
 export type Entry = {
   at: number
   detail: string | null
+  event: number | null
   kind: Kind
   round: number
   seq: number
   text: string
+  who: string | null
 }
 
 export type Hand = { connected: boolean; name: string }
@@ -161,6 +163,9 @@ export type Live =
   | { round: number; type: 'round' }
   | { delta: string; item: string; offset: number | null; type: 'text' | 'thinking' }
   | { item: string; text: string; type: 'message' }
+  | { channel: 'input' | 'text' | 'thinking'; delta: string; item: string; offset: number | null; type: 'delta'; who: string | null }
+  | { entry: Entry; type: 'entry' }
+  | { researcher: Researcher; type: 'researcher' }
   | { type: 'end' | 'idle' }
 
 export type Detail = Summary & {

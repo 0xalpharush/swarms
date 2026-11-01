@@ -55,6 +55,34 @@ test('swarm frame escapes research text and points the player at its own route',
   assert.match(html, /Back this quest/)
 })
 
+test('a running swarm frame streams the live round and lists its explorers', async () => {
+  const running: Overview = {
+    ...overview,
+    history: [{ base: null, commits: [], endedAt: null, excerpt: null, n: 3, spent: '0', startedAt: 10, status: 'running' }],
+    researchers: [
+      { action: 'Using exec_command', events: 2, id: 's:1', lastSequence: 2, name: 'zstd <tuner>', output: null, parent: null, round: 3, state: 'running', task: '', toolsCompleted: 1, updatedAt: 1 },
+      { action: null, events: 1, id: 's:0', lastSequence: 1, name: 'old', output: null, parent: null, round: 2, state: 'completed', task: '', toolsCompleted: 0, updatedAt: 1 },
+    ],
+    running: { n: 3, startedAt: 10 },
+  }
+  const html = await XFrames.swarm('https://swarms.example', running).text()
+
+  assert.match(html, /<title>Live: Safer &lt;signatures&gt;<\/title>/)
+  assert.match(html, /\/live'\)/)
+  assert.match(html, /href="https:\/\/swarms\.example\/s\/abc123" id="watch"/)
+  assert.match(html, /"crew":\[\{"action":"Using exec_command","id":"s:1","name":"zstd \\u003ctuner>","state":"running"\}\]/)
+  assert.doesNotMatch(html, /"name":"old"/)
+  assert.match(html, /Back this quest/)
+})
+
+test('a swarm frame without a running round shows the latest finding', async () => {
+  const html = await XFrames.swarm('https://swarms.example', { ...overview, history: [{ base: null, commits: [], endedAt: 9, excerpt: 'zstd wins on cost', n: 2, spent: '0.1', startedAt: 1, status: 'completed' }], status: 'paused' }).text()
+
+  assert.match(html, /<title>Fund Safer/)
+  assert.match(html, /zstd wins on cost/)
+  assert.match(html, /"live":null/)
+})
+
 test('card image escapes its title', async () => {
   const response = XFrames.card('Explore <science>')
   const svg = await response.text()

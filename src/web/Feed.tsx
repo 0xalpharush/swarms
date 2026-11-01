@@ -3,15 +3,15 @@ import type { Entry, Kind } from '../shared/Api.ts'
 import { ago, clock } from './format.ts'
 import { useNow } from './hooks.ts'
 
-const kinds = { error: 'error', funds: 'funds', machine: 'machine', message: 'agent', status: 'status', steer: 'steer', thinking: 'thinking', tool: 'tool' } as const satisfies Record<Kind, string>
+const kinds = { error: 'error', funds: 'funds', machine: 'machine', message: 'agent', output: 'output', status: 'status', steer: 'steer', thinking: 'thinking', tool: 'tool' } as const satisfies Record<Kind, string>
 
-function Row(props: { entry: Entry; fresh: boolean }) {
+function Row(props: { entry: Entry; fresh: boolean; who: string | undefined }) {
   const [open, setOpen] = useState(false)
   const entry = props.entry
   return (
     <li className={props.fresh ? 'entry entry-fresh' : 'entry'} data-kind={entry.kind}>
       <time dateTime={new Date(entry.at).toISOString()}>{clock(entry.at)}</time>
-      <span className="entry-kind">{kinds[entry.kind]}</span>
+      <span className="entry-kind">{props.who ?? kinds[entry.kind]}</span>
       <div className="entry-body">
         <p className="entry-text">{entry.text}</p>
         {entry.detail && (
@@ -27,7 +27,7 @@ function Row(props: { entry: Entry; fresh: boolean }) {
   )
 }
 
-export function Feed(props: { entries: readonly Entry[]; live: boolean }) {
+export function Feed(props: { entries: readonly Entry[]; live: boolean; names?: ReadonlyMap<string, string> }) {
   const box = useRef<HTMLOListElement>(null)
   const stick = useRef(true)
   const seen = useRef<number | undefined>(undefined)
@@ -41,7 +41,7 @@ export function Feed(props: { entries: readonly Entry[]; live: boolean }) {
     if (!element) return
     if (stick.current) element.scrollTop = element.scrollHeight
     else setBelow((count) => count + 1)
-  }, [last?.seq])
+  }, [last?.seq, props.entries.length])
 
   useEffect(() => {
     if (seen.current === undefined && last) seen.current = last.seq
@@ -68,7 +68,7 @@ export function Feed(props: { entries: readonly Entry[]; live: boolean }) {
       >
         {props.entries.length === 0 && <li className="feed-empty">The feed fills in once the swarm starts working.</li>}
         {props.entries.map((entry) => (
-          <Row entry={entry} fresh={first !== undefined && entry.seq > first} key={entry.seq} />
+          <Row entry={entry} fresh={first !== undefined && entry.seq > first} key={entry.event === null ? `s${entry.seq}` : `e${entry.event}${entry.kind}`} who={entry.who === null ? undefined : props.names?.get(entry.who) ?? 'explorer'} />
         ))}
         {props.live && (
           <li aria-hidden className="feed-cursor">

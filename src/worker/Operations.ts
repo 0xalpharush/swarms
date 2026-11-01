@@ -46,7 +46,7 @@ import * as Vault from './Vault.ts'
 
 export const statuses = ['funding', 'running', 'paused', 'done'] as const satisfies readonly Status[]
 
-export const kinds = ['tool', 'message', 'thinking', 'steer', 'funds', 'status', 'machine', 'error'] as const satisfies readonly Kind[]
+export const kinds = ['tool', 'output', 'message', 'thinking', 'steer', 'funds', 'status', 'machine', 'error'] as const satisfies readonly Kind[]
 
 export const sources = ['swarm', 'report', 'note', 'feed'] as const satisfies readonly Hit['kind'][]
 
@@ -152,7 +152,13 @@ export const schema = {
     after: z.coerce.number().int().min(0).default(0).describe('Return entries after this seq; pass the previous page\'s next.'),
     kind: z.enum(kinds).optional().describe('Only entries of this kind.'),
     limit: z.coerce.number().int().min(1).max(200).default(200).describe('At most this many entries.'),
+    round: z.coerce.number().int().min(0).optional().describe('Only entries of this round.'),
     swarm: id,
+    who: z
+      .string()
+      .max(160)
+      .optional()
+      .describe('Only entries of this researcher: lead for the lead agent, or a researcher id from the swarm\'s researchers.'),
   }),
   list: z.object({ status: z.enum(statuses).optional().describe('Only swarms with this status.') }),
   pledge: z.object({
@@ -414,7 +420,7 @@ export async function feed(env: Cloudflare.Env, input: Input<'feed'>): Promise<P
   const query = parsed.value
   if (!(await Store.exists(env, query.swarm))) return missing()
 
-  const entries = await stub(env, query.swarm).feed(query.after, { kind: query.kind, limit: query.limit })
+  const entries = await stub(env, query.swarm).feed(query.after, { kind: query.kind, limit: query.limit, round: query.round, who: query.who })
   return Problem.ok({ entries, next: entries.at(-1)?.seq ?? query.after })
 }
 

@@ -3,6 +3,7 @@ import type { Account, Address, Hex } from 'viem'
 import { keccak256, stringToHex } from 'viem'
 import type { Code, Currency, Entry, Hand, Kind, Live, Note, Researcher, Round, Terms, Token } from '../shared/Api.ts'
 import { advance, researchId } from '../shared/Research.ts'
+import { type Buffers, clip, memory, narrate, redact } from '../shared/Trail.ts'
 import * as Answer from '../shared/Answer.ts'
 import * as Memo from '../shared/Memo.ts'
 import * as Chain from './Chain.ts'
@@ -77,8 +78,6 @@ type Money = { biggest: bigint; left: bigint; row: Store.Row }
 
 type Repo = { name: string; state: 'create' | 'later' | 'ready' }
 
-type Call = { detail: string | null; kind: Kind; text: string }
-
 type Guest = { label: string; name: string; terms: Terms }
 
 const schema = [
@@ -91,6 +90,8 @@ const schema = [
 const columns = [
   ['rounds', 'commits', "ALTER TABLE rounds ADD COLUMN commits TEXT NOT NULL DEFAULT '[]'"],
   ['rounds', 'base', 'ALTER TABLE rounds ADD COLUMN base TEXT'],
+  ['feed', 'who', 'ALTER TABLE feed ADD COLUMN who TEXT'],
+  ['feed', 'event', 'ALTER TABLE feed ADD COLUMN event INTEGER'],
 ] as const
 
 const followMs = 2_000
@@ -196,7 +197,7 @@ export class Swarm extends DurableObject<Cloudflare.Env> {
   view(): View {
     const sql = this.ctx.storage.sql
     const feed = sql
-      .exec<Record<string, SqlStorageValue>>('SELECT seq, at, round, kind, text, detail FROM feed ORDER BY seq DESC LIMIT 200')
+      .exec<Record<string, SqlStorageValue>>('SELECT seq, at, round, kind, text, detail, who, event FROM feed ORDER BY seq DESC LIMIT 200')
       .toArray()
       .reverse()
       .map(entry)
@@ -231,12 +232,26 @@ export class Swarm extends DurableObject<Cloudflare.Env> {
       }))
   }
 
-  feed(after: number, filter: { kind?: Kind | undefined; limit?: number | undefined } = {}): Entry[] {
+  feed(
+    after: number,
+    filter: { kind?: Kind | undefined; limit?: number | undefined; round?: number | undefined; who?: string | undefined } = {},
+  ): Entry[] {
+    const where = [
+      'seq > ?',
+      ...(filter.kind ? ['kind = ?'] : []),
+      ...(filter.round === undefined ? [] : ['round = ?']),
+      ...(filter.who === undefined ? [] : [filter.who === 'lead' ? 'who IS NULL' : 'who = ?']),
+    ]
+    const values = [
+      after,
+      ...(filter.kind ? [filter.kind] : []),
+      ...(filter.round === undefined ? [] : [filter.round]),
+      ...(filter.who === undefined || filter.who === 'lead' ? [] : [filter.who]),
+    ]
     return this.ctx.storage.sql
       .exec<Record<string, SqlStorageValue>>(
-        `SELECT seq, at, round, kind, text, detail FROM feed WHERE seq > ?${filter.kind ? ' AND kind = ?' : ''} ORDER BY seq LIMIT ?`,
-        after,
-        ...(filter.kind ? [filter.kind] : []),
+        `SELECT seq, at, round, kind, text, detail, who, event FROM feed WHERE ${where.join(' AND ')} ORDER BY seq LIMIT ?`,
+        ...values,
         filter.limit ?? 200,
       )
       .toArray()
@@ -248,7 +263,7 @@ export class Swarm extends DurableObject<Cloudflare.Env> {
     const score = terms.map(() => "(instr(lower(text || ' ' || coalesce(detail, '')), ?) > 0)").join(' + ')
     return this.ctx.storage.sql
       .exec<Record<string, SqlStorageValue>>(
-        `SELECT seq, at, round, kind, text, detail FROM (SELECT *, ${score} AS score FROM feed) WHERE score > 0 ORDER BY score DESC, seq DESC LIMIT ?`,
+        `SELECT seq, at, round, kind, text, detail, who, event FROM (SELECT *, ${score} AS score FROM feed) WHERE score > 0 ORDER BY score DESC, seq DESC LIMIT ?`,
         ...terms,
         limit,
       )
@@ -264,7 +279,12 @@ export class Swarm extends DurableObject<Cloudflare.Env> {
 
     const upstream = await Gateway.stream(this.env, id, agent, this.kv.get<number>('cursor') ?? 0, request.signal)
     if (!upstream.ok || !upstream.body) return sse(`data: ${JSON.stringify({ type: 'idle' } satisfies Live)}\n\n`)
-    return sse(upstream.body.pipeThrough(live(turn, this.kv.get<number>('round') ?? 0)))
+    const known = new Map<string, Researcher>()
+    for (const row of this.ctx.storage.sql.exec<{ snapshot: string }>('SELECT snapshot FROM researchers ORDER BY round').toArray()) {
+      const researcher = JSON.parse(row.snapshot) as Researcher
+      known.set(researcher.id, researcher)
+    }
+    return sse(upstream.body.pipeThrough(live({ buffers: memory(), known, round: this.kv.get<number>('round') ?? 0, scope: agent, turn })))
   }
 
   override async alarm() {
@@ -1223,6 +1243,7 @@ export class Swarm extends DurableObject<Cloudflare.Env> {
     if (!outer) return false
     if (outer.source === undefined) return outer.type === 'result' && event.request_id === turn
 
+    const at = event.created_at ?? Date.now()
     if (outer.source === 'subagent' && outer.update) {
       const round = this.kv.get<number>('round') ?? 0
       const scope = outer.root_session_id ?? this.kv.get<string>('agent') ?? 'session'
@@ -1230,49 +1251,57 @@ export class Swarm extends DurableObject<Cloudflare.Env> {
       if (!id) return false
       const stored = this.ctx.storage.sql.exec<{ snapshot: string }>('SELECT snapshot FROM researchers WHERE id = ? ORDER BY round DESC LIMIT 1', id).toArray()[0]
       const previous = stored ? JSON.parse(stored.snapshot) as Researcher : undefined
-      const next = advance(previous, outer.update, { scope, round, at: Date.now(), sequence: event.seq })
+      const next = advance(previous, outer.update, { scope, round, at, sequence: event.seq })
       if (next && next !== previous) {
         this.ctx.storage.sql.exec('INSERT INTO researchers (id, round, snapshot) VALUES (?, ?, ?) ON CONFLICT(id, round) DO UPDATE SET snapshot = excluded.snapshot', id, next.round, JSON.stringify(next))
-        if (next.state !== previous?.state || !previous) this.log('status', `${next.name}: ${next.state}`, next.action)
+        if (next.state !== previous?.state || !previous) this.log('status', `${next.name}: ${next.state}`, next.action, { at, event: event.seq, who: id })
       }
+      const update = outer.update as { event?: { payload?: Record<string, unknown>; type?: string }; type?: string }
+      if (update.type === 'event') this.record(id, update.event?.type, update.event?.payload ?? {}, event.seq, at)
       return false
     }
 
     const inner = outer.event
     const payload = inner?.payload ?? {}
-    if (inner?.type === 'tool.call') {
-      const described = call(payload)
-      if (described) this.log(described.kind, described.text, described.detail)
-      if (payload['tool'] === 'spawn_agent') this.kv.put('workers', (this.kv.get<number>('workers') ?? 0) + 1)
-    } else if (inner?.type === 'tool.result' && payload['status'] !== 'completed') {
-      this.log('error', `${tool(payload)} failed`, clip(JSON.stringify(payload['result'] ?? ''), 2000))
-    } else if (inner?.type === 'assistant.message') {
-      this.flush()
-      this.log('message', clip(String(payload['text'] ?? ''), 4000))
-    } else if (inner?.type === 'reasoning.summary.delta') {
-      this.kv.put('thinking', (this.kv.get<string>('thinking') ?? '') + String(payload['text'] ?? ''))
-    } else if (inner?.type === 'model.call.completed') {
-      this.flush()
-    } else if (inner?.type === 'run.failed' || inner?.type === 'model.call.failed') {
-      this.log('error', inner.type === 'run.failed' ? 'The round failed.' : 'A model call failed.', clip(JSON.stringify(payload), 2000))
-    }
+    this.record(null, inner?.type, payload, event.seq, at)
+    if (inner?.type === 'tool.call' && payload['tool'] === 'spawn_agent') this.kv.put('workers', (this.kv.get<number>('workers') ?? 0) + 1)
     return false
   }
 
-  flush() {
-    const thinking = this.kv.get<string>('thinking')?.trim()
-    this.kv.delete('thinking')
-    if (thinking) this.log('thinking', clip(thinking, 600))
+  record(who: string | null, type: string | undefined, payload: Record<string, unknown>, event: number, at: number) {
+    for (const found of narrate(this.buffers, who, type, payload)) this.log(found.kind, found.text, found.detail, { at, event, who })
   }
 
-  log(kind: Kind, text: string, detail?: string | null) {
+  get buffers(): Buffers {
+    const name = (who: string | null) => (who === null ? 'thinking' : `thinking:${who}`)
+    return {
+      add: (who, text) => this.kv.put(name(who), (this.kv.get<string>(name(who)) ?? '') + text),
+      take: (who) => {
+        const text = this.kv.get<string>(name(who)) ?? ''
+        this.kv.delete(name(who))
+        return text
+      },
+    }
+  }
+
+  flush() {
+    const speakers = [null, ...[...this.kv.list({ prefix: 'thinking:' })].map(([name]) => name.slice('thinking:'.length))]
+    for (const who of speakers) {
+      const thinking = this.buffers.take(who).trim()
+      if (thinking) this.log('thinking', clip(thinking, 1500), null, { who })
+    }
+  }
+
+  log(kind: Kind, text: string, detail?: string | null, origin: { at?: number; event?: number; who?: string | null } = {}) {
     this.ctx.storage.sql.exec(
-      'INSERT INTO feed (at, round, kind, text, detail) VALUES (?, ?, ?, ?, ?)',
-      Date.now(),
+      'INSERT INTO feed (at, round, kind, text, detail, who, event) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      origin.at ?? Date.now(),
       this.kv.get<number>('round') ?? 0,
       kind,
       redact(text),
       detail ? redact(detail) : null,
+      origin.who ?? null,
+      origin.event ?? null,
     )
   }
 }
@@ -1299,14 +1328,16 @@ function sse(body: BodyInit) {
   return new Response(body, { headers: { 'cache-control': 'no-store', 'content-type': 'text/event-stream' } })
 }
 
-function live(turn: string, round: number) {
+type Viewing = { buffers: Buffers; known: Map<string, Researcher>; round: number; scope: string; turn: string }
+
+function live(context: Viewing) {
   const decoder = new TextDecoder()
   const encoder = new TextEncoder()
   const send = (event: Live) => encoder.encode(`data: ${JSON.stringify(event)}\n\n`)
   let buffer = ''
   return new TransformStream<Uint8Array, Uint8Array>({
     start(controller) {
-      controller.enqueue(send({ round, type: 'round' }))
+      controller.enqueue(send({ round: context.round, type: 'round' }))
     },
     transform(chunk, controller) {
       buffer += decoder.decode(chunk, { stream: true })
@@ -1322,36 +1353,61 @@ function live(turn: string, round: number) {
           controller.enqueue(encoder.encode(': keepalive\n\n'))
           continue
         }
-        const translated = translate(JSON.parse(data) as Gateway.Event, turn)
-        if (translated?.type === 'end') {
+        for (const translated of translate(JSON.parse(data) as Gateway.Event, context)) {
           controller.enqueue(send(translated))
-          controller.terminate()
-          return
+          if (translated.type === 'end') {
+            controller.terminate()
+            return
+          }
         }
-        if (translated) controller.enqueue(send(translated))
       }
     },
   })
 }
 
-function translate(event: Gateway.Event, turn: string): Live | undefined {
+function translate(event: Gateway.Event, context: Viewing): Live[] {
   const outer = event.event
-  if (!outer) return undefined
-  if (outer.source === undefined) return outer.type === 'result' && event.request_id === turn ? { type: 'end' } : undefined
+  if (!outer) return []
+  if (outer.source === undefined) return outer.type === 'result' && event.request_id === context.turn ? [{ type: 'end' }] : []
 
-  const inner = outer.event
-  const payload = inner?.payload ?? {}
-  const text = typeof payload['text'] === 'string' ? redact(payload['text']) : ''
-  const offset = typeof payload['offset'] === 'number' ? payload['offset'] : null
-  if (inner?.type === 'assistant.delta') return { delta: text, item: String(payload['item_id'] ?? ''), offset, type: 'text' }
-  if (inner?.type === 'assistant.message') return { item: String(payload['item_id'] ?? ''), text, type: 'message' }
-  if (inner?.type === 'reasoning.summary.delta')
-    return { delta: text, item: `reasoning:${String(payload['model_call_index'] ?? '')}`, offset: null, type: 'thinking' }
-  return undefined
-}
+  const at = event.created_at ?? Date.now()
+  const said = (who: string | null, found: { detail: string | null; kind: Kind; text: string }): Live => ({
+    entry: { at, detail: found.detail ? redact(found.detail) : null, event: event.seq, kind: found.kind, round: context.round, seq: 0, text: redact(found.text), who },
+    type: 'entry',
+  })
+  const speak = (who: string | null, type: string | undefined, payload: Record<string, unknown>): Live[] => {
+    const text = typeof payload['text'] === 'string' ? redact(payload['text']) : ''
+    const offset = typeof payload['offset'] === 'number' ? payload['offset'] : null
+    const streamed: Live[] = []
+    if (type === 'assistant.delta')
+      streamed.push(who === null ? { delta: text, item: String(payload['item_id'] ?? ''), offset, type: 'text' } : { channel: 'text', delta: text, item: String(payload['item_id'] ?? ''), offset, type: 'delta', who })
+    if (type === 'assistant.message' && who === null) streamed.push({ item: String(payload['item_id'] ?? ''), text, type: 'message' })
+    if (type === 'reasoning.summary.delta') {
+      const item = `reasoning:${String(payload['model_call_index'] ?? '')}`
+      streamed.push(who === null ? { delta: text, item, offset: null, type: 'thinking' } : { channel: 'thinking', delta: text, item, offset: null, type: 'delta', who })
+    }
+    if (type === 'tool.input.delta') streamed.push({ channel: 'input', delta: text, item: String(payload['call_id'] ?? ''), offset: null, type: 'delta', who })
+    return [...streamed, ...narrate(context.buffers, who, type, payload).map((found) => said(who, found))]
+  }
 
-export function redact(text: string) {
-  return text.replace(/(https?:\/\/)[^\s/@:'"]+:[^\s/@'"]+@/g, '$1***@').replace(/eyJ[\w-]{8,}\.[\w-]{8,}\.[\w-]{8,}/g, '[redacted]')
+  if (outer.source === 'subagent' && outer.update) {
+    const scope = outer.root_session_id ?? context.scope
+    const id = researchId(outer.update, scope)
+    if (!id) return []
+    const previous = context.known.get(id)
+    const next = advance(previous, outer.update, { at, round: context.round, scope, sequence: event.seq })
+    const events: Live[] = []
+    if (next && next !== previous) {
+      context.known.set(id, next)
+      events.push({ researcher: next, type: 'researcher' })
+      if (next.state !== previous?.state || !previous) events.push(said(id, { detail: next.action, kind: 'status', text: `${next.name}: ${next.state}` }))
+    }
+    const update = outer.update as { event?: { payload?: Record<string, unknown>; type?: string }; type?: string }
+    if (update.type === 'event') events.push(...speak(id, update.event?.type, update.event?.payload ?? {}))
+    return events
+  }
+
+  return speak(null, outer.event?.type, outer.event?.payload ?? {})
 }
 
 function same(a: string, b: string) {
@@ -1472,48 +1528,17 @@ function listed(notes: Note[]) {
     .join('\n')
 }
 
-function call(payload: Record<string, unknown>): Call | undefined {
-  const name = tool(payload)
-  const raw = typeof payload['arguments'] === 'string' ? payload['arguments'] : JSON.stringify(payload['arguments'] ?? {})
-  const input =
-    typeof payload['arguments'] === 'object' && payload['arguments'] !== null
-      ? (payload['arguments'] as Record<string, unknown>)
-      : {}
-  const on = typeof input['hand'] === 'string' ? ` on ${input['hand']}` : ''
-
-  if (name === 'exec') return { detail: clip(raw, 4000), kind: 'tool', text: `Ran a script: ${clip(raw.split('\n')[0] ?? '', 120)}` }
-  if (name === 'spawn_agent')
-    return { detail: clip(String(input['task'] ?? ''), 2000), kind: 'tool', text: `Spawned an explorer: ${clip(String(input['role'] ?? 'worker'), 80)}` }
-  if (name === 'wait_agent') return { detail: null, kind: 'tool', text: 'Waiting on explorers' }
-  if (name === 'compute_create')
-    return {
-      detail: raw,
-      kind: 'machine',
-      text: `Starting machine ${String(input['attach'] ?? '')} (${String(input['image'] ?? 'default image')}${input['gpu'] ? ', ' + String(input['gpu']) : ''})`,
-    }
-  if (name === 'compute_terminate') return { detail: raw, kind: 'machine', text: 'Shutting down a machine' }
-  if (name === 'exec_command') return { detail: raw, kind: 'tool', text: `$ ${clip(String(input['cmd'] ?? ''), 140)}${on}` }
-  if (name === 'write_stdin' || name === 'wait') return undefined
-  return { detail: clip(raw, 2000), kind: 'tool', text: `Called ${name}${on}` }
-}
-
-function tool(payload: Record<string, unknown>) {
-  return String(payload['tool'] ?? 'a tool').replace(/^mcp__gateway__/, '')
-}
-
 function entry(row: Record<string, SqlStorageValue>): Entry {
   return {
     at: Number(row['at']),
     detail: row['detail'] === null ? null : String(row['detail']),
+    event: row['event'] === null || row['event'] === undefined ? null : Number(row['event']),
     kind: String(row['kind']) as Kind,
     round: Number(row['round']),
     seq: Number(row['seq']),
     text: String(row['text']),
+    who: row['who'] === null || row['who'] === undefined ? null : String(row['who']),
   }
-}
-
-function clip(text: string, length: number) {
-  return text.length > length ? text.slice(0, length - 1) + '…' : text
 }
 
 function short(address: string) {

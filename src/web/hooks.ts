@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
-import type { Config, Live } from '../shared/Api.ts'
+import type { Config, Entry, Live, Researcher } from '../shared/Api.ts'
 import * as Api from './api.ts'
 import * as Wallet from './wallet.ts'
 
@@ -81,34 +81,67 @@ function apply(draft: Draft | undefined, event: Live): Draft | undefined {
   return { ...draft, items, thinking: event.type === 'text' ? '' : draft.thinking }
 }
 
-export function useLive(id: string, active: boolean) {
+export type Stream = { input: string; inputItem: string; text: string; textItem: string; thinking: string; thinkingItem: string; at: number }
+
+export type Broadcast = { connected: boolean; draft: Draft | undefined; researchers: ReadonlyMap<string, Researcher>; streams: Readonly<Record<string, Stream>> }
+
+const blank: Stream = { at: 0, input: '', inputItem: '', text: '', textItem: '', thinking: '', thinkingItem: '' }
+
+function write(stream: Stream, channel: 'input' | 'text' | 'thinking', item: string, delta: string, offset: number | null): Stream {
+  const before = stream[`${channel}Item`] === item ? stream[channel] : ''
+  const text = offset === null ? before + delta : before.slice(0, offset) + delta
+  return { ...stream, at: Date.now(), [channel]: text.slice(-6000), [`${channel}Item`]: item }
+}
+
+function settle(stream: Stream, entry: Entry): Stream {
+  if (entry.kind === 'thinking') return { ...stream, thinking: '', thinkingItem: '' }
+  if (entry.kind === 'message') return { ...stream, text: '', textItem: '' }
+  if (entry.kind === 'tool' || entry.kind === 'machine') return { ...stream, input: '', inputItem: '' }
+  return stream
+}
+
+export function speaker(who: string | null) {
+  return who ?? 'lead'
+}
+
+export function useBroadcast(id: string, active: boolean, onEntry: (entry: Entry) => void): Broadcast {
   const [draft, setDraft] = useState<Draft>()
+  const [connected, setConnected] = useState(false)
+  const [researchers, setResearchers] = useState<ReadonlyMap<string, Researcher>>(new Map())
+  const [streams, setStreams] = useState<Readonly<Record<string, Stream>>>({})
+  const handler = useRef(onEntry)
+
   useEffect(() => {
-    if (!active || Api.fixture) return
-    let alive = true
-    let source: EventSource | undefined
-    let timer: ReturnType<typeof setTimeout> | undefined
-    const again = (ms: number) => {
-      source?.close()
-      if (alive) timer = setTimeout(open, ms)
-    }
-    const open = () => {
-      source = new EventSource(`/api/swarms/${encodeURIComponent(id)}/live`)
-      source.onmessage = (message) => {
-        const event = JSON.parse(String(message.data)) as Live
-        if (event.type === 'end' || event.type === 'idle') return again(event.type === 'end' ? 1500 : 4000)
-        setDraft((previous) => apply(previous, event))
+    handler.current = onEntry
+  })
+
+  useEffect(() => {
+    setDraft(undefined)
+    setResearchers(new Map())
+    setStreams({})
+  }, [id])
+
+  useEffect(() => {
+    if (!active) return
+    const stream = (who: string, change: (stream: Stream) => Stream) => setStreams((previous) => ({ ...previous, [who]: change(previous[who] ?? blank) }))
+    return Api.live(id, (event) => {
+      if (event.type === 'end' || event.type === 'idle') {
+        setConnected(false)
+        return
       }
-      source.onerror = () => again(3000)
-    }
-    open()
-    return () => {
-      alive = false
-      source?.close()
-      clearTimeout(timer)
-    }
+      setConnected(true)
+      if (event.type === 'round' || event.type === 'text' || event.type === 'thinking' || event.type === 'message') setDraft((previous) => apply(previous, event))
+      if (event.type === 'text' || event.type === 'thinking') stream('lead', (current) => write(current, event.type, event.item, event.delta, event.offset))
+      if (event.type === 'delta') stream(speaker(event.who), (current) => write(current, event.channel, event.item, event.delta, event.offset))
+      if (event.type === 'researcher') setResearchers((previous) => new Map(previous).set(event.researcher.id, event.researcher))
+      if (event.type === 'entry') {
+        stream(speaker(event.entry.who), (current) => settle(current, event.entry))
+        handler.current(event.entry)
+      }
+    })
   }, [active, id])
-  return draft
+
+  return { connected: active && connected, draft, researchers, streams }
 }
 
 export function useNow(ms = 1000) {

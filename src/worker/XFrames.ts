@@ -124,22 +124,38 @@ export function start(origin: string) {
 }
 
 export function swarm(origin: string, value: Overview) {
-  const title = `Fund ${value.title}`
-  const description = `Join this research swarm from the timeline. Round ${Math.max(1, value.rounds)} · ${value.workers} researchers.`
+  const running = value.status === 'running' ? value.running : null
+  const title = running ? `Live: ${value.title}` : `Fund ${value.title}`
+  const description = running
+    ? `Watch this research swarm work, live from the timeline: round ${running.n}, every explorer's thoughts and commands as they happen.`
+    : `Join this research swarm from the timeline. Round ${Math.max(1, value.rounds)} · ${value.workers} researchers.`
+  const crew = running
+    ? value.researchers
+        .filter((member) => member.round === running.n)
+        .map((member) => ({ action: member.action, id: member.id, name: member.name, state: member.state }))
+    : []
+  const latest = value.history.findLast((round) => round.excerpt)?.excerpt ?? null
+  const body = running
+    ? `<div class="mission-top"><p class="eyebrow"><span class="onair"><i></i>LIVE</span> ROUND ${running.n} · <span id="elapsed">0m 00s</span></p><span id="working">${crew.length} EXPLORER${crew.length === 1 ? '' : 'S'}</span></div>
+      <h1 class="single">${attribute(value.title)}</h1>
+      <div class="live" aria-live="polite"><p class="live-who"><b id="live-who">Lead researcher</b> <span id="live-kind">is working</span></p><p class="live-text" id="live-text">Tuning in…</p></div>
+      <div class="crew" id="crew" role="group" aria-label="Directions"></div>`
+    : `<div class="mission-top"><p class="eyebrow">${attribute(value.status.toUpperCase())} · ROUND ${Math.max(1, value.rounds)}</p><span>${value.workers} RESEARCHERS</span></div>
+      <h1>${attribute(value.title)}</h1>
+      <p class="lede clamp">${attribute(latest ?? value.goal)}</p>
+      <div class="mission-stats"><span><strong>${attribute(value.raised)}</strong> raised</span><span><strong>${attribute(value.remaining)}</strong> fuel left</span><span><strong>${value.rounds}</strong> rounds</span></div>`
   const content = `<main>
     <section class="panel mission" id="setup">
-      <div class="mission-top"><p class="eyebrow">${attribute(value.status.toUpperCase())} · ROUND ${Math.max(1, value.rounds)}</p><span>${value.workers} RESEARCHERS</span></div>
-      <h1>${attribute(value.title)}</h1>
-      <p class="lede clamp">${attribute(value.goal)}</p>
-      <div class="mission-stats"><span><strong>${attribute(value.raised)}</strong> raised</span><span><strong>${attribute(value.remaining)}</strong> fuel left</span><span><strong>${value.rounds}</strong> rounds</span></div>
+      ${body}
       ${amounts('Back this quest')}
-      <p class="status" id="status">Your pledge is capped. Unused MACH returns to your wallet.</p>
+      <p class="status" id="status">${running ? '<a href="' + attribute(`${origin}/s/${encodeURIComponent(value.id)}`) + '" id="watch" target="_blank" rel="noreferrer">Watch the whole broadcast ↗</a> · ' : ''}Your pledge is capped. Unused MACH returns to your wallet.</p>
     </section>
     ${approval()}
   </main>`
   return new Response(
     document(origin, `/x/s/${encodeURIComponent(value.id)}`, title, description, content, {
       kind: 'swarm',
+      live: running ? { crew, round: running.n, startedAt: running.startedAt } : null,
       swarm: { id: value.id, title: value.title },
       url: `${origin}/x/s/${encodeURIComponent(value.id)}`,
     }),
@@ -160,9 +176,11 @@ export function card(title: string) {
 }
 
 const styles = `
+@keyframes onair{0%,100%{opacity:1}50%{opacity:.35}}
 @keyframes drift{0%,100%{transform:translate(0,0)}50%{transform:translate(9px,-7px)}}
 @keyframes pulse{0%,100%{opacity:.28;transform:scale(.9)}50%{opacity:.78;transform:scale(1.12)}}
 *{box-sizing:border-box}html,body{height:100%;margin:0}body{background:#eaf4df;color:#13281d;font-family:Inter,ui-sans-serif,system-ui,sans-serif;overflow:hidden}.app{height:100dvh;min-height:320px;position:relative;display:grid;grid-template-rows:46px 1fr 38px;overflow:hidden;background:radial-gradient(circle at 50% -25%,#fff 0,#eaf4df 48%,#dcefd0 100%)}header,footer{position:relative;z-index:5;display:flex;align-items:center;justify-content:space-between;padding:0 18px;font:700 11px ui-monospace,SFMono-Regular,monospace;letter-spacing:.13em}header{border-bottom:1px solid rgba(25,61,43,.16)}header a,footer a{color:inherit;text-decoration:none}header span{color:#587064}footer{border-top:1px solid rgba(25,61,43,.14);letter-spacing:.04em;color:#4c6759}footer span{display:flex;align-items:center;gap:7px}footer b{width:7px;height:7px;border-radius:50%;background:#33a668;box-shadow:0 0 0 5px rgba(51,166,104,.12)}.world{position:absolute;inset:46px 0 38px;background-image:linear-gradient(rgba(25,61,43,.07) 1px,transparent 1px),linear-gradient(90deg,rgba(25,61,43,.07) 1px,transparent 1px);background-size:36px 36px;transform:perspective(500px) rotateX(58deg) scale(1.4);transform-origin:center bottom;opacity:.6}.world i{position:absolute;width:12px;height:12px;background:#2b744d;box-shadow:9px 9px 0 rgba(25,61,43,.18);transform:rotate(30deg);animation:drift 5s ease-in-out infinite}.world i:after{content:"";position:absolute;inset:3px;border-radius:50%;background:#d8ff95;animation:pulse 2s ease-in-out infinite}.world i:nth-child(1){left:12%;top:28%}.world i:nth-child(2){left:31%;top:66%;animation-delay:-1s}.world i:nth-child(3){left:69%;top:24%;animation-delay:-2s}.world i:nth-child(4){left:84%;top:70%;animation-delay:-3s}.world i:nth-child(5){left:54%;top:48%;animation-delay:-4s}main{position:relative;z-index:3;display:flex;align-items:center;justify-content:center;padding:10px 18px;min-height:0}.panel,.approval{width:min(760px,100%);background:rgba(249,252,245,.92);border:1px solid rgba(25,61,43,.2);border-radius:18px;box-shadow:0 18px 50px rgba(25,61,43,.12);padding:16px 18px;backdrop-filter:blur(10px)}.eyebrow{margin:0 0 5px;color:#397052;font:800 10px ui-monospace,SFMono-Regular,monospace;letter-spacing:.14em}h1,h2{font-family:Georgia,serif;letter-spacing:-.025em}h1{font-size:clamp(27px,5vw,42px);line-height:1;margin:0 0 5px}h2{font-size:clamp(25px,4vw,38px);margin:4px 0 8px}.lede{margin:0 0 11px;color:#4b6457;font-size:13px}.quests{display:grid;grid-template-columns:repeat(3,1fr);gap:7px;margin-bottom:8px}.quest{min-height:58px;text-align:left;padding:9px 10px;border:1px solid rgba(25,61,43,.18);border-radius:11px;background:#f8fbf5;color:inherit;cursor:pointer}.quest strong,.quest span{display:block}.quest strong{font-size:12px;line-height:1.15}.quest span{font-size:10px;line-height:1.2;color:#61776a;margin-top:4px}.quest:hover,.quest.selected{background:#1a3d2c;color:#fff;border-color:#1a3d2c;transform:translateY(-1px)}.quest.selected span{color:#cfe2d7}.custom{display:grid;grid-template-columns:1fr auto;gap:6px;margin-bottom:8px}.custom input,.funding input{width:100%;height:39px;border:1px solid rgba(25,61,43,.18);border-radius:10px;background:#fff;color:#13281d;padding:0 11px;font:500 12px inherit;outline:none}.custom input:focus,.funding input:focus{border-color:#307a51;box-shadow:0 0 0 3px rgba(48,122,81,.12)}button,.launch,.secondary{min-height:39px;border:0;border-radius:10px;font:800 12px inherit;cursor:pointer;transition:.15s ease}.custom button,.secondary{padding:0 14px;background:#dae8d2;color:#173b29}.funding{display:grid;grid-template-columns:auto minmax(120px,1fr) minmax(130px,auto);gap:7px;align-items:center}.amounts{display:flex;align-items:center;border:1px solid rgba(25,61,43,.18);border-radius:10px;background:#fff;padding:3px;height:39px}.amounts span{padding:0 7px;font:800 9px ui-monospace,SFMono-Regular,monospace;color:#557064}.amount{min-width:41px;min-height:31px;background:transparent;color:#294c39}.amount.selected{background:#d9edb4;color:#183b29}.launch{display:inline-flex;align-items:center;justify-content:center;background:#193d2b;color:#fff;text-decoration:none;padding:0 18px}.launch:hover{background:#24593e;transform:translateY(-1px)}.launch:disabled{opacity:.42;cursor:not-allowed;transform:none}.status{min-height:14px;margin:7px 2px 0;color:#597064;font-size:10px}.status.error{color:#a13f35}.mission h1{font-size:clamp(30px,6vw,52px);max-width:680px}.mission-top{display:flex;justify-content:space-between;align-items:center}.mission-top>span{font:800 9px ui-monospace,SFMono-Regular,monospace;color:#496859}.clamp{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden;max-width:680px}.mission-stats{display:flex;gap:8px;margin:9px 0 12px}.mission-stats span{padding:7px 9px;border-radius:8px;background:#e5f0dc;color:#5a7064;font-size:10px}.mission-stats strong{color:#1a432f;font-size:12px}.approval{text-align:center;max-width:560px;padding:25px}.approval p:not(.eyebrow){margin:0 auto 16px;color:#587064;font-size:13px}.approval .launch{min-width:220px}.portal{display:flex;justify-content:center;gap:10px;margin-bottom:12px}.portal span{width:42px;height:42px;border-radius:12px;display:grid;place-items:center;background:#dcecbf;color:#1b5034;font:900 16px ui-monospace,monospace;box-shadow:0 7px 18px rgba(25,61,43,.12)}.portal span:nth-child(2){transform:translateY(-8px);background:#1b5034;color:#fff}.success-mark{width:52px;height:52px;border-radius:50%;display:grid;place-items:center;margin:0 auto 12px;background:#1d7448;color:#fff;font-size:25px}.success-actions{display:flex;justify-content:center;gap:8px}.secondary{display:inline-flex;align-items:center;justify-content:center;padding:0 18px;text-decoration:none}.approval[hidden],.panel[hidden]{display:none}@media(max-width:560px){header,footer{padding:0 11px}header span{font-size:8px}.app{grid-template-rows:40px 1fr 34px}.world{inset:40px 0 34px}main{padding:7px}.panel{padding:12px}.lede{font-size:11px}.quest{padding:7px;min-height:64px}.quest strong{font-size:10px}.quest span{font-size:9px}.funding{grid-template-columns:1fr 1fr}.amounts{grid-column:1/-1}.funding .launch{grid-column:2}.funding input{grid-column:1}.mission-stats{margin:7px 0}.mission-stats span{padding:5px 7px}.approval{padding:18px}.success-actions{flex-direction:column}}@media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+.onair{display:inline-flex;align-items:center;gap:5px;margin-right:6px;padding:3px 6px;border-radius:4px;background:#d93025;color:#fff;letter-spacing:.12em}.onair i{width:6px;height:6px;border-radius:50%;background:#fff;animation:onair 1.4s ease-in-out infinite}.mission h1.single{font-size:clamp(22px,4vw,32px);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.live{margin:8px 0 8px;padding:9px 11px;border-left:3px solid #d93025;border-radius:0 10px 10px 0;background:#fff}.live-who{margin:0 0 3px;font:700 10px ui-monospace,SFMono-Regular,monospace;letter-spacing:.06em;color:#3a5a48;text-transform:uppercase}.live-who b{color:#13281d}.live-text{margin:0;min-height:3.9em;font:italic 13px/1.3 Georgia,serif;color:#2b4436;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:3;overflow:hidden;overflow-wrap:anywhere}.crew{display:flex;gap:6px;overflow-x:auto;margin-bottom:9px;scrollbar-width:none}.member{flex-shrink:0;display:inline-flex;align-items:center;gap:6px;min-height:26px;padding:0 10px;border:1px solid rgba(25,61,43,.18);border-radius:999px;background:#f8fbf5;color:#294c39;font:700 11px inherit}.member i{width:7px;height:7px;border-radius:50%;background:#9fb3a5}.member[data-state=running] i,.member[data-state=pending] i{background:#33a668;animation:onair 1.6s ease-in-out infinite}.member[data-state=completed] i{background:#1a432f}.member[data-state=failed] i{background:#c0392b}.member.on{background:#1a3d2c;color:#fff;border-color:#1a3d2c}.member.pinned{box-shadow:0 0 0 2px #d9edb4}.status a{color:#1a432f;font-weight:700}@media (prefers-reduced-motion:reduce){.onair i,.member i{animation:none}}
 `
 
 const client = `
@@ -187,6 +205,45 @@ if(frame.kind==='start'){
   document.getElementById('custom-pick').addEventListener('click',customPick);
   custom.addEventListener('keydown',event=>{if(event.key==='Enter')customPick()});
   action.disabled=true;
+}
+if(frame.live){
+  const who=document.getElementById('live-who'),kind=document.getElementById('live-kind'),box=document.getElementById('live-text'),crew=document.getElementById('crew'),elapsed=document.getElementById('elapsed'),working=document.getElementById('working'),watch=document.getElementById('watch');
+  const members=new Map(frame.live.crew.map(member=>[member.id,member]));
+  const streams=new Map();
+  let pinned=null,speaking='lead';
+  const name=id=>id==='lead'?'Lead researcher':(members.get(id)||{}).name||'Explorer';
+  const paint=()=>{
+    const id=pinned||speaking,stream=streams.get(id)||{};
+    who.textContent=name(id);kind.textContent=stream.kind||'is working';
+    box.textContent=(stream.text||'').slice(-240)||(members.get(id)||{}).action||'Tuning in…';
+    const busy=[...members.values()].filter(member=>member.state==='running'||member.state==='pending').length;
+    working.textContent=busy+' OF '+members.size+' EXPLORERS AT WORK';
+    if(watch)watch.href=new URL(frame.url).origin+'/s/'+encodeURIComponent(frame.swarm.id)+(id==='lead'?'':'?who='+encodeURIComponent(id));
+    crew.replaceChildren(...[['lead',{name:'Lead',state:'running'}],...members].map(([id,member])=>{
+      const button=document.createElement('button');button.type='button';button.className='member'+(id===(pinned||speaking)?' on':'')+(id===pinned?' pinned':'');button.dataset.state=member.state;
+      const dot=document.createElement('i');button.append(dot,id==='lead'?'Lead':member.name);
+      button.addEventListener('click',()=>{pinned=pinned===id?null:id;paint()});return button;
+    }));
+  };
+  const write=(id,label,delta,item,offset)=>{
+    const stream=streams.get(id)||{},base=stream.item===item?stream.text||'':'';
+    streams.set(id,{item,kind:label,text:(offset===null||offset===undefined?base+delta:base.slice(0,offset)+delta).slice(-2000)});speaking=id;paint();
+  };
+  const open=()=>{
+    const source=new EventSource('/v1/swarms/'+encodeURIComponent(frame.swarm.id)+'/live');
+    source.onmessage=message=>{
+      const event=JSON.parse(message.data);
+      if(event.type==='thinking')write('lead','is thinking',event.delta,event.item,null);
+      else if(event.type==='text')write('lead','is writing',event.delta,event.item,event.offset);
+      else if(event.type==='delta')write(event.who||'lead',event.channel==='thinking'?'is thinking':event.channel==='input'?'is writing code':'is writing',event.delta,event.item,event.offset);
+      else if(event.type==='researcher'){members.set(event.researcher.id,event.researcher);paint()}
+      else if(event.type==='entry'&&event.entry.kind!=='thinking'){const id=event.entry.who||'lead';streams.set(id,{item:'entry:'+event.entry.event,kind:event.entry.kind==='output'?'got back':event.entry.kind==='message'?'said':'did',text:event.entry.kind==='output'?event.entry.detail||event.entry.text:event.entry.text});speaking=id;paint()}
+      else if(event.type==='end'||event.type==='idle'){source.close();setTimeout(open,event.type==='end'?1500:5000)}
+    };
+    source.onerror=()=>{source.close();setTimeout(open,4000)};
+  };
+  const tick=()=>{const seconds=Math.max(0,Math.floor((Date.now()-frame.live.startedAt)/1000));elapsed.textContent=Math.floor(seconds/60)+'m '+String(seconds%60).padStart(2,'0')+'s'};
+  open();paint();tick();setInterval(tick,1000);
 }
 async function send(path,options){
   const response=await fetch(path,options);

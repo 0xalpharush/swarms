@@ -1,5 +1,5 @@
 import * as Answer from '../shared/Answer.ts'
-import type { Budget, BudgetRequested, Budgeted, Config, Contributed, Contribution, Currency, Detail, Entry, Kind, Note, Pledge, Pledged, Requested, Researcher, Round, Status, Summary, Token } from '../shared/Api.ts'
+import type { Budget, BudgetRequested, Budgeted, Config, Contributed, Contribution, Currency, Detail, Entry, Kind, Live as LiveEvent, Note, Pledge, Pledged, Requested, Researcher, Round, Status, Summary, Token } from '../shared/Api.ts'
 import { decimal, units } from '../shared/Memo.ts'
 
 type Line = readonly [Kind, string, (string | null)?]
@@ -104,10 +104,12 @@ function build(input: {
   const feed = input.lines.map(([kind, text, detail], index): Entry => ({
     at: at(input.lines.length - index) + (index % 3) * 11_000,
     detail: detail ?? null,
+    event: null,
     kind,
     round: Math.max(1, input.history.length),
     seq: index + 1,
     text,
+    who: null,
   }))
   return settle({
     budgets,
@@ -180,7 +182,7 @@ function settle(swarm: Live) {
 
 function push(swarm: Live, kind: Kind, text: string, detail: string | null, when: number) {
   const seq = (swarm.feed.at(-1)?.seq ?? 0) + 1
-  swarm.feed.push({ at: when, detail, kind, round: Math.max(1, swarm.rounds), seq, text })
+  swarm.feed.push({ at: when, detail, event: null, kind, round: Math.max(1, swarm.rounds), seq, text, who: null })
   swarm.updatedAt = when
 }
 
@@ -490,8 +492,82 @@ export async function swarm(key: string) {
   return delay(detail(await find(key)))
 }
 
-export async function feed(key: string, after: number) {
-  return delay({ entries: (await find(key)).feed.filter((entry) => entry.seq > after) })
+export async function feed(key: string, after: number, filter: { round?: number; who?: string } = {}) {
+  const entries = (await find(key)).feed.filter(
+    (entry) => entry.seq > after && (filter.round === undefined || entry.round === filter.round) && (filter.who === undefined || (entry.who ?? 'lead') === filter.who),
+  )
+  return delay({ entries: entries.slice(0, 200), next: entries.slice(0, 200).at(-1)?.seq ?? after })
+}
+
+const musings = [
+  'The cheapest way to settle this is a matched run: same inputs, same machine size, one variable changed at a time.',
+  'The last result looks too good. Before trusting it, rerun with a cold cache and three seeds.',
+  'Two explorers disagree by 12%. The difference is the input size, not the method; normalise per gigabyte before comparing.',
+  'This direction is not paying off. Write down what was tried so the lead can steer the next round elsewhere.',
+  'A smaller machine is enough here. The workload is memory bound, so more cores only add cost.',
+]
+
+const doings: readonly (readonly [string, string, string])[] = [
+  ['$ python bench.py --seeds 3 --size 1g', '{"cmd":"python bench.py --seeds 3 --size 1g"}', 'seed 0: 41.8 s\nseed 1: 42.1 s\nseed 2: 41.6 s\nmedian 41.8 s (1.53 GiB/s)'],
+  ['$ git log --oneline -5', '{"cmd":"git log --oneline -5"}', 'a41c2e9 Add the matched benchmark harness\n90b3db0 Record baseline measurements'],
+  ['Ran a script: const runs = await Promise.all(sizes.map(measure))', 'const runs = await Promise.all(sizes.map(measure))\ntext(JSON.stringify(runs))', '[{"size":"256m","s":10.4},{"size":"1g","s":41.8},{"size":"4g","s":171.2}]'],
+  ['$ pip install -q zstandard brotli && python compare.py', '{"cmd":"pip install -q zstandard brotli && python compare.py"}', 'zstd -19: ratio 4.12, 38 MB/s\nbrotli -11: ratio 4.31, 6 MB/s\nbz2 -9: ratio 3.95, 14 MB/s'],
+]
+
+export function live(key: string, listener: (event: LiveEvent) => void) {
+  let alive = true
+  let timer: ReturnType<typeof setTimeout> | undefined
+  let event = 1_000_000
+  let turn = 0
+  const later = (ms: number, run: () => void) => {
+    timer = setTimeout(() => alive && run(), ms)
+  }
+  const say = (swarm: Live, who: string | null, kind: Kind, text: string, detail: string | null) => {
+    const entry: Entry = { at: Date.now(), detail, event: ++event, kind, round: Math.max(1, swarm.rounds), seq: 0, text, who }
+    listener({ entry, type: 'entry' })
+    swarm.feed.push({ ...entry, seq: (swarm.feed.at(-1)?.seq ?? 0) + 1 })
+  }
+  const next = async () => {
+    const swarm = await find(key).catch(() => undefined)
+    if (!alive) return
+    if (!swarm || swarm.status !== 'running') {
+      listener({ type: 'idle' })
+      return later(4000, () => void next())
+    }
+    const team = demoTeam(swarm).filter((member) => member.round === swarm.rounds && member.state === 'running')
+    const member = team.length ? team[turn % (team.length + 1)] : undefined
+    const who = member?.id ?? null
+    const thought = musings[turn % musings.length] ?? ''
+    turn++
+    let shown = 0
+    const think = () => {
+      const delta = thought.slice(shown, shown + 3 + (shown % 5))
+      shown += delta.length
+      if (delta) {
+        listener(who === null ? { delta, item: `reasoning:${turn}`, offset: null, type: 'thinking' } : { channel: 'thinking', delta, item: `reasoning:${turn}`, offset: null, type: 'delta', who })
+        return later(45, think)
+      }
+      say(swarm, who, 'thinking', thought, null)
+      const [text, detail, output] = doings[turn % doings.length] ?? doings[0]!
+      later(500, () => {
+        say(swarm, who, 'tool', text, detail)
+        if (member) listener({ researcher: { ...member, action: text, events: member.events + turn, lastSequence: event, toolsCompleted: member.toolsCompleted + Math.floor(turn / 2), updatedAt: Date.now() }, type: 'researcher' })
+        later(1400, () => {
+          say(swarm, who, 'output', text.startsWith('Ran') ? 'Script output' : 'Command output', output)
+          later(900, () => void next())
+        })
+      })
+    }
+    think()
+  }
+  void find(key).then((swarm) => {
+    if (alive && swarm.status === 'running') listener({ round: Math.max(1, swarm.rounds), type: 'round' })
+    void next()
+  })
+  return () => {
+    alive = false
+    clearTimeout(timer)
+  }
 }
 
 export function create(input: { goal: string; title: string }) {

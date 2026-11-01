@@ -1,4 +1,4 @@
-import type { BudgetRequested, Budgeted, Config, Contributed, Currency, Detail, Entry, Issued, Lent, Pledged, Problem, Requested, Summary, Token } from '../shared/Api.ts'
+import type { BudgetRequested, Budgeted, Config, Contributed, Currency, Detail, Entry, Issued, Lent, Live, Pledged, Problem, Requested, Summary, Token } from '../shared/Api.ts'
 import * as Fixtures from './fixtures.ts'
 
 export const fixture = new URLSearchParams(location.search).has('fixture')
@@ -42,8 +42,40 @@ export function swarm(id: string) {
   return fixture ? Fixtures.swarm(id) : request<Detail>(path(id))
 }
 
-export function feed(id: string, after: number) {
-  return fixture ? Fixtures.feed(id, after) : request<{ entries: Entry[] }>(`${path(id)}/feed?after=${after}`)
+export function feed(id: string, after: number, filter: { round?: number; who?: string } = {}) {
+  const query = new URLSearchParams({ after: String(after) })
+  if (filter.round !== undefined) query.set('round', String(filter.round))
+  if (filter.who !== undefined) query.set('who', filter.who)
+  return fixture ? Fixtures.feed(id, after, filter) : request<{ entries: Entry[]; next: number }>(`${path(id)}/feed?${query}`)
+}
+
+export function live(id: string, listener: (event: Live) => void) {
+  if (fixture) return Fixtures.live(id, listener)
+  let alive = true
+  let source: EventSource | undefined
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const again = (ms: number) => {
+    source?.close()
+    if (alive) timer = setTimeout(open, ms)
+  }
+  const open = () => {
+    source = new EventSource(`${path(id)}/live`)
+    source.onmessage = (message) => {
+      const event = JSON.parse(String(message.data)) as Live
+      listener(event)
+      if (event.type === 'end' || event.type === 'idle') again(event.type === 'end' ? 1500 : 4000)
+    }
+    source.onerror = () => {
+      listener({ type: 'idle' })
+      again(3000)
+    }
+  }
+  open()
+  return () => {
+    alive = false
+    source?.close()
+    clearTimeout(timer)
+  }
 }
 
 export function create(input: { goal: string; title: string }) {

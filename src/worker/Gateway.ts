@@ -15,6 +15,7 @@ export type Event = {
     root_session_id?: string
     update?: unknown
   }
+  created_at?: number
   request_id?: string
   seq: number
 }
