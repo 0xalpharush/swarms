@@ -717,11 +717,12 @@ export class Swarm extends DurableObject<Cloudflare.Env> {
     )
     const pending = recent.reduce((sum, item) => sum + BigInt(item.amount), 0n)
     const signed = BigInt(channel.signed)
+    const floor = snapshot ? recent.reduce((most, item) => Payer.max(most, BigInt(item.cumulative)), accepted) : signed
     const spent = snapshot?.spent ?? this.kv.get<string>('spent:' + source.id)
     const need =
       spent === undefined
         ? signed + price
-        : [BigInt(snapshot?.requiredCumulative ?? '0'), signed + 1n, BigInt(spent) + pending + price].reduce(Payer.max)
+        : [BigInt(snapshot?.requiredCumulative ?? '0'), floor + 1n, BigInt(spent) + pending + price].reduce(Payer.max)
     const deposit = BigInt(snapshot?.deposit ?? channel.deposit)
     let topUp: string | undefined
     let additional = 0n
@@ -1399,7 +1400,8 @@ function translate(event: Gateway.Event, context: Viewing): Live[] {
     const events: Live[] = []
     if (next && next !== previous) {
       context.known.set(id, next)
-      events.push({ researcher: next, type: 'researcher' })
+      const moved = !previous || (['action', 'name', 'output', 'parent', 'round', 'state', 'task', 'toolsCompleted'] as const).some((field) => previous[field] !== next[field])
+      if (moved) events.push({ researcher: next, type: 'researcher' })
       if (next.state !== previous?.state || !previous) events.push(said(id, { detail: next.action, kind: 'status', text: `${next.name}: ${next.state}` }))
     }
     const update = outer.update as { event?: { payload?: Record<string, unknown>; type?: string }; type?: string }

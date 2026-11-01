@@ -53,6 +53,16 @@ export function output(value: unknown): string {
   return value === undefined || value === null ? '' : JSON.stringify(value)
 }
 
+export function result(name: string, text: string) {
+  const exited = /^Process exited with code (-?\d+)$/m.exec(text)?.[1]
+  const running = /^Process running with session ID/m.test(text) || /^Script running with cell ID/m.test(text)
+  const marker = /^Output:$/m.exec(text)
+  const body = (/^(Chunk ID|Script (completed|running|failed)|Wall time|Process (exited|running)|Original token count)/.test(text) && marker ? text.slice(marker.index + 'Output:'.length) : text).trim()
+  const label = name === 'exec' ? 'Script' : name === 'exec_command' ? 'Command' : name
+  const status = exited === undefined ? (running ? ' · still running' : '') : exited === '0' ? '' : ` · exit ${exited}`
+  return { body, text: `${label} output${status}` }
+}
+
 export function step(type: string | undefined, payload: Record<string, unknown>): Step | undefined {
   if (type === 'tool.call') return call(payload)
   if (type === 'tool.result') {
@@ -60,7 +70,9 @@ export function step(type: string | undefined, payload: Record<string, unknown>)
     const text = output(payload['result']).trim()
     if (payload['status'] !== 'completed') return { detail: clip(text || JSON.stringify(payload['result'] ?? ''), 2000), kind: 'error', text: `${name} failed` }
     if (quiet.has(name) || !text) return undefined
-    return { detail: clip(text, 2000), kind: 'output', text: `${name === 'exec' ? 'Script' : name === 'exec_command' ? 'Command' : name} output` }
+    const shown = result(name, text)
+    if (!shown.body) return undefined
+    return { detail: clip(shown.body, 2000), kind: 'output', text: shown.text }
   }
   if (type === 'assistant.message') return { detail: null, kind: 'message', text: clip(String(payload['text'] ?? ''), 4000) }
   if (type === 'run.failed') return { detail: clip(JSON.stringify(payload), 2000), kind: 'error', text: 'The run failed.' }

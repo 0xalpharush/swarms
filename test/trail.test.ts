@@ -18,8 +18,11 @@ test('a researcher keeps its own thinking until its model call completes', () =>
 })
 
 test('tool results become outputs, and failures errors', () => {
-  const ok = step('tool.result', { result: [{ type: 'input_text', text: 'Script completed' }, { type: 'input_text', text: '42' }], status: 'completed', tool: 'exec' })
-  assert.deepEqual(ok, { detail: 'Script completed\n42', kind: 'output', text: 'Script output' })
+  const ok = step('tool.result', { result: [{ type: 'input_text', text: 'Script completed\nWall time 0.3 seconds\nOutput:\n' }, { type: 'input_text', text: '42' }], status: 'completed', tool: 'exec' })
+  assert.deepEqual(ok, { detail: '42', kind: 'output', text: 'Script output' })
+  const failed = step('tool.result', { result: 'Chunk ID: 1\nWall time: 0.2 seconds\nProcess exited with code 127\nOriginal token count: 5\nOutput:\nbash: python3: command not found', status: 'completed', tool: 'exec_command' })
+  assert.deepEqual(failed, { detail: 'bash: python3: command not found', kind: 'output', text: 'Command output · exit 127' })
+  assert.equal(step('tool.result', { result: 'Script running with cell ID 4\nWall time 11.0 seconds\nOutput:\n', status: 'completed', tool: 'exec' }), undefined)
   assert.equal(step('tool.result', { result: 'boom', status: 'failed', tool: 'exec_command' })?.kind, 'error')
   assert.equal(step('tool.result', { result: 'x', status: 'completed', tool: 'wait_agent' }), undefined)
   assert.equal(step('tool.call', { arguments: { cmd: 'ls -la' }, tool: 'exec_command' })?.text, '$ ls -la')
