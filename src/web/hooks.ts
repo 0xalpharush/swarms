@@ -110,7 +110,7 @@ const blank: Stream = { at: 0, input: '', inputItem: '', text: '', textItem: '',
 function write(stream: Stream, channel: 'input' | 'text' | 'thinking', item: string, delta: string, offset: number | null): Stream {
   const before = stream[`${channel}Item`] === item ? stream[channel] : ''
   const text = offset === null ? before + delta : before.slice(0, offset) + delta
-  return { ...stream, at: Date.now(), [channel]: text.slice(-6000), [`${channel}Item`]: item }
+  return { ...stream, at: Date.now(), [channel]: text, [`${channel}Item`]: item }
 }
 
 function settle(stream: Stream, entry: Entry): Stream {

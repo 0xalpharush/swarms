@@ -123,14 +123,10 @@ const flows: readonly Flow[] = [
   },
   {
     frames: [
-      { name: 'Ideas and backers', url: swarm('bench-coders', '&scene=in#ideas') },
-      { name: 'Copying an idea', note: 'drafts @swarm in the composer', steps: [{ click: '.idea-row' }], url: swarm('bench-coders', '&scene=in#ideas') },
       { name: 'Copying from a $ chip', steps: [{ wait: 800 }, { click: 'button.said-backed' }], url: swarm('bench-coders', '&scene=in#room') },
-      { name: 'No ideas yet', url: swarm('rust-book-el', '#ideas') },
-      { name: 'Finished, read only', url: swarm('mev-map', '#ideas') },
     ],
-    id: 'ideas',
-    title: 'Ideas',
+    id: 'backed',
+    title: 'Backed notes',
   },
   {
     frames: [
@@ -148,8 +144,6 @@ const flows: readonly Flow[] = [
   },
   {
     frames: [
-      { name: 'Artifacts', url: swarm('bench-coders', '&artifact=leaderboard#artifacts') },
-      { name: 'No artifacts yet', url: swarm('rust-book-el', '#artifacts') },
       { name: 'Machines', note: 'desktop tab', url: swarm('bench-coders', '#machines') },
       { name: 'A sandbox opened', note: 'config and commands', steps: [{ wait: 800 }, { click: '.machine-row' }, { click: '.run button' }], url: swarm('bench-coders', '#machines') },
       { name: 'A lent machine', note: 'price and payout', steps: [{ wait: 8000 }, { click: ".machine-glyph[data-kind='hand']" }], url: swarm('bench-coders', '#machines') },
@@ -159,7 +153,7 @@ const flows: readonly Flow[] = [
       { name: 'About', url: swarm('bench-coders', '#about') },
     ],
     id: 'tabs',
-    title: 'Artifacts, machines and the rest',
+    title: 'Machines, code and the rest',
   },
   {
     frames: [

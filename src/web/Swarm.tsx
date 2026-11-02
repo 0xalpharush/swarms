@@ -5,12 +5,11 @@ import { merge } from '../shared/Trail.ts'
 import * as Api from './api.ts'
 import { here, seeded } from './boot.ts'
 import { Connect } from './Connect.tsx'
-import { Artifacts } from './Artifacts.tsx'
 import { asked, Fund } from './Contribute.tsx'
 import { ago, duration, mach, percent, short, usd } from './format.ts'
 import { useLive, useMedia, useNow, usePoll } from './hooks.ts'
 import { Lost } from './Lost.tsx'
-import { Ideas, Presence } from './Ideas.tsx'
+import { Presence } from './Ideas.tsx'
 import { Machines } from './Machines.tsx'
 import { Markdown } from './Markdown.tsx'
 import { Room } from './Room.tsx'
@@ -20,14 +19,10 @@ import { Bar, Status } from './Visual.tsx'
 
 const Code = lazy(() => import('./Code.tsx').then((module) => ({ default: module.Code })))
 
-const tabs = ['transcript', 'room', 'ideas', 'artifacts', 'code', 'machines', 'about'] as const
+const tabs = ['transcript', 'room', 'code', 'machines', 'about'] as const
 
 type Tab = (typeof tabs)[number]
 
-
-function chosen() {
-  return here().searchParams.get('artifact') ?? undefined
-}
 
 function subscribe(listener: () => void) {
   addEventListener('hashchange', listener)
@@ -58,7 +53,6 @@ export function Swarm(props: { config: Config | undefined; id: string }) {
   const [entries, setEntries] = useState<readonly Entry[]>(() => seeded<Detail>(props.id)?.feed ?? [])
   const [note, setNote] = useState('')
   const [tab, setTab] = useTab()
-  const [artifact, setArtifact] = useState(chosen)
   const [unread, setUnread] = useState(0)
   const [result, setResult] = useState(false)
   const [prefill] = useState(() => asked())
@@ -69,7 +63,6 @@ export function Swarm(props: { config: Config | undefined; id: string }) {
   const wide = useMedia('(min-width: 1100px)')
   const phone = useMedia('(max-width: 799px)')
   const running = detail.data?.status === 'running'
-  const [shelf] = usePoll(() => Api.artifacts(props.id), running ? 30_000 : 60_000, `artifacts:${props.id}`)
   const last = useRef(0)
   const loaded = detail.data !== undefined
   const stream = useLive(props.id, running, (entry) => setEntries((previous) => merge(previous, [entry])))
@@ -85,13 +78,6 @@ export function Swarm(props: { config: Config | undefined; id: string }) {
   useEffect(() => {
     if (detail.data) document.title = `${detail.data.title} · Swarms`
   }, [detail.data?.title])
-
-  useEffect(() => {
-    const url = new URL(location.href)
-    if (artifact) url.searchParams.set('artifact', artifact)
-    else url.searchParams.delete('artifact')
-    history.replaceState(null, '', url)
-  }, [artifact])
 
   useEffect(() => {
     if (!loaded) return
@@ -136,22 +122,15 @@ export function Swarm(props: { config: Config | undefined; id: string }) {
     setFunding(true)
   }
   const fund = <Fund config={props.config} note={note} onDone={() => { reload(); setFunding(false) }} onNote={setNote} prefill={prefill} target={() => Promise.resolve({ id: swarm.id, wallet: swarm.wallet })} title={swarm.title} />
-  const open = (slug: string) => {
-    setArtifact(slug)
-    setTab('artifacts')
-  }
   const choose = (next: Tab) => {
     setTab(next)
   }
-  const room = <Room config={props.config} onArtifact={open} onBack={back} onMessages={heard} onSteered={reload} onUnread={setUnread} swarm={swarm} visible={wide || shown === 'room'} />
-  const count = shelf.data?.artifacts.length ?? 0
+  const room = <Room config={props.config} onBack={back} onMessages={heard} onSteered={reload} onUnread={setUnread} swarm={swarm} visible={wide || shown === 'room'} />
   const labels: Record<Tab, ReactNode> = {
     about: 'About',
-    artifacts: count ? `Artifacts · ${count}` : 'Artifacts',
     code: swarm.code ? `Code · ${swarm.code.name}` : 'Code',
     machines: connected ? `Machines · ${connected}` : 'Machines',
     room: <>Room<Presence members={chat.members} online={chat.online} watching={chat.watching} />{unread > 0 && <span className="tab-count">{unread}</span>}</>,
-    ideas: swarm.notes.length ? `Ideas · ${swarm.notes.length}` : 'Ideas',
     transcript: 'Transcript',
   }
 
@@ -172,7 +151,7 @@ export function Swarm(props: { config: Config | undefined; id: string }) {
         <section className="room-main">
           {phone ? (
             <nav aria-label="Swarm" className="phone-views" role="tablist">
-              {(['transcript', 'room', 'ideas', 'artifacts'] as const).map((item) => (
+              {(['transcript', 'room', 'code', 'machines'] as const).map((item) => (
                 <button aria-selected={shown === item} key={item} onClick={() => setTab(item)} role="tab" type="button">
                   {labels[item]}
                 </button>
@@ -220,8 +199,6 @@ export function Swarm(props: { config: Config | undefined; id: string }) {
           )}
           {shown !== 'transcript' && shown !== 'room' && (
             <div className="room-panel room-page-panel" data-tab={shown} id={`panel-${shown}`} role="tabpanel">
-              {shown === 'artifacts' && <Artifacts artifacts={shelf.data?.artifacts} error={shelf.error} onSelect={setArtifact} selected={artifact} working={live} />}
-              {shown === 'ideas' && <Ideas done={swarm.status === 'done'} me={chat.me} members={chat.members} notes={swarm.notes} onBack={back} online={chat.online} />}
               {shown === 'code' && <Repository config={props.config} swarm={swarm} />}
               {shown === 'machines' && (
                 <>

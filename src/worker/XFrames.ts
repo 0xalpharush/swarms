@@ -441,7 +441,7 @@ if(frame.kind==='swarm'){
   }
   if(frame.live&&!demo&&!query.has('demo')){
     let stream={item:'',text:'',who:null};
-    const write=(who,delta,item,offset)=>{const base=stream.item===item&&stream.who===who?stream.text:'';stream={item,text:(offset===null||offset===undefined?base+delta:base.slice(0,offset)+delta).slice(-600),who};nowLine.hidden=false;nowWho.textContent=who||'Agent';nowText.textContent=stream.text;stick(panes.transcript)};
+    const write=(who,delta,item,offset)=>{const base=stream.item===item&&stream.who===who?stream.text:'';stream={item,text:(offset===null||offset===undefined?base+delta:base.slice(0,offset)+delta),who};nowLine.hidden=false;nowWho.textContent=who||'Agent';nowText.textContent=stream.text;stick(panes.transcript)};
     const open=()=>{
       const source=new EventSource('/v1/swarms/'+encodeURIComponent(frame.swarm.id)+'/live');
       source.onmessage=message=>{const event=JSON.parse(message.data);

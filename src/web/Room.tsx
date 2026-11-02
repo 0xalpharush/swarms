@@ -60,7 +60,6 @@ function Backed(props: { onBack: ((note: string) => void) | undefined; steer: No
 
 export function Room(props: {
   config: Config | undefined
-  onArtifact: (slug: string) => void
   onBack: (note: string) => void
   onMessages?: (messages: readonly Said[], me: Me | null, members: readonly Member[], online: readonly string[], watching: number) => void
   onSteered: () => void
@@ -365,20 +364,14 @@ export function Room(props: {
         {loaded && !messages.length && <li className="room-empty">Quiet so far. Be the first to say hi.</li>}
         {messages.map((item, index) => {
           const author = item.author
+          if (item.artifact) return null
           if (!author)
             return (
-              <li className="said said-system" data-artifact={!!item.artifact} key={item.id}>
-                {item.artifact ? (
-                  <button className="said-link" onClick={() => item.artifact && props.onArtifact(item.artifact.slug)} type="button">
-                    <Words handles={handles} me={myNames} text={item.text} /> <span aria-hidden="true">→</span>
-                    <time dateTime={new Date(item.at).toISOString()}>{minute(item.at)}</time>
-                  </button>
-                ) : (
-                  <p>
-                    <Words handles={handles} me={myNames} text={item.text} />
-                    <time dateTime={new Date(item.at).toISOString()}>{minute(item.at)}</time>
-                  </p>
-                )}
+              <li className="said said-system" key={item.id}>
+                <p>
+                  <Words handles={handles} me={myNames} text={item.text} />
+                  <time dateTime={new Date(item.at).toISOString()}>{minute(item.at)}</time>
+                </p>
               </li>
             )
           const previous = messages[index - 1]
