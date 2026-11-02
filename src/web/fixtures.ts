@@ -1,5 +1,5 @@
 import * as Answer from '../shared/Answer.ts'
-import type { Budget, BudgetRequested, Budgeted, Chatter, Config, Contributed, Contribution, Currency, Detail, Entry, Kind, Live as LiveEvent, Me, Member, Note, Pledge, Pledged, Posted, Requested, Researcher, Room, Round, Said, Status, Summary, Token, Way } from '../shared/Api.ts'
+import type { Account, Budget, BudgetRequested, Budgeted, Chatter, Config, Contributed, Contribution, Currency, Detail, Entry, Kind, Live as LiveEvent, Me, Member, Note, Pledge, Pledged, Posted, Requested, Researcher, Room, Round, Said, Status, Summary, Token, Way } from '../shared/Api.ts'
 import { decimal, maxNote, units } from '../shared/Memo.ts'
 import * as Mention from '../shared/Mention.ts'
 
@@ -693,13 +693,38 @@ const remarks = [
 
 const listeners = new Map<string, Set<(event: Chatter | { type: 'open' | 'closed' }) => void>>()
 
+const names = new Map<string, string>([
+  [people[2], 'mira'],
+  [people[4], 'tensorbox'],
+])
+
+function called(address: string) {
+  return names.get(address.toLowerCase()) ?? Mention.handle(address)
+}
+
 function spoken(text: string) {
-  return text.replace(/@(\d)\b/g, (_, index: string) => `@${Mention.handle(people[Number(index)] ?? visitor)}`)
+  return text.replace(/@(\d)\b/g, (_, index: string) => `@${called(people[Number(index)] ?? visitor)}`)
 }
 
 function mentions(swarm: Live, text: string) {
   const named = Mention.mentioned(text)
-  return members(swarm).filter((member) => named.includes(member.handle)).map((member) => member.address)
+  return members(swarm).filter((member) => named.includes(member.handle) || named.includes(Mention.handle(member.address))).map((member) => member.address)
+}
+
+export function account(who: `0x${string}` | undefined): Promise<Account> {
+  if (!who) return Promise.reject(fail(401, 'unauthorized', 'Sign in with Tempo Wallet to read your account.'))
+  return delay({ address: who, handle: called(who), name: names.get(who.toLowerCase()) ?? null })
+}
+
+export function rename(who: `0x${string}` | undefined, name: string | null): Promise<Account> {
+  if (!who) return Promise.reject(fail(401, 'unauthorized', 'Sign in with Tempo Wallet to set your username.'))
+  const wanted = name?.trim().replace(/^@/, '').toLowerCase() || null
+  const wrong = wanted ? Mention.invalid(wanted) : undefined
+  if (wrong) return Promise.reject(fail(400, 'invalid_request', wrong))
+  if (wanted && [...names].some(([address, taken]) => taken === wanted && address !== who.toLowerCase())) return Promise.reject(fail(409, 'conflict', `@${wanted} is taken. Pick another.`))
+  if (wanted) names.set(who.toLowerCase(), wanted)
+  else names.delete(who.toLowerCase())
+  return account(who)
 }
 
 function steering(swarm: Live, amount: string, note: string): Said['steer'] {
@@ -741,7 +766,7 @@ function members(swarm: Live): Member[] {
     address,
     available: decimal(item.backed > item.steered ? item.backed - item.steered : 0n),
     backed: decimal(item.backed),
-    handle: Mention.handle(address),
+    handle: called(address),
     since: item.since,
     steered: decimal(item.steered),
     ways: [...item.ways],
@@ -751,7 +776,7 @@ function members(swarm: Live): Member[] {
 function me(swarm: Live, who: `0x${string}` | undefined): Me | null {
   if (!who) return null
   const found = members(swarm).find((member) => member.address === who)
-  return found ? { ...found, member: true } : { address: who, available: '0.000000', backed: '0.000000', handle: Mention.handle(who), member: false, since: 0, steered: '0.000000', ways: [] }
+  return found ? { ...found, member: true } : { address: who, available: '0.000000', backed: '0.000000', handle: called(who), member: false, since: 0, steered: '0.000000', ways: [] }
 }
 
 function fail(status: number, code: string, detail: string) {

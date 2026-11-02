@@ -6,7 +6,6 @@ import { advance, researchId } from '../shared/Research.ts'
 import { type Buffers, clip, memory, narrate, redact } from '../shared/Trail.ts'
 import * as Answer from '../shared/Answer.ts'
 import * as Memo from '../shared/Memo.ts'
-import * as Mention from '../shared/Mention.ts'
 import * as Chain from './Chain.ts'
 import * as Gateway from './Gateway.ts'
 import * as Hands from './Hands.ts'
@@ -167,7 +166,7 @@ export class Swarm extends DurableObject<Cloudflare.Env> {
       `${short(input.contributor)} pledged ${trim(input.amount)} ${Chain.currencies[input.token].symbol}${input.note ? ' with a note' : ''}`,
       input.note,
     )
-    this.announce(`@${Mention.handle(input.contributor)} pledged ${trim(input.amount)} ${Chain.currencies[input.token].symbol}${input.note ? ` behind "${input.note}"` : ''}.`)
+    this.announce(`@${(await Store.account(this.env, input.contributor)).handle} pledged ${trim(input.amount)} ${Chain.currencies[input.token].symbol}${input.note ? ` behind "${input.note}"` : ''}.`)
     if (input.noteId) await this.steer(input.swarm, input.noteId, `pledged ${trim(input.amount)} ${Chain.currencies[input.token].symbol}`)
     if (!this.kv.get<string>('turn')) await this.ctx.storage.setAlarm(Date.now())
   }
@@ -180,7 +179,7 @@ export class Swarm extends DurableObject<Cloudflare.Env> {
       `${short(input.contributor)} sent ${trim(input.amount)} ${Chain.tokens[input.token].symbol}${input.note ? ' with a note' : ''}`,
       [input.note, input.hash].filter(Boolean).join('\n'),
     )
-    this.announce(`@${Mention.handle(input.contributor)} sent ${trim(input.amount)} ${Chain.tokens[input.token].symbol}${input.note ? ` behind "${input.note}"` : ''}.`)
+    this.announce(`@${(await Store.account(this.env, input.contributor)).handle} sent ${trim(input.amount)} ${Chain.tokens[input.token].symbol}${input.note ? ` behind "${input.note}"` : ''}.`)
     if (input.noteId) await this.steer(input.swarm, input.noteId, `sent ${trim(input.amount)} ${Chain.tokens[input.token].symbol}`)
     if (!this.kv.get<string>('turn')) await this.ctx.storage.setAlarm(Date.now())
   }
@@ -192,7 +191,7 @@ export class Swarm extends DurableObject<Cloudflare.Env> {
       `${short(input.contributor)} set a budget of ${trim(input.amount)} ${Chain.currencies[input.token].symbol} ${per(input.period)}${input.note ? ' with a note' : ''}`,
       input.note,
     )
-    this.announce(`@${Mention.handle(input.contributor)} set a daily budget of ${trim(input.amount)} ${Chain.currencies[input.token].symbol}${input.note ? ` behind "${input.note}"` : ''}.`)
+    this.announce(`@${(await Store.account(this.env, input.contributor)).handle} set a daily budget of ${trim(input.amount)} ${Chain.currencies[input.token].symbol}${input.note ? ` behind "${input.note}"` : ''}.`)
     if (!this.kv.get<string>('turn')) await this.ctx.storage.setAlarm(Date.now())
   }
 

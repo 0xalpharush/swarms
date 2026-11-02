@@ -273,6 +273,8 @@ export type Member = {
 
 export type Me = Member & { member: boolean }
 
+export type Account = { address: `0x${string}`; handle: string; name: string | null }
+
 export type Steer = { amount: string; backers: number; note: string; noteId: string; round: number | null; share: number; weight: string }
 
 export type Said = {

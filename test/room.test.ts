@@ -24,12 +24,26 @@ test('the idea is the message without @swarm', () => {
   assert.equal(Mention.idea('@quark-1a2b is right, @swarm drop Qwen'), '@quark-1a2b is right, drop Qwen')
 })
 
-test('mentions are lowercased handles, each once', () => {
-  assert.deepEqual(Mention.mentioned('@Quark-1A2B and @quark-1a2b, @fern-0000 and @swarm'), ['quark-1a2b', 'fern-0000'])
-  assert.deepEqual(Mention.mentioned('@quark-1a2bc is not a handle'), [])
+test('mentions are lowercased names, each once, without @swarm or addresses in email', () => {
+  assert.deepEqual(Mention.mentioned('@Quark-1A2B and @quark-1a2b, @mira_k and @swarm'), ['quark-1a2b', 'mira_k'])
+  assert.deepEqual(Mention.mentioned('write to me@georgios.dev or @ab'), [])
+  assert.deepEqual(Mention.mentioned('thanks, @tensorbox.'), ['tensorbox'])
 })
 
 test('pieces keep the text and split out every mention', () => {
-  assert.deepEqual(Mention.pieces('hi @quark-1a2b, @swarm go'), ['hi ', '@quark-1a2b', ', ', '@swarm', ' go'])
+  assert.deepEqual(Mention.pieces('hi @quark-1a2b, @swarm go @mira'), ['hi ', '@quark-1a2b', ', ', '@swarm', ' go ', '@mira'])
+  assert.deepEqual(Mention.pieces('me@swarm.dev'), ['me@swarm.dev'])
   assert.equal(Mention.pieces('plain').join(''), 'plain')
+})
+
+test('a username is 3 to 24 safe characters and not a reserved or address-made name', () => {
+  assert.equal(Mention.invalid('georgios'), undefined)
+  assert.equal(Mention.invalid('Mira_K-2'), undefined)
+  assert.match(Mention.invalid('ab') ?? '', /3 to 24/)
+  assert.match(Mention.invalid('9lives') ?? '', /starting with a letter/)
+  assert.match(Mention.invalid('trailing-') ?? '', /ending with a letter or digit/)
+  assert.match(Mention.invalid('has space') ?? '', /letters, digits/)
+  assert.match(Mention.invalid('swarm') ?? '', /reserved/)
+  assert.match(Mention.invalid('quark-1a2b') ?? '', /made from an address/)
+  assert.match(Mention.invalid('a'.repeat(25)) ?? '', /3 to 24/)
 })

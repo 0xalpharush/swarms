@@ -1,4 +1,4 @@
-import type { Answer, Budget, Contribution, Currency, Member, Note, Pledge, Summary, Way } from '../shared/Api.ts'
+import type { Account, Answer, Budget, Contribution, Currency, Member, Note, Pledge, Summary, Way } from '../shared/Api.ts'
 import * as Memo from '../shared/Memo.ts'
 import * as Mention from '../shared/Mention.ts'
 
@@ -491,11 +491,11 @@ const steered = 'coalesce((select sum(cast(amount as integer)) from steers where
 export async function members(env: Cloudflare.Env, swarm: string): Promise<Member[]> {
   const { results } = await env.DB.prepare(
     `select b.contributor as address, sum(b.amount) as backed, sum(case when b.note_id is not null then b.amount else 0 end) + ${steered} as steered,
-      group_concat(distinct b.way) as ways, min(b.at) as since
+      group_concat(distinct b.way) as ways, min(b.at) as since, (select name from names where address = b.contributor) as name
     from (${backing}) b group by b.contributor order by min(b.at)`,
   )
     .bind(swarm)
-    .all<{ address: `0x${string}`; backed: number; since: number; steered: number; ways: string }>()
+    .all<{ address: `0x${string}`; backed: number; name: string | null; since: number; steered: number; ways: string }>()
   return results.map((row) => {
     const backed = BigInt(row.backed)
     const allocated = BigInt(row.steered)
@@ -503,12 +503,37 @@ export async function members(env: Cloudflare.Env, swarm: string): Promise<Membe
       address: row.address,
       available: Memo.decimal(backed > allocated ? backed - allocated : 0n),
       backed: Memo.decimal(backed),
-      handle: Mention.handle(row.address),
+      handle: row.name ?? Mention.handle(row.address),
       since: row.since,
       steered: Memo.decimal(allocated),
       ways: ways.filter((way) => row.ways.split(',').includes(way)),
     }
   })
+}
+
+export async function account(env: Cloudflare.Env, address: `0x${string}`): Promise<Account> {
+  const lower = address.toLowerCase() as `0x${string}`
+  const row = await env.DB.prepare('select name from names where address = ?').bind(lower).first<{ name: string }>()
+  return { address: lower, handle: row?.name ?? Mention.handle(lower), name: row?.name ?? null }
+}
+
+export async function rename(env: Cloudflare.Env, address: `0x${string}`, name: string | null) {
+  const lower = address.toLowerCase()
+  if (!name) {
+    await env.DB.prepare('delete from names where address = ?').bind(lower).run()
+    return true
+  }
+  try {
+    await env.DB.prepare(
+      'insert into names (address, name, updated_at) values (?, ?, ?) on conflict (address) do update set name = excluded.name, updated_at = excluded.updated_at',
+    )
+      .bind(lower, name, Date.now())
+      .run()
+    return true
+  } catch (error) {
+    if (/unique/i.test(String(error))) return false
+    throw error
+  }
 }
 
 export async function steer(

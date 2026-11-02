@@ -1,5 +1,7 @@
 export const maxText = 1000
 
+export const maxName = 24
+
 export const smallestSteer = 10_000n
 
 const words = [
@@ -9,13 +11,27 @@ const words = [
   'raven', 'reef', 'rune', 'sable', 'sorrel', 'thorn', 'tidal', 'tundra', 'umber', 'vapor', 'vector', 'walrus', 'willow', 'xenon', 'yarrow', 'zephyr',
 ] as const
 
+const reserved = new Set(['admin', 'all', 'everyone', 'here', 'lead', 'swarm', 'swarms', 'system', 'you'])
+
+const shape = /^[a-z][a-z0-9_-]{1,22}[a-z0-9]$/
+
+const made = /^[a-z]+-[0-9a-f]{4}$/
+
 const swarm = /(^|[^\w@-])@swarm(?![\w-])/gi
 
-const person = /@([a-z]+-[0-9a-f]{4})(?![\w-])/gi
+const person = /(?<![\w@-])@([a-z][a-z0-9_-]{1,22}[a-z0-9])(?![\w-])/gi
 
 export function handle(address: string) {
   const lower = address.toLowerCase()
   return `${words[Number.parseInt(lower.slice(2, 10), 16) % words.length]}-${lower.slice(-4)}`
+}
+
+export function invalid(name: string) {
+  const lower = name.toLowerCase()
+  if (!shape.test(lower)) return 'A username is 3 to 24 letters, digits, hyphens or underscores, starting with a letter and ending with a letter or digit.'
+  if (reserved.has(lower)) return `@${lower} is reserved.`
+  if (made.test(lower)) return `@${lower} looks like a name made from an address, such as @quark-1a2b. Pick another.`
+  return undefined
 }
 
 export function steers(text: string) {
@@ -28,9 +44,9 @@ export function idea(text: string) {
 }
 
 export function mentioned(text: string) {
-  return [...new Set([...text.matchAll(person)].map((match) => (match[1] ?? '').toLowerCase()))]
+  return [...new Set([...text.matchAll(person)].map((match) => (match[1] ?? '').toLowerCase()))].filter((name) => name !== 'swarm')
 }
 
 export function pieces(text: string) {
-  return text.split(/(@swarm(?![\w-])|@[a-z]+-[0-9a-f]{4}(?![\w-]))/gi).filter(Boolean)
+  return text.split(/((?<![\w@-])@[a-z][a-z0-9_-]{1,22}[a-z0-9](?![\w-]))/gi).filter(Boolean)
 }

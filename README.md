@@ -6,7 +6,7 @@ Swarms is a community-funded science project. Anyone can propose an open questio
 
 ## Start or join
 
-The home page asks where you want to start: ask a new question, or back a swarm already at work, picked from the tiles of the running ones. A swarm's page puts its live transcript first and its room beside it. Backers talk in the room, mention each other with `@handle`, and steer the swarm with `@swarm`: such a message puts part of their backing behind the idea as a note, which the lead weighs by the money behind it. Anyone can read along.
+The home page asks where you want to start: ask a new question, or back a swarm already at work, picked from the tiles of the running ones. A swarm's page puts its live transcript first and its room beside it. Backers pick a username, talk in the room, mention each other with `@name`, and steer the swarm with `@swarm`: such a message puts part of their backing behind the idea as a note, which the lead weighs by the money behind it. Anyone can read along.
 
 In the transcript, click a researcher to inspect its assignment, current action and reported result. These states come from the runtime's named subagent events. Completed actions count confirmed tool results; there is no invented percentage of a scientific breakthrough. Earlier snapshots remain available by round. Runs from before individual tracking show aggregate counts until new events arrive.
 

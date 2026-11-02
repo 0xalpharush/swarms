@@ -2,13 +2,20 @@ import { Mach, Provider, tempoWallet } from 'accounts'
 import { type Address, encodeFunctionData, type Hex } from 'viem'
 import { Abis, Actions, createClient, http } from 'viem/tempo'
 import { tempo } from 'viem/tempo/chains'
-import type { Config, Currency } from '../shared/Api.ts'
-import { authorize as bear, fixture } from './api.ts'
+import type { Account, Config, Currency } from '../shared/Api.ts'
+import * as Api from './api.ts'
+import { fixture } from './api.ts'
 import * as Fixtures from './fixtures.ts'
 
 export type Session = { address: Address; token: string }
 
-export type State = { address: Address | undefined; balance: bigint | undefined; balances: Partial<Record<Currency, bigint>>; session: Session | undefined }
+export type State = {
+  account: Account | undefined
+  address: Address | undefined
+  balance: bigint | undefined
+  balances: Partial<Record<Currency, bigint>>
+  session: Session | undefined
+}
 
 let provider: ReturnType<typeof Provider.create> | undefined
 
@@ -24,9 +31,9 @@ function stored(): Session | undefined {
   }
 }
 
-let state: State = { address: undefined, balance: undefined, balances: {}, session: stored() }
+let state: State = { account: undefined, address: undefined, balance: undefined, balances: {}, session: stored() }
 
-bear(state.session?.token)
+Api.authorize(state.session?.token)
 
 const listeners = new Set<() => void>()
 
@@ -41,7 +48,7 @@ function set(next: Partial<State>) {
   state = { ...state, ...next }
   if (next.address && !fixture) localStorage.setItem(remembered, next.address)
   if ('session' in next) {
-    bear(next.session?.token)
+    Api.authorize(next.session?.token)
     if (!fixture) {
       if (next.session) localStorage.setItem(kept, JSON.stringify(next.session))
       else localStorage.removeItem(kept)
@@ -102,6 +109,7 @@ export async function signIn(config: Config) {
     await new Promise((resolve) => setTimeout(resolve, 900))
     const session = { address: Fixtures.visitor, token: 'fixture' } satisfies Session
     set({ address: session.address, session })
+    void identify()
     return session
   }
   const result = (await wallet().request({
@@ -112,14 +120,34 @@ export async function signIn(config: Config) {
   const token = account?.capabilities?.auth?.token
   if (!account || !token) throw new Error('Tempo Wallet returned no session.')
   const session = { address: account.address.toLowerCase() as Address, token }
-  set({ address: account.address, session })
+  set({ account: undefined, address: account.address, session })
   void refresh(config).catch(() => {})
+  void identify()
   return session
+}
+
+export async function identify() {
+  const token = state.session?.token
+  if (!token) return undefined
+  try {
+    const account = await Api.account()
+    if (state.session?.token === token) set({ account })
+    return account
+  } catch (error) {
+    if (error instanceof Api.Failure && error.status === 401 && state.session?.token === token) signOut()
+    return undefined
+  }
+}
+
+export async function rename(name: string | null) {
+  const account = await Api.rename(name)
+  set({ account })
+  return account
 }
 
 export function signOut() {
   const token = state.session?.token
-  set({ session: undefined })
+  set({ account: undefined, session: undefined })
   if (token && !fixture) void fetch('/v1/auth/logout', { headers: { authorization: `Bearer ${token}` }, method: 'POST' }).catch(() => {})
 }
 

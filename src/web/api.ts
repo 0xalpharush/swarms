@@ -1,4 +1,4 @@
-import type { BudgetRequested, Budgeted, Chatter, Config, Contributed, Currency, Detail, Entry, Issued, Lent, Live, Pledged, Posted, Problem, Requested, Room, Summary, Token } from '../shared/Api.ts'
+import type { Account, BudgetRequested, Budgeted, Chatter, Config, Contributed, Currency, Detail, Entry, Issued, Lent, Live, Pledged, Posted, Problem, Requested, Room, Summary, Token } from '../shared/Api.ts'
 import * as Fixtures from './fixtures.ts'
 
 export const fixture = new URLSearchParams(location.search).has('fixture')
@@ -113,6 +113,14 @@ export function hand(id: string, label: string) {
   return fixture
     ? Promise.reject(new Failure({ detail: 'Hands need the live site.' }, 503))
     : request<Issued>(`${path(id)}/hands`, label ? { label } : {})
+}
+
+export function account() {
+  return fixture ? Fixtures.account(bearer ? Fixtures.visitor : undefined) : request<Account>('/api/me')
+}
+
+export function rename(name: string | null) {
+  return fixture ? Fixtures.rename(bearer ? Fixtures.visitor : undefined, name) : request<Account>('/api/me', { name })
 }
 
 export function room(id: string, query: { after?: number; before?: number } = {}) {

@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { Issued, Lent, Summary } from '../shared/Api.ts'
 import * as Api from './api.ts'
-import * as Mention from '../shared/Mention.ts'
 import { Code } from './Docs.tsx'
 import { message, useWallet } from './hooks.ts'
 
@@ -13,7 +12,7 @@ export function Connect(props: { swarm: Summary }) {
   const [form, setForm] = useState<Form>('cli')
   const [lent, setLent] = useState<readonly Lent[]>([])
   const [state, setState] = useState<{ busy?: boolean; error?: string }>({})
-  const session = useWallet().session
+  const wallet = useWallet()
   const done = props.swarm.status === 'done'
 
   useEffect(() => {
@@ -50,8 +49,8 @@ export function Connect(props: { swarm: Summary }) {
       </p>
       {!done && (
         <p className="fine">
-          {session
-            ? `Issued to @${Mention.handle(session.address)}, so lending it also lets you post in the swarm's room.`
+          {wallet.session
+            ? `Issued to ${wallet.account ? `@${wallet.account.handle}` : 'you'}, so lending it also lets you post in the swarm's room.`
             : "Sign in with Tempo Wallet in the room first, and lending a machine also lets you post there."}
         </p>
       )}

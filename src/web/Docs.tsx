@@ -41,6 +41,8 @@ const routes = [
   ['GET', '/v1/swarms/:id/chat/live', 'A WebSocket of new messages, presence and typing.', ''],
   ['POST', '/v1/auth/challenge', 'A sign-in message for Tempo Wallet to sign.', '{ chainId }'],
   ['POST', '/v1/auth', 'Verify the signature; answers a session token.', '{ address, message, signature }'],
+  ['GET', '/v1/me', 'Your account: address, username and the handle rooms show.', ''],
+  ['POST', '/v1/me', 'Set your username, or clear it with null.', '{ name }'],
   ['POST', '/v1/swarms/:id/hands', 'Issue a hand to lend a machine.', '{ label? }'],
   ['GET', '/v1/swarms/:id/pledges/:pledge', 'Pledge status; polls Tempo Wallet while pending.', '?wait=<s>'],
   ['POST', '/v1/swarms/:id/pledges/:pledge', 'Approve with a key authorization or transaction, or poll.', '{ keyAuthorization } | { transaction } | {}'],
@@ -291,7 +293,7 @@ export function Docs(props: { config: Config | undefined }) {
         intro={
           <>
             <p>
-              Every swarm has a room where its backers talk. Anyone can read it. Anyone who pledged, sent, has a daily budget or lent a machine while signed in can post, and mentions others as <code>@handle</code>, a name made from their address.
+              Every swarm has a room where its backers talk. Anyone can read it. Anyone who pledged, sent, has a daily budget or lent a machine while signed in can post, and mentions others as <code>@handle</code>: their username, set with <code>POST /v1/me</code>, or else a name made from their address.
             </p>
             <p>
               A message with <code>@swarm</code> steers: <code>steer</code> is how much of the author's backing, not yet behind a note, goes behind the rest of the message as a note. It moves weight, not money, and it reaches a running round at once.

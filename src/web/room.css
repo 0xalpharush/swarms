@@ -203,3 +203,14 @@
 a.quest-step { text-decoration:none; }
 .room-panel > .broadcast-empty { align-items:center; justify-content:center; gap:4px; }
 .broadcast-empty .btn { min-height:40px; margin-top:18px; padding:0 18px; border-radius:10px; }
+.room-me { flex-wrap:wrap; }
+.room-me-actions { display:flex; align-items:center; gap:12px; }
+.room-me-actions:has(.rename) { flex-basis:100%; flex-wrap:wrap; }
+.rename { width:100%; padding:10px; border:1px solid #d6decf; border-radius:10px; background:#fbfcf9; }
+.rename-field { display:flex; align-items:center; gap:2px; padding:0 10px; border:1px solid #d6decf; border-radius:8px; background:var(--white); font:13px var(--mono); color:var(--grey-600); }
+.rename-field:focus-within { border-color:#6d8e52; }
+.rename-field input { flex:1; min-width:0; height:34px; border:0; outline:none; background:none; font:13px var(--mono); color:var(--black); }
+.rename-actions { display:flex; flex-wrap:wrap; align-items:center; gap:12px; margin-top:8px; }
+.rename-actions .btn-high { height:30px; border-radius:8px; }
+.rename .fine,.rename .error { margin-top:8px; }
+.room-gate-actions .rename { margin-top:4px; }

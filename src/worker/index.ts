@@ -24,6 +24,10 @@ app.all(`${Sessions.path}/*`, (c) => Sessions.auth(c.env).fetch(c.req.raw))
 
 app.get('/api/config', (c) => c.json(Operations.config(c.env)))
 
+app.get('/api/me', async (c) => Problem.respond(await Operations.account(c.env, await Sessions.who(c.env, c.req.raw))))
+
+app.post('/api/me', async (c) => Problem.respond(await Operations.rename(c.env, await Rest.body(c.req.raw), await Sessions.who(c.env, c.req.raw))))
+
 app.get('/api/swarms', async (c) => Problem.respond(await Operations.list(c.env, {})))
 
 app.post('/api/swarms', async (c) => Problem.respond(await Operations.create(c.env, await Rest.body(c.req.raw)), 201))

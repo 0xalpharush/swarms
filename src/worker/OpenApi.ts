@@ -62,6 +62,14 @@ const address = { pattern: '^0x[0-9a-fA-F]{40}$', type: 'string' }
 const authorizeAccessKey = { description: "Pass to Tempo Wallet's wallet_connect as capabilities.authorizeAccessKey." }
 
 const schemas = {
+  Account: object(
+    {
+      address,
+      handle: { description: 'The name rooms show: the username, or one made from the address such as quark-1a2b.', type: 'string' },
+      name: nullable({ description: 'The username the account chose, lower case.', type: 'string' }),
+    },
+    'The signed-in account.',
+  ),
   Answer: object(
     {
       at: time,
@@ -386,6 +394,22 @@ export function document(origin: string) {
     openapi: '3.1.0',
     paths: {
       '/v1/config': { get: { operationId: 'config', responses: ok(ref('Config'), 'Chain, token and pledge sizes.'), summary: 'Configuration' } },
+      '/v1/me': {
+        get: {
+          description: 'The signed-in account, from Authorization: Bearer <token>.',
+          operationId: 'getAccount',
+          responses: { ...ok(ref('Account'), 'The account.'), ...failures(401) },
+          summary: 'Your account',
+        },
+        post: {
+          description:
+            "Sets the account's username, which every room shows and mentions as @name, unique and stored in lower case. Names made from an address (word-1a2b) and a few others, such as swarm, are reserved. A null or empty name goes back to the one made from the address.",
+          operationId: 'rename',
+          requestBody: { content: { 'application/json': { schema: input(Operations.schema.rename) } }, required: true },
+          responses: { ...ok(ref('Account'), 'The account.'), ...failures(400, 401, 409) },
+          summary: 'Set your username',
+        },
+      },
       '/v1/search': {
         get: {
           description:

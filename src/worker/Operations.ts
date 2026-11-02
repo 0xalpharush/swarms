@@ -4,6 +4,7 @@ import { getTransactionReceipt } from 'viem/actions'
 import { Abis } from 'viem/tempo'
 import { z } from 'zod'
 import type {
+  Account,
   Answered,
   BudgetRequested,
   Budgeted,
@@ -189,6 +190,14 @@ export const schema = {
     pledge: pledgeId,
     swarm: id,
     wait: seconds(0, `Seconds to keep polling Tempo Wallet while the pledge is pending, at most ${maxWait}.`),
+  }),
+  rename: z.object({
+    name: z
+      .string()
+      .trim()
+      .max(Mention.maxName)
+      .nullable()
+      .describe(`Your username, 3 to ${Mention.maxName} letters, digits, hyphens or underscores, starting with a letter; it is stored in lower case. null or "" goes back to the name made from your address.`),
   }),
   room: z.object({
     after: z.coerce.number().int().min(0).default(0).describe('Return the messages after this id; 0 returns the newest.'),
@@ -541,7 +550,24 @@ export async function room(env: Cloudflare.Env, input: Input<'room'>, address?: 
     stub(env, query.swarm).messages({ after: query.after, before: query.before, limit: query.limit }),
     Store.members(env, query.swarm),
   ])
-  return Problem.ok({ me: address ? self(members, address) : null, members, messages, next: messages.at(-1)?.id ?? query.after })
+  return Problem.ok({ me: address ? await self(env, members, address) : null, members, messages, next: messages.at(-1)?.id ?? query.after })
+}
+
+export async function account(env: Cloudflare.Env, address?: Address): Promise<Problem.Result<Account>> {
+  if (!address) return Problem.fail(401, 'unauthorized', 'Sign in with Tempo Wallet to read your account.')
+  return Problem.ok(await Store.account(env, address))
+}
+
+export async function rename(env: Cloudflare.Env, input: Input<'rename'>, address?: Address): Promise<Problem.Result<Account>> {
+  const parsed = parse(schema.rename, input)
+  if (!parsed.ok) return parsed
+  if (!address) return Problem.fail(401, 'unauthorized', 'Sign in with Tempo Wallet to set your username.')
+
+  const name = parsed.value.name?.replace(/^@/, '').toLowerCase() || null
+  const wrong = name ? Mention.invalid(name) : undefined
+  if (wrong) return Problem.fail(400, 'invalid_request', wrong)
+  if (!(await Store.rename(env, address, name))) return Problem.fail(409, 'conflict', `@${name} is taken. Pick another.`)
+  return Problem.ok(await Store.account(env, address))
 }
 
 export async function say(env: Cloudflare.Env, input: Input<'say'>, address?: Address): Promise<Problem.Result<Posted>> {
@@ -586,12 +612,12 @@ export async function say(env: Cloudflare.Env, input: Input<'say'>, address?: Ad
   const named = Mention.mentioned(request.text)
   const message = await stub(env, row.id).say({
     author: address,
-    mentions: members.filter((member) => named.includes(member.handle)).map((member) => member.address),
+    mentions: members.filter((member) => named.includes(member.handle) || named.includes(Mention.handle(member.address))).map((member) => member.address),
     steer,
     swarm: row.id,
     text: request.text,
   })
-  return Problem.ok({ me: self(steer ? await Store.members(env, row.id) : members, address), message })
+  return Problem.ok({ me: await self(env, steer ? await Store.members(env, row.id) : members, address), message })
 }
 
 export async function chatter(env: Cloudflare.Env, input: Input<'swarm'>, request: Request): Promise<Problem.Result<Response>> {
@@ -607,10 +633,11 @@ function dollars(amount: string) {
   return '$' + amount.replace(/(\.\d*?)0+$/, '$1').replace(/\.$/, '')
 }
 
-function self(members: readonly Member[], address: Address): Me {
+async function self(env: Cloudflare.Env, members: readonly Member[], address: Address): Promise<Me> {
   const found = members.find((member) => member.address === address)
   if (found) return { ...found, member: true }
-  return { address, available: Memo.decimal(0n), backed: Memo.decimal(0n), handle: Mention.handle(address), member: false, since: 0, steered: Memo.decimal(0n), ways: [] }
+  const known = await Store.account(env, address)
+  return { address, available: Memo.decimal(0n), backed: Memo.decimal(0n), handle: known.handle, member: false, since: 0, steered: Memo.decimal(0n), ways: [] }
 }
 
 export async function hand(env: Cloudflare.Env, input: Input<'hand'>, contributor?: Address): Promise<Problem.Result<Issued>> {

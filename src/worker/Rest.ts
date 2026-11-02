@@ -40,6 +40,10 @@ app.all('/mcp', (c) => Mcp.handle(c.req.raw, c.env))
 
 app.get('/v1/config', (c) => c.json(Operations.config(c.env)))
 
+app.get('/v1/me', async (c) => Problem.respond(await Operations.account(c.env, await Sessions.who(c.env, c.req.raw))))
+
+app.post('/v1/me', async (c) => Problem.respond(await Operations.rename(c.env, await body(c.req.raw), await Sessions.who(c.env, c.req.raw))))
+
 app.get('/v1/swarms', async (c) => Problem.respond(await Operations.list(c.env, c.req.query())))
 
 app.post('/v1/swarms', async (c) => Problem.respond(await Operations.create(c.env, await body(c.req.raw)), 201))

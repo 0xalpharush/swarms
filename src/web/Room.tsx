@@ -33,28 +33,95 @@ function minute(at: number) {
   return new Date(at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })
 }
 
-function Avatar(props: { address: string; size?: 'small' }) {
-  const handle = Mention.handle(props.address)
+function Avatar(props: { address: string; handle: string; size?: 'small' }) {
   return (
     <span aria-hidden className="avatar" data-size={props.size} style={{ background: tint(props.address) }}>
-      {handle.charAt(0).toUpperCase()}
+      {props.handle.charAt(0).toUpperCase()}
     </span>
   )
 }
 
-function Words(props: { handles: ReadonlySet<string>; me: string | undefined; text: string }) {
+function Words(props: { handles: ReadonlySet<string>; me: ReadonlySet<string>; text: string }) {
   return (
     <>
       {Mention.pieces(props.text).map((piece, index) => {
         const name = piece.slice(1).toLowerCase()
         if (!piece.startsWith('@') || (name !== 'swarm' && !props.handles.has(name))) return piece
         return (
-          <span className="mention" data-me={name === props.me} data-swarm={name === 'swarm'} key={index}>
+          <span className="mention" data-me={props.me.has(name)} data-swarm={name === 'swarm'} key={index}>
             {piece}
           </span>
         )
       })}
     </>
+  )
+}
+
+function Rename(props: { address: string; name: string | null; onDone: () => void }) {
+  const [open, setOpen] = useState(false)
+  const [value, setValue] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string>()
+  const made = Mention.handle(props.address)
+  const wanted = value.trim().replace(/^@/, '').toLowerCase()
+  const wrong = wanted ? Mention.invalid(wanted) : undefined
+
+  if (!open)
+    return (
+      <button
+        className="btn btn-minimal"
+        onClick={() => {
+          setValue(props.name ?? '')
+          setError(undefined)
+          setOpen(true)
+        }}
+        type="button"
+      >
+        {props.name ? 'Rename' : 'Pick a username'}
+      </button>
+    )
+
+  const save = async (name: string | null) => {
+    setBusy(true)
+    setError(undefined)
+    try {
+      await Wallet.rename(name)
+      setOpen(false)
+      props.onDone()
+    } catch (failure) {
+      setError(reason(failure))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <form
+      className="rename"
+      onSubmit={(event) => {
+        event.preventDefault()
+        if (wanted && !wrong) void save(wanted)
+      }}
+    >
+      <label className="rename-field">
+        <span>@</span>
+        <input aria-label="Username" autoFocus maxLength={Mention.maxName + 1} onChange={(event) => setValue(event.target.value)} placeholder={made} spellCheck={false} value={value} />
+      </label>
+      <div className="rename-actions">
+        <button className="btn btn-high" disabled={busy || !wanted || !!wrong || wanted === props.name} type="submit">
+          {busy ? 'Saving…' : 'Save'}
+        </button>
+        {props.name && (
+          <button className="btn btn-minimal" disabled={busy} onClick={() => void save(null)} type="button">
+            Go back to @{made}
+          </button>
+        )}
+        <button className="btn btn-minimal" onClick={() => setOpen(false)} type="button">
+          Cancel
+        </button>
+      </div>
+      <p className={error || wrong ? 'error' : 'fine'}>{error ?? wrong ?? 'Every room shows it, and others mention you with it. Letters, digits, - and _.'}</p>
+    </form>
   )
 }
 
@@ -164,9 +231,13 @@ export function Room(props: { config: Config | undefined; onBack: (note: string)
     return () => observer.disconnect()
   }, [])
 
-  const handles = new Set(members.map((member) => member.handle))
+  const called = new Map(members.map((member) => [member.address, member.handle]))
+  const handleOf = (address: string) => called.get(address as `0x${string}`) ?? Mention.handle(address)
+  const handles = new Set(members.flatMap((member) => [member.handle, Mention.handle(member.address)]))
+  const myNames = new Set(me ? [me.handle, Mention.handle(me.address)] : [])
+  const refresh = () => void load(last.current)
   const mine = me?.member ? me : undefined
-  const query = mine && !closed ? /(^|\s)@([a-z0-9-]*)$/i.exec(text.slice(0, caret)) : null
+  const query = mine && !closed ? /(^|\s)@([a-z0-9_-]*)$/i.exec(text.slice(0, caret)) : null
   const options = query
     ? [
         { handle: 'swarm', hint: done ? 'done, it takes no more steering' : 'steer it with your backing' },
@@ -179,7 +250,7 @@ export function Room(props: { config: Config | undefined; onBack: (note: string)
   const idea = Mention.idea(text)
   const available = mine ? units(mine.available) : 0n
   const amount = steer !== undefined && /^\d*\.?\d{0,6}$/.test(steer) && steer !== '' && steer !== '.' ? units(steer) : 0n
-  const typers = Object.entries(typing).filter(([address, until]) => until > now && address !== me?.address).map(([address]) => Mention.handle(address))
+  const typers = Object.entries(typing).filter(([address, until]) => until > now && address !== me?.address).map(([address]) => handleOf(address))
 
   const complete = (handle: string) => {
     if (!query) return
@@ -325,6 +396,7 @@ export function Room(props: { config: Config | undefined; onBack: (note: string)
         </p>
         <div className="room-gate-actions">
           {!done && <button className="btn btn-high" onClick={() => props.onBack('')} type="button">Back this swarm</button>}
+          <Rename address={me.address} name={wallet.account?.name ?? null} onDone={refresh} />
           <button className="btn btn-minimal" onClick={() => Wallet.signOut()} type="button">Sign out</button>
         </div>
       </div>
@@ -342,7 +414,7 @@ export function Room(props: { config: Config | undefined; onBack: (note: string)
         <button aria-expanded={roster} className="room-online" onClick={() => setRoster(!roster)} title="Who backs this swarm" type="button">
           {(here.length ? here : ranked.map((member) => member.address)).slice(0, 5).map((address) => (
             <span className="room-face" data-online={online.includes(address)} key={address}>
-              <Avatar address={address} size="small" />
+              <Avatar address={address} handle={handleOf(address)} size="small" />
             </span>
           ))}
           <span className="room-online-label">{roster ? 'Close' : here.length ? `${here.length} here` : 'Backers'}</span>
@@ -353,7 +425,7 @@ export function Room(props: { config: Config | undefined; onBack: (note: string)
           {ranked.map((member) => (
             <li key={member.address}>
               <button disabled={!mine} onClick={() => mention(member.handle)} title={mine ? `Mention @${member.handle}` : member.address} type="button">
-                <Avatar address={member.address} />
+                <Avatar address={member.address} handle={member.handle} />
                 <span className="roster-name">
                   @{member.handle}
                   {member.address === me?.address && <span className="tag">you</span>}
@@ -391,17 +463,17 @@ export function Room(props: { config: Config | undefined; onBack: (note: string)
             return (
               <li className="said said-system" key={item.id}>
                 <p>
-                  <Words handles={handles} me={me?.handle} text={item.text} />
+                  <Words handles={handles} me={myNames} text={item.text} />
                   <time dateTime={new Date(item.at).toISOString()}>{minute(item.at)}</time>
                 </p>
               </li>
             )
           const previous = messages[index - 1]
           const follow = previous?.author === author && item.at - previous.at < 5 * 60_000 && !item.steer && !previous.steer
-          const handle = Mention.handle(author)
+          const handle = handleOf(author)
           return (
             <li className="said" data-follow={follow} data-me={author === me?.address} data-mentioned={!!me && item.mentions.includes(me.address)} key={item.id}>
-              {follow ? <span className="said-gap" /> : <Avatar address={author} />}
+              {follow ? <span className="said-gap" /> : <Avatar address={author} handle={handle} />}
               <div className="said-body">
                 {!follow && (
                   <p className="said-head">
@@ -413,7 +485,7 @@ export function Room(props: { config: Config | undefined; onBack: (note: string)
                   </p>
                 )}
                 <p className="said-text">
-                  <Words handles={handles} me={me?.handle} text={item.text} />
+                  <Words handles={handles} me={myNames} text={item.text} />
                 </p>
                 {item.steer && (
                   <p className="said-steer">
@@ -548,12 +620,15 @@ export function Room(props: { config: Config | undefined; onBack: (note: string)
           </p>
         )}
         {mine && (
-          <p className="room-me">
+          <div className="room-me">
             <span>
               You are <b>@{mine.handle}</b> · {usd(mine.available)} to steer with
             </span>
-            <button className="btn btn-minimal" onClick={() => Wallet.signOut()} type="button">Sign out</button>
-          </p>
+            <div className="room-me-actions">
+              <Rename address={mine.address} name={wallet.account?.name ?? null} onDone={refresh} />
+              <button className="btn btn-minimal" onClick={() => Wallet.signOut()} type="button">Sign out</button>
+            </div>
+          </div>
         )}
       </footer>
     </section>
