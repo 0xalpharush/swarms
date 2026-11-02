@@ -1,7 +1,7 @@
 import { File, PatchDiff } from '@pierre/diffs/react'
 import { FileTree, useFileTree } from '@pierre/trees/react'
 import { useEffect, useMemo, useState } from 'react'
-import type { Code as Repo, Update } from '../shared/Api.ts'
+import type { Code as Repo, Pushed } from '../shared/Api.ts'
 import { ago, usd } from './format.ts'
 import { message, useMedia } from './hooks.ts'
 import { Link } from './router.tsx'
@@ -108,7 +108,7 @@ function Changes(props: { base: string; from: string | null; to: string }) {
   )
 }
 
-function Diffs(props: { base: string; commits: readonly Commit[]; update: Update }) {
+function Diffs(props: { base: string; commits: readonly Commit[]; update: Pushed }) {
   const shas = props.update.commits
   if (props.update.base || shas.length === 1) return <Changes base={props.base} from={props.update.base} to={shas[0] ?? ''} />
   return (
@@ -132,7 +132,7 @@ function Copy(props: { text: string }) {
   return <button className="code-copy" onClick={() => void navigator.clipboard?.writeText(props.text).then(() => { setDone(true); setTimeout(() => setDone(false), 1500) })} type="button">{done ? 'Copied' : 'Copy path'}</button>
 }
 
-export function Code(props: { gateway: string; repo: Repo; swarm: string; updates: readonly Update[] }) {
+export function Code(props: { gateway: string; repo: Repo; swarm: string; updates: readonly Pushed[] }) {
   const base = `${props.gateway}/p/${props.repo.owner}/${props.repo.app}/git/${encodeURIComponent(props.repo.name)}`
   const version = String(props.updates.at(-1)?.at ?? 0)
   const [state, setState] = useState<{ commits?: Commit[]; error?: string; files?: string[] }>({})

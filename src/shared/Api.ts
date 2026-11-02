@@ -74,6 +74,8 @@ export type Note = {
 
 export type Update = { at: number; base: string | null; commits: string[]; done: boolean; spent: string; text: string }
 
+export type Pushed = Omit<Update, 'text'>
+
 export type Working = { since: number }
 
 export type Kind = 'tool' | 'output' | 'message' | 'thinking' | 'steer' | 'funds' | 'status' | 'machine' | 'error'
@@ -149,7 +151,7 @@ export type Detail = Summary & {
   notes: Note[]
   pledges: Pledge[]
   reason: string | null
-  updates: Update[]
+  updates: Pushed[]
   why: Why | null
   working: Working | null
 }

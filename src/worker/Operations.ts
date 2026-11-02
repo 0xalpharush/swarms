@@ -356,6 +356,8 @@ export async function create(env: Cloudflare.Env, input: Input<'create'>): Promi
   return row ? Problem.ok(Store.summary(row)) : Problem.fail(502, 'unavailable', 'The swarm was not saved.')
 }
 
+const firstFeed = 80
+
 export async function detail(env: Cloudflare.Env, input: Input<'swarm'>, feed = true): Promise<Problem.Result<Detail>> {
   const parsed = parse(schema.swarm, input)
   if (!parsed.ok) return parsed
@@ -376,13 +378,13 @@ export async function detail(env: Cloudflare.Env, input: Input<'swarm'>, feed = 
     budgets,
     code: view.code,
     contributions,
-    feed: feed ? view.feed : [],
+    feed: feed ? view.feed.slice(-firstFeed) : [],
     hands: view.hands,
     notes,
     pledges,
     reason: view.reason,
     why: view.why,
-    updates: view.updates,
+    updates: view.updates.map(({ text: _text, ...update }) => update),
     working: view.working,
   })
 }

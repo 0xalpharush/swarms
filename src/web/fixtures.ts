@@ -8,7 +8,7 @@ type Line = readonly [Kind, string, (string | null)?, string?]
 
 type Backing = { amount: string; contributor: `0x${string}`; note: string }
 
-type Live = Omit<Detail, 'answer' | 'reason' | 'why' | 'working'> & { chat: Said[]; cursor: number; flicker: readonly string[]; next: number; script: readonly Line[]; since: number | null; steered: Set<string>; steers: Backing[] }
+type Live = Omit<Detail, 'answer' | 'reason' | 'updates' | 'why' | 'working'> & { updates: Update[]; chat: Said[]; cursor: number; flicker: readonly string[]; next: number; script: readonly Line[]; since: number | null; steered: Set<string>; steers: Backing[] }
 
 export const pace = typeof window !== 'undefined' && window.top !== window ? 0.2 : 1
 

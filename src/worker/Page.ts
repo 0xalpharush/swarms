@@ -94,7 +94,7 @@ async function gather(env: Cloudflare.Env, url: URL): Promise<{ data: Record<str
   data[id] = detail.value
   const room = await within(Operations.room(env, { swarm: id }), 800)
   if (room?.ok) data[`room:${id}`] = room.value
-  const latest = detail.value.updates.at(-1)?.text
+  const latest = detail.value.answer?.text
   return {
     data,
     head: { description: (latest ?? detail.value.goal).replace(/\s+/g, ' ').slice(0, 200), image: head.image, player: `${url.origin}/x/s/${encodeURIComponent(id)}`, title: `${detail.value.title} · Swarms` },
