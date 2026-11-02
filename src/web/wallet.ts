@@ -90,7 +90,7 @@ export function initial(): State {
   return seed
 }
 
-let checked = !!session || fixture
+let checked = fixture
 
 Api.authorize(state.session?.token)
 
@@ -141,6 +141,10 @@ function asked() {
 export async function restore(config: Config) {
   if (!checked) {
     checked = true
+    if (state.session) {
+      if (state.pending) set({ pending: false })
+      return void refresh(config).catch(() => {})
+    }
     if (!state.address && !localStorage.getItem(remembered)) return
     const accounts = await (await wallet())
       .request({ method: 'eth_accounts' })
@@ -154,10 +158,17 @@ export async function restore(config: Config) {
 }
 
 export async function connect(config: Config) {
-  if (state.address) return state.address
-  const address = fixture ? Fixtures.visitor : (await (await wallet()).request({ method: 'eth_requestAccounts' }))[0]
+  if (fixture) {
+    if (!state.address) set({ address: Fixtures.visitor })
+    return state.address ?? Fixtures.visitor
+  }
+  const provider = await wallet()
+  const known = (await provider.request({ method: 'eth_accounts' }).catch(() => [] as readonly Address[]))[0]
+  const address = known ?? (await provider.request({ method: 'eth_requestAccounts' }))[0]
   if (!address) throw new Error('Tempo Wallet returned no account.')
-  set({ address })
+  if (address.toLowerCase() === state.address?.toLowerCase()) return state.address
+  const switched = !!state.session && state.session.address.toLowerCase() !== address.toLowerCase()
+  set({ account: switched ? undefined : state.account, address, ...(switched ? { session: undefined } : {}) })
   void refresh(config).catch(() => {})
   return address
 }
