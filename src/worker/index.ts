@@ -12,6 +12,22 @@ export { Swarm } from './Swarm.ts'
 
 const app = new Hono<{ Bindings: Cloudflare.Env }>()
 
+app.use('*', async (c, next) => {
+  await next()
+  const path = new URL(c.req.url).pathname
+  if (c.req.method !== 'GET' || c.res.status !== 200 || !(path.startsWith('/api/') || path.startsWith('/v1/'))) return
+  if (!(c.res.headers.get('content-type') ?? '').startsWith('application/json') || c.res.headers.has('etag')) return
+  const body = await c.res.arrayBuffer()
+  const digest = new Uint8Array(await crypto.subtle.digest('SHA-1', body))
+  const etag = `W/"${Array.from(digest.subarray(0, 12), (byte) => byte.toString(16).padStart(2, '0')).join('')}"`
+  const headers = new Headers(c.res.headers)
+  headers.set('etag', etag)
+  if (!headers.has('cache-control')) headers.set('cache-control', 'no-cache')
+  const match = (c.req.header('if-none-match') ?? '').split(',').some((tag) => tag.trim() === etag)
+  c.res = undefined
+  c.res = match ? new Response(null, { headers, status: 304 }) : new Response(body, { headers, status: 200 })
+})
+
 app.get('*', async (c, next) => {
   const path = new URL(c.req.url).pathname
   const accept = c.req.header('accept') ?? ''

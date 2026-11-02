@@ -21,6 +21,16 @@ export function href(path: string) {
   return `${url.pathname}${url.search}${url.hash}`
 }
 
+const warmers: ((path: string) => void)[] = []
+
+export function warmer(warm: (path: string) => void) {
+  warmers.push(warm)
+}
+
+export function prefetch(path: string) {
+  for (const warm of warmers) warm(path)
+}
+
 export function navigate(path: string, options: { replace?: boolean } = {}) {
   if (options.replace) history.replaceState(null, '', href(path))
   else history.pushState(null, '', href(path))
@@ -33,6 +43,9 @@ export function Link(props: { children: ReactNode; className?: string; to: strin
     <a
       className={props.className}
       href={href(props.to)}
+      onFocus={() => prefetch(props.to)}
+      onPointerEnter={() => prefetch(props.to)}
+      onTouchStart={() => prefetch(props.to)}
       onClick={(event: MouseEvent<HTMLAnchorElement>) => {
         if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
         event.preventDefault()

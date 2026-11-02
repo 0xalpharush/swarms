@@ -51,6 +51,14 @@ function recall<T>(key: string): T | undefined {
   }
 }
 
+export function remembered<T>(key: string) {
+  return kept.get(shelf(key)) as T | undefined
+}
+
+export function remember(key: string, data: unknown) {
+  kept.set(shelf(key), data)
+}
+
 function keep(key: string, data: unknown) {
   const name = shelf(key)
   kept.set(name, data)
@@ -61,11 +69,11 @@ function keep(key: string, data: unknown) {
 
 export function usePoll<T>(load: () => Promise<T>, ms: number, key: string, options: { keep?: boolean } = {}) {
   const [state, setState] = useState<{ data?: T | undefined; error?: string }>(() => {
-    const data = seeded<T>(key) ?? (options.keep ? recall<T>(key) : undefined)
+    const data = remembered<T>(key) ?? seeded<T>(key) ?? (options.keep ? recall<T>(key) : undefined)
     const failed = seeded<string>(`!${key}`)
     return data === undefined ? (failed ? { error: failed } : {}) : { data }
   })
-  const warm = useRef(state.data !== undefined || state.error !== undefined)
+  const warm = useRef(remembered(key) === undefined && (seeded(key) !== undefined || seeded(`!${key}`) !== undefined))
   const [version, setVersion] = useState(0)
   const current = useRef(load)
 
@@ -81,6 +89,7 @@ export function usePoll<T>(load: () => Promise<T>, ms: number, key: string, opti
         const data = await current.current()
         if (!alive) return
         if (options.keep) keep(key, data)
+        else remember(key, data)
         setState({ data })
       } catch (error) {
         if (alive) setState((previous) => ({ ...previous, error: message(error) }))

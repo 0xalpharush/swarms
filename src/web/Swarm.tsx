@@ -8,7 +8,7 @@ import { here, seeded } from './boot.ts'
 import { Connect } from './Connect.tsx'
 import { asked, Fund } from './Contribute.tsx'
 import { ago, duration, mach, percent, short, usd } from './format.ts'
-import { useLive, useMedia, useNow, usePoll } from './hooks.ts'
+import { remembered, useLive, useMedia, useNow, usePoll } from './hooks.ts'
 import { Lost } from './Lost.tsx'
 import { Presence } from './Ideas.tsx'
 import { Machines } from './Machines.tsx'
@@ -19,6 +19,8 @@ import { Transcript } from './Transcript.tsx'
 import { Bar, Energy, Status } from './Visual.tsx'
 
 const Code = lazy(() => import('./Code.tsx').then((module) => ({ default: module.Code })))
+
+const trails = new Map<string, readonly Entry[]>()
 
 const tabs = ['transcript', 'room', 'code', 'machines', 'about'] as const
 
@@ -51,7 +53,10 @@ export function Swarm(props: { config: Config | undefined; id: string }) {
     first.current = false
     return Api.swarm(props.id, full)
   }, 5000, props.id)
-  const [entries, setEntries] = useState<readonly Entry[]>(() => seeded<Detail>(props.id)?.feed ?? [])
+  const [entries, setEntries] = useState<readonly Entry[]>(() => trails.get(props.id) ?? remembered<Detail>(props.id)?.feed ?? seeded<Detail>(props.id)?.feed ?? [])
+  useEffect(() => {
+    if (entries.length) trails.set(props.id, entries.slice(-400))
+  }, [entries, props.id])
   const [note, setNote] = useState('')
   const [tab, setTab] = useTab()
   const [unread, setUnread] = useState(0)

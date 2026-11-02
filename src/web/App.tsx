@@ -2,11 +2,12 @@ import { lazy, Suspense, useEffect, useState } from 'react'
 import type { Config } from '../shared/Api.ts'
 import { decimal } from '../shared/Memo.ts'
 import { mach, short } from './format.ts'
-import { message, useConfig, useWallet } from './hooks.ts'
+import { message, remember, remembered, useConfig, useWallet } from './hooks.ts'
+import * as Api from './api.ts'
 import { Home, Join } from './Home.tsx'
-import { Link, navigate, usePath } from './router.tsx'
+import { Link, navigate, usePath, warmer } from './router.tsx'
 import { Lost } from './Lost.tsx'
-import { page } from './pages.tsx'
+import { page, preload } from './pages.tsx'
 import * as Wallet from './wallet.ts'
 
 const Repo = lazy(() => import('./Repo.tsx').then((module) => ({ default: module.Repo })))
@@ -16,6 +17,26 @@ const New = page('new', () => import('./New.tsx').then((module) => module.New))
 const Docs = page('docs', () => import('./Docs.tsx').then((module) => module.Docs))
 
 const Swarm = page('swarm', () => import('./Swarm.tsx').then((module) => module.Swarm))
+
+const fetching = new Map<string, number>()
+
+function warmSwarm() {
+  return import('./Swarm.tsx').then((module) => preload('swarm', module.Swarm))
+}
+
+if (typeof window !== 'undefined') {
+  warmer((path) => {
+    const id = /^\/s\/([^/?#]+)\/?(?:[?#]|$)/.exec(path)?.[1]
+    if (!id) return
+    void warmSwarm()
+    const swarm = decodeURIComponent(id)
+    if (remembered(swarm) !== undefined || Date.now() - (fetching.get(swarm) ?? 0) < 10_000) return
+    fetching.set(swarm, Date.now())
+    Api.swarm(swarm).then((detail) => remember(swarm, detail), () => fetching.delete(swarm))
+  })
+  const idle = (window as { requestIdleCallback?: (run: () => void) => void }).requestIdleCallback ?? ((run: () => void) => setTimeout(run, 1500))
+  idle(() => void warmSwarm())
+}
 
 const About = page('about', () => import('./About.tsx').then((module) => module.About))
 
