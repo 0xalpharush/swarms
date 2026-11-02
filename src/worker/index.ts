@@ -19,13 +19,14 @@ app.get('*', async (c, next) => {
   return Page.page(c.req.raw, c.env)
 })
 
-app.get('/x', async (c) => XFrames.start(new URL(c.req.url).origin, (await Store.list(c.env).catch(() => [])).map((row) => Store.summary(row))))
+app.get('/x', async (c) => XFrames.start(new URL(c.req.url).origin, (await Store.list(c.env).catch(() => [])).map((row) => Store.summary(row)), new URL(c.req.url)))
 
 app.get('/x/card.svg', (c) => XFrames.card(c.req.query('title') ?? 'Fund a research swarm'))
 
 app.get('/x/s/:id', async (c) => {
   const result = await Operations.get(c.env, { swarm: c.req.param('id') })
-  return result.ok ? XFrames.swarm(new URL(c.req.url).origin, result.value) : result.status === 404 ? XFrames.lost(new URL(c.req.url).origin) : Problem.json(result)
+  const url = new URL(c.req.url)
+  return result.ok ? XFrames.swarm(url.origin, result.value, url) : result.status === 404 ? XFrames.lost(url.origin, url) : Problem.json(result)
 })
 
 app.get('/a/:id/:slug', (c) => c.redirect(`${new URL(c.req.url).pathname}/`, 301))

@@ -9,6 +9,18 @@ const headers = {
   'x-content-type-options': 'nosniff',
 }
 
+const player = {
+  'cache-control': 'public, max-age=15',
+  'content-security-policy': "object-src 'none'; base-uri 'none'; script-src 'self' 'unsafe-inline'",
+  'content-type': 'text/html; charset=utf-8',
+  'referrer-policy': 'no-referrer',
+  'x-content-type-options': 'nosniff',
+}
+
+const sandbox = 'allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox'
+
+const host = `(()=>{const frame=document.getElementById('xframe-player');const own=location.origin;const allowed=value=>{try{const url=new URL(value);if(url.origin==='https://wallet.tempo.xyz'&&/^[a-z0-9-]{8,16}$/i.test(url.searchParams.get('user_code')||''))return 'wallet';if(url.origin===own&&(url.pathname.startsWith('/s/')||url.pathname.startsWith('/x/')))return 'page';if(url.origin==='https://x.com'&&url.pathname==='/intent/post')return 'page'}catch{}};addEventListener('message',event=>{const message=event.data;if(event.source!==frame.contentWindow||message?.type!=='swarms:open'||typeof message.url!=='string')return;const kind=allowed(message.url);if(!kind)return;let popup=null;try{popup=kind==='wallet'?window.open(message.url,'swarms-wallet','popup,width=460,height=760'):window.open(message.url,'_blank','noopener')}catch{}if(!popup&&kind==='wallet')location.href=message.url});const content=new URL(location.href);content.searchParams.set('xframes-content','');frame.src=content.href})();`
+
 function attribute(value: string) {
   return value.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 }
@@ -26,14 +38,11 @@ function backers(count: number) {
   return `${count} backer${count === 1 ? '' : 's'}`
 }
 
-function document(origin: string, path: string, title: string, description: string, content: string, context: unknown, status = 200) {
+function document(origin: string, path: string, title: string, description: string, content: string, context: object, status = 200, request?: URL) {
   const url = `${origin}${path}`
   const image = `${origin}/xframe-card.jpg`
-  return new Response(
-    `<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
+  const hosted = request !== undefined && !request.searchParams.has('xframes-content')
+  const tags = `<meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover">
 <title>${attribute(title)}</title>
 <meta name="description" content="${attribute(description)}">
@@ -48,12 +57,32 @@ function document(origin: string, path: string, title: string, description: stri
 <meta property="og:title" content="${attribute(title)}">
 <meta property="og:description" content="${attribute(description)}">
 <meta property="og:image" content="${attribute(image)}">
-<meta property="og:url" content="${attribute(url)}">
+<meta property="og:url" content="${attribute(url)}">`
+  if (hosted)
+    return new Response(
+      `<!doctype html>
+<html lang="en">
+<head>
+${tags}
+<style>html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#f6f8f2}#xframe-player{display:block;border:0;width:100%;height:100%}</style>
+</head>
+<body>
+<iframe id="xframe-player" title="${attribute(title)}" sandbox="${sandbox}" allow="autoplay; fullscreen *; clipboard-write"></iframe>
+<script>${host}</script>
+</body>
+</html>`,
+      { headers: player, status },
+    )
+  return new Response(
+    `<!doctype html>
+<html lang="en">
+<head>
+${tags}
 <style>${styles}</style>
 </head>
 <body>
 <div class="app">${content}</div>
-<script>window.__SWARM_FRAME__=${script(context)};</script>
+<script>window.__SWARM_FRAME__=${script({ ...context, hosted: request?.searchParams.has('xframes-content') ?? false })};</script>
 <script>${client}</script>
 </body>
 </html>`,
@@ -94,7 +123,7 @@ const wallet = `<section class="view center" data-view="approve" hidden>
     <button class="go" data-retry type="button">Try again</button>
   </section>`
 
-export function start(origin: string, swarms: readonly Summary[] = []) {
+export function start(origin: string, swarms: readonly Summary[] = [], request?: URL) {
   const title = 'Start a breakthrough, or be part of one'
   const description = 'Fund research an AI does in the open. Start one, or join one already running.'
   const ideas = open(swarms).slice(0, 4)
@@ -133,10 +162,10 @@ export function start(origin: string, swarms: readonly Summary[] = []) {
     ${joins ? `<ol class="list scroll">${joins}</ol>` : '<button class="empty" data-open="start" type="button">No swarms yet. <b>Start one →</b></button>'}
   </section>
   ${wallet}`
-  return document(origin, '/x', title, description, content, { briefInstruction, ideas, kind: 'home', url: `${origin}/x` })
+  return document(origin, '/x', title, description, content, { briefInstruction, ideas, kind: 'home', url: `${origin}/x` }, 200, request)
 }
 
-export function swarm(origin: string, value: Overview) {
+export function swarm(origin: string, value: Overview, request?: URL) {
   const working = value.status === 'running' ? value.working : null
   const done = value.status === 'done'
   const title = working ? `Live: ${value.title}` : done ? value.title : `Fund ${value.title}`
@@ -184,15 +213,15 @@ export function swarm(origin: string, value: Overview) {
     page,
     swarm: { id: value.id, title: value.title },
     url: `${origin}/x/s/${encodeURIComponent(value.id)}`,
-  })
+  }, 200, request)
 }
 
-export function lost(origin: string) {
+export function lost(origin: string, request?: URL) {
   const content = `<section class="view center" data-view="lost">
     <h2>This swarm drifted off.</h2>
     <div class="row"><a class="go" href="/x">Start one</a><a class="ghost" href="/x?view=join">Join one</a></div>
   </section>`
-  return document(origin, '/x', 'Swarms', 'Fund research an AI does in the open.', content, { kind: 'lost', url: `${origin}/x` }, 404)
+  return document(origin, '/x', 'Swarms', 'Fund research an AI does in the open.', content, { kind: 'lost', url: `${origin}/x` }, 404, request)
 }
 
 export function card(title: string) {
@@ -320,6 +349,7 @@ h2{margin:0;font-weight:400;font-size:28px;letter-spacing:-.02em;max-width:620px
 
 const client = `
 const frame=window.__SWARM_FRAME__;
+if(frame.hosted)document.addEventListener('click',event=>{const link=event.target instanceof Element?event.target.closest('a[href]'):null;if(!link||event.defaultPrevented)return;const url=new URL(link.href,location.href);if(link.target==='_blank'){event.preventDefault();parent.postMessage({type:'swarms:open',url:url.href},new URL(frame.url).origin);return}if(url.origin===new URL(frame.url).origin&&url.pathname.startsWith('/x')){url.searchParams.set('xframes-content','');link.href=url.href}},true);
 const query=new URLSearchParams(location.search);
 const demo=query.get('scene');
 const views=[...document.querySelectorAll('[data-view]')];
@@ -337,7 +367,7 @@ async function send(path,options){
   if(demo){
     await sleep(500);
     if(path==='/v1/swarms')return{id:'demo',title:choice.title};
-    if(/pledges$/.test(path))return{pledge:'demo',device:{userCode:'WXYZ-4821',verificationUriFull:'https://wallet.tempo.xyz',expiresAt:Date.now()+(demo==='expired'?1500:600000),interval:1}};
+    if(/pledges$/.test(path))return{pledge:'demo',device:{userCode:'WXYZ-4821',verificationUriFull:'https://wallet.tempo.xyz/?user_code=WXYZ-4821',expiresAt:Date.now()+(demo==='expired'?1500:600000),interval:1}};
     if(demo==='declined'){await sleep(900);const error=new Error('declined');error.status=403;throw error}
     if(demo==='done'){await sleep(700);return{status:'active'}}
     await sleep(15000);return{status:'pending'};

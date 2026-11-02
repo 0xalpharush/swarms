@@ -82,3 +82,19 @@ test('card image escapes its title', async () => {
   assert.match(svg, /Explore &lt;science&gt;/)
   assert.doesNotMatch(svg, /Explore <science>/)
 })
+
+test('a frame is served as a trusted player around its sandboxed card, as xframes does', async () => {
+  const outer = XFrames.swarm('https://swarms.example', overview, new URL('https://swarms.example/x/s/abc123?view=fund'))
+  const html = await outer.text()
+  assert.doesNotMatch(outer.headers.get('content-security-policy') ?? '', /sandbox/)
+  assert.match(html, /name="twitter:player" content="https:\/\/swarms\.example\/x\/s\/abc123"/)
+  assert.match(html, /<iframe id="xframe-player"[^>]*sandbox="allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox"/)
+  assert.match(html, /xframes-content/)
+  assert.doesNotMatch(html, />Fund</)
+
+  const inner = XFrames.swarm('https://swarms.example', overview, new URL('https://swarms.example/x/s/abc123?view=fund&xframes-content='))
+  assert.match(inner.headers.get('content-security-policy') ?? '', /^sandbox /)
+  const card = await inner.text()
+  assert.match(card, /"hosted":true/)
+  assert.match(card, />Fund</)
+})
