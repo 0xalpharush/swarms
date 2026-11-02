@@ -269,6 +269,13 @@ export class Swarm extends DurableObject<Cloudflare.Env> {
 
   async heal() {
     const now = Date.now()
+    const id = this.kv.get<string>('id')
+    if (id && !this.kv.get<number>('published') && !this.kv.get<number>('exposing')) {
+      this.kv.put('exposing', now)
+      const row = await Store.find(this.env, id)
+      if (row) await this.expose(row).catch((error: unknown) => console.error('Making the swarm data public failed', error))
+      this.kv.delete('exposing')
+    }
     if (!this.kv.get<string>('paused') || this.kv.get<string>('turn') || now - (this.kv.get<number>('healed') ?? 0) < healMs) return
     const alarm = await this.ctx.storage.getAlarm()
     if (alarm !== null && alarm < now + healMs) return
