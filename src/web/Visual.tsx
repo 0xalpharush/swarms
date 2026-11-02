@@ -31,7 +31,7 @@ export function Bar(props: { swarm: Pick<Summary, 'raised' | 'remaining' | 'spen
 }
 
 function cents(value: string) {
-  return `${(Math.floor(Number(value) * 100) / 100).toFixed(2)}`
+  return '$' + (Math.floor(Number(value) * 100) / 100).toFixed(2)
 }
 
 export function progress(swarm: Pick<Detail, 'reason' | 'status' | 'why' | 'working'>, now: number) {
