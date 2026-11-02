@@ -26,7 +26,7 @@ function asked() {
   const token = query.get('token')?.toLowerCase()
   const amount = query.get('amount')?.trim()
   return {
-    amount: amount && /^\d+(\.\d{1,6})?$/.test(amount) ? amount : '0.25',
+    amount: amount && /^\d+(\.\d{1,6})?$/.test(amount) ? amount : '2',
     mode,
     note: query.get('note')?.slice(0, maxNote) ?? '',
     token: (token && token in symbols && (mode === 'pledge' || token !== 'mach') ? token : mode === 'pledge' ? 'mach' : 'usdce') as Currency,

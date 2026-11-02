@@ -18,7 +18,7 @@ export function New(props: { config: Config | undefined }) {
   const [question, setQuestion] = useState('')
   const [title, setTitle] = useState('')
   const [goal, setGoal] = useState('')
-  const [amount, setAmount] = useState('0.25')
+  const [amount, setAmount] = useState('2')
   const [note, setNote] = useState('')
   const [token, setToken] = useState<Currency>('mach')
   const [state, setState] = useState<{ created?: Summary; error?: string; short?: boolean; step?: Step | 'create' }>({})

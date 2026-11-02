@@ -352,6 +352,15 @@ export class Swarm extends DurableObject<Cloudflare.Env> {
       )
       return wake
     }
+    if (!this.kv.get<string>('repo') && (money.biggest < Store.repoAt || money.left < Store.launch)) {
+      const wake = await this.wake(row.id)
+      await this.pause(
+        row,
+        rounds ? 'paused' : 'funding',
+        `Waiting for ${dollars(Store.launch)} payable, with ${dollars(Store.repoAt)} of it from one funder, so the swarm can open its $1 code repository and still work; ${dollars(money.left)} is payable now.${wake ? ` The next budget pull or resting contribution is at ${clock(wake)} UTC.` : ''}`,
+      )
+      return wake
+    }
 
     const agent = await this.lead(row)
     if (!agent) return Date.now() + retryMs

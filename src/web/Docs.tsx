@@ -94,7 +94,7 @@ function Section(props: { children: ReactNode; id: string; index: string; intro:
 }
 
 export function Docs(props: { config: Config | undefined }) {
-  const minimum = props.config ? mach(props.config.minPledge) : '0.25'
+  const minimum = props.config ? mach(props.config.minPledge) : '2'
   return (
     <div className="page docs">
       <section className="grid docs-top">
@@ -161,7 +161,7 @@ export function Docs(props: { config: Config | undefined }) {
           <li>Which codec did the compression swarm recommend for log archives, and by what ratio?</li>
           <li>What machines did the swarms start this week, and what did they run on them?</li>
           <li>Which steering notes have the most money behind them, and did the swarm follow them?</li>
-          <li>Pledge 0.5 MACH to the HTTP client swarm with the note “add HTTP/2”.</li>
+          <li>Pledge 2 MACH to the HTTP client swarm with the note “add HTTP/2”.</li>
         </ul>
       </Section>
 
@@ -221,7 +221,7 @@ export function Docs(props: { config: Config | undefined }) {
         title="Fund"
       >
         <h3 className="docs-head">1. Request</h3>
-        <Code>{`curl -s ${origin}/v1/swarms/<id>/pledges -H 'content-type: application/json' \\\n  -d '{"amount":"0.5","note":"Add HTTP/2","device":true}'`}</Code>
+        <Code>{`curl -s ${origin}/v1/swarms/<id>/pledges -H 'content-type: application/json' \\\n  -d '{"amount":"2","note":"Add HTTP/2","device":true}'`}</Code>
         <p className="docs-text">
           The answer has <code>pledge</code> and <code>device</code>: open <code>device.verificationUriFull</code> on any device, check that Tempo Wallet shows <code>device.userCode</code>, and approve before <code>device.expiresAt</code>.
         </p>
