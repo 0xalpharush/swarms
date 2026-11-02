@@ -108,6 +108,8 @@ const followMs = 2_000
 
 const refreshMs = 10_000
 
+const healMs = 5 * 60_000
+
 const retryMs = 30_000
 
 const maxFailures = 3
@@ -210,7 +212,16 @@ export class Swarm extends DurableObject<Cloudflare.Env> {
     return listed.ok ? listed.value.hands : []
   }
 
+  async heal() {
+    const now = Date.now()
+    if (!this.kv.get<string>('paused') || this.kv.get<string>('turn') || now - (this.kv.get<number>('healed') ?? 0) < healMs) return
+    if ((await this.ctx.storage.getAlarm()) !== null) return
+    this.kv.put('healed', now)
+    await this.ctx.storage.setAlarm(now)
+  }
+
   view(): View {
+    this.ctx.waitUntil(this.heal())
     const sql = this.ctx.storage.sql
     const feed = sql
       .exec<Record<string, SqlStorageValue>>('SELECT seq, at, round, kind, text, detail, who, event FROM feed ORDER BY seq DESC LIMIT 200')
@@ -534,8 +545,9 @@ export class Swarm extends DurableObject<Cloudflare.Env> {
     }
     if (failures >= maxFailures) {
       this.kv.put('failures', 0)
-      await this.pause(row, 'paused', `${failures} rounds in a row failed, so the swarm paused. New money restarts it.`)
-      return null
+      const wake = await this.wake(row.id)
+      await this.pause(row, 'paused', `${failures} rounds in a row failed, so the swarm paused. New money restarts it${wake ? `, and so does the next budget pull at ${clock(wake)} UTC` : ''}.`)
+      return wake
     }
     return Date.now() + (status === 'completed' ? 0 : settleMs)
   }
