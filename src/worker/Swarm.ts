@@ -1501,6 +1501,7 @@ function brief(
     crew(parallel),
     '',
     'For anything that needs a real machine (running code, benchmarks, installs, downloads), create a Modal sandbox with tools.mcp__gateway__compute_create({ image: "python:3.12-slim", cpu: 1, memory: 1024, lease: 300, timeout: 900, attach: "<short name>" }). It joins as a hand with that name, so pass hand: "<short name>" to exec_command and the file tools to work there. Terminate every sandbox you create with tools.mcp__gateway__compute_terminate before you reply.',
+    'For anything that needs a real web browser (sites that need JavaScript, logins, forms, screenshots), create a Browserbase browser with tools.mcp__gateway__browser_create({ minutes: 15 }), at the same time as the sandbox that drives it (Promise.all), not one after the other. Its connectUrl is a secret Chrome DevTools URL: in the sandbox, pip install playwright and call chromium.connect_over_cdp(connectUrl), then browser.contexts[0].pages[0]; pass the URL to the script through a file or an environment variable, never print it or put it in your reply. Browsers cost $0.12 an hour; close every browser you create with tools.mcp__gateway__browser_close({ name }) before you reply.',
     '',
     ...(lent.length ? [...lending(lent, money.left), ''] : []),
     'Contributors steer the swarm with their money. Their notes, with the money behind each and its share of everything contributed (weigh them by that share; new notes may arrive while you work):',
