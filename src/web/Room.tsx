@@ -1,6 +1,7 @@
 import { type KeyboardEvent, type ReactNode, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { Config, Detail, Me, Member, Room as RoomState, Said, Way } from '../shared/Api.ts'
 import { seeded } from './boot.ts'
+import * as Answer from '../shared/Answer.ts'
 import { decimal, maxNote, units } from '../shared/Memo.ts'
 import * as Mention from '../shared/Mention.ts'
 import * as Api from './api.ts'
@@ -369,7 +370,7 @@ export function Room(props: {
             return (
               <li className="said said-system" key={item.id}>
                 <p>
-                  <Words handles={handles} me={myNames} text={item.text} />
+                  <Words handles={handles} me={myNames} text={item.text.startsWith('Update: ') ? `Update: ${Answer.unround(item.text.slice(8))}` : item.text} />
                   <time dateTime={new Date(item.at).toISOString()}>{minute(item.at)}</time>
                 </p>
               </li>
