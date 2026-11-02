@@ -343,12 +343,13 @@ h2{margin:0;font-weight:400;font-size:28px;letter-spacing:-.02em;max-width:620px
 .fund-name{display:flex;align-items:center;gap:10px;margin:6px 0 0;font-size:22px;line-height:1.25;letter-spacing:-.02em}
 .behind{margin:6px 0 0;padding:10px 12px;border:1px solid #c5d4b6;border-radius:12px;background:#f1f6ea;font-size:15px}
 .behind b{display:block;font:11px ${mono};font-weight:400;color:#4b6a3a}
-@media(max-width:560px){.big b{font-size:56px!important}.door-peek{margin-top:6px}.door-peek .chip:nth-child(n+3){display:none}.goal{-webkit-line-clamp:2}.notes{display:none}.pay{padding:12px}.app{padding:12px}.doors{grid-template-columns:1fr}.door{padding:16px}.door-title{font-size:26px}.door-peek .chip:nth-child(n+4){display:none}.doors{align-content:stretch}.door{gap:8px}.split{grid-template-columns:1fr;gap:10px}h1{font-size:22px}.big b{font-size:42px}.go,.ghost{min-height:44px}.code{font-size:38px}.row{flex-direction:column;width:100%}.room{margin:-12px}.sum{display:none}.stake button{padding:0 7px}}
+@media(max-width:560px) and (max-aspect-ratio:1/1){.big b{font-size:56px!important}.door-peek{margin-top:6px}.door-peek .chip:nth-child(n+3){display:none}.goal{-webkit-line-clamp:2}.notes{display:none}.pay{padding:12px}.app{padding:12px}.doors{grid-template-columns:1fr}.door{padding:16px}.door-title{font-size:26px}.door-peek .chip:nth-child(n+4){display:none}.doors{align-content:stretch}.door{gap:8px}.split{grid-template-columns:1fr;gap:10px}h1{font-size:22px}.big b{font-size:42px}.go,.ghost{min-height:44px}.code{font-size:38px}.row{flex-direction:column;width:100%}.room{margin:-12px}.sum{display:none}.stake button{padding:0 7px}}
 @media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 `
 
 const client = `
 const frame=window.__SWARM_FRAME__;
+const fit=()=>{const app=document.querySelector('.app');const wide=innerWidth>innerHeight;const scale=Math.min(innerWidth/800,innerHeight/450);if(wide&&scale<1){app.style.width='800px';app.style.height='450px';app.style.zoom=String(scale)}else{app.style.width='';app.style.height='';app.style.zoom=''}};fit();addEventListener('resize',fit);
 if(frame.hosted)document.addEventListener('click',event=>{const link=event.target instanceof Element?event.target.closest('a[href]'):null;if(!link||event.defaultPrevented)return;const url=new URL(link.href,location.href);if(link.target==='_blank'){event.preventDefault();parent.postMessage({type:'swarms:open',url:url.href},new URL(frame.url).origin);return}if(url.origin===new URL(frame.url).origin&&url.pathname.startsWith('/x')){url.searchParams.set('xframes-content','');link.href=url.href}},true);
 const query=new URLSearchParams(location.search);
 const demo=query.get('scene');
