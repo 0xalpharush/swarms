@@ -411,6 +411,12 @@ export class Swarm extends DurableObject<Cloudflare.Env> {
       )
       return wake
     }
+    const wanted = BigInt(this.kv.get<string>('wanted') ?? '0')
+    if (wanted > money.biggest) {
+      const wake = await this.wake(row.id)
+      await this.pause(row, worked ? 'paused' : 'funding', costly(wanted, money.biggest))
+      return wake
+    }
     if (!this.kv.get<string>('repo') && (money.biggest < Store.repoAt || money.left < Store.launch)) {
       const wake = await this.wake(row.id)
       await this.pause(
@@ -564,14 +570,18 @@ export class Swarm extends DurableObject<Cloudflare.Env> {
 
     const failures = status === 'completed' ? 0 : (this.kv.get<number>('failures') ?? 0) + 1
     this.kv.put('failures', failures)
+    if (status === 'completed') this.kv.delete('wanted')
     if (answer?.done) return this.done(row, 'The agent reports the goal is met.')
-    if (status !== 'completed' && money.left < Store.reserve) {
+    const wanted = BigInt(this.kv.get<string>('wanted') ?? '0')
+    if (status !== 'completed' && (money.left < Store.reserve || wanted > money.biggest)) {
       this.kv.put('failures', 0)
       const wake = await this.wake(row.id)
       await this.pause(
         row,
         'paused',
-        `Waiting for money: the next request needed more than the ${dollars(money.left)} the contributions can pay now.${wake ? ` The next budget pull or resting contribution is at ${clock(wake)} UTC.` : ' New money keeps it going.'}`,
+        wanted > money.biggest
+          ? costly(wanted, money.biggest)
+          : `Waiting for money: the next request needed more than the ${dollars(money.left)} the contributions can pay now.${wake ? ` The next budget pull or resting contribution is at ${clock(wake)} UTC.` : ' New money keeps it going.'}`,
       )
       return wake
     }
@@ -719,6 +729,7 @@ export class Swarm extends DurableObject<Cloudflare.Env> {
     ]
     let busy = false
     let small = false
+    let wanted = 0n
     for (const source of ordered) {
       const result = await this.attempt(row, source, input, snapshots).catch(
         (error: unknown): Failed => ({ failed: String(error).split('\n')[0]?.slice(0, 300) ?? 'The payment failed.', room: { amount: 0n, resets: Date.now() + retryMs } }),
@@ -733,6 +744,7 @@ export class Swarm extends DurableObject<Cloudflare.Env> {
       if (result.busy) busy = true
       if (result.busy || result.small) {
         small ||= !!result.small
+        if (result.small && result.price) wanted = Payer.max(wanted, result.price)
         continue
       }
       if (result.room?.ended && source.row) {
@@ -745,6 +757,7 @@ export class Swarm extends DurableObject<Cloudflare.Env> {
     }
 
     if (busy) return { code: 'busy', detail: "The swarm's contributions are holding other calls' reservations; try again shortly.", retry: 2, status: 429 }
+    if (wanted) this.kv.put('wanted', String(wanted))
     const wake = await this.wake(row.id)
     return {
       code: 'limit_reached',
@@ -774,7 +787,7 @@ export class Swarm extends DurableObject<Cloudflare.Env> {
       const room = await this.room(row, source)
       const deposit = Payer.min(Payer.max(step, price), room.amount)
       if (deposit < price)
-        return { failed: `It can put in ${Memo.decimal(room.amount)} now, less than the ${Memo.decimal(price)} this request holds.`, room, small: room.amount >= perCall }
+        return { failed: `It can put in ${Memo.decimal(room.amount)} now, less than the ${Memo.decimal(price)} this request holds.`, price, room, small: room.amount >= perCall }
       const authorization = await mppx.createCredential(offered.response, { depositRaw: String(deposit) })
       const entry = Payer.opened(this.kv, source.id)
       if (!entry) throw new Error('mppx stored no channel for the open')
@@ -810,6 +823,7 @@ export class Swarm extends DurableObject<Cloudflare.Env> {
         return {
           busy: Date.now() - (this.kv.get<number>('paid:' + source.id) ?? 0) < (unspent >= perCall ? heldMs : holdMs),
           failed: `It can add ${Memo.decimal(room.amount)} now, less than the ${Memo.decimal(shortfall)} its channel needs (deposit ${Memo.decimal(deposit)}, spent ${Memo.decimal(BigInt(spent ?? '0'))}, accepted ${Memo.decimal(accepted)}, required ${Memo.decimal(BigInt(snapshot?.requiredCumulative ?? '0'))}, in flight ${Memo.decimal(pending)} over ${recent.length}, this request ${Memo.decimal(price)}).`,
+          price,
           room,
           small: room.amount + Payer.max(unspent, 0n) >= perCall,
         }
@@ -1524,7 +1538,7 @@ export class Swarm extends DurableObject<Cloudflare.Env> {
   }
 }
 
-type Failed = { busy?: boolean; failed: string; room: Room | undefined; small?: boolean }
+type Failed = { busy?: boolean; failed: string; price?: bigint; room: Room | undefined; small?: boolean }
 
 function pool(): Source {
   return { currency: Chain.tokens.ousd.address, id: 'pool', label: "the swarm's wallet", row: null }
@@ -1633,6 +1647,10 @@ function slug(title: string) {
       .slice(0, 48)
       .replace(/-+$/, '') || 'swarm'
   )
+}
+
+function costly(wanted: bigint, biggest: bigint) {
+  return `Waiting for money: the agent's next model call holds ${dollars(wanted)}, more than the ${dollars(biggest)} any one contribution can pay at once. A contribution or budget pull that can cover it starts it again.`
 }
 
 function funds(money: Money) {
