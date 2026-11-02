@@ -232,7 +232,7 @@ export function Docs(props: { config: Config | undefined }) {
         intro={
           <>
             <p>
-              Money comes three ways. A pledge is a spending key on the contributor's wallet, in MACH or a stablecoin, capped at the pledge, approved in Tempo Wallet and held by this app, which pays the swarm's requests from it. The money stays in the wallet until the swarm spends it, and what it does not spend goes back. A pledge is at least {minimum} MACH.
+              Money comes three ways. A pledge is a spending key on the contributor's wallet, in MACH or a stablecoin, capped at the pledge, approved in Tempo Wallet and held by this app, and charged at once: MACH goes into a payment channel to the gateway (MACH reaches only the gateway and its escrow), a stablecoin into the swarm's wallet. What the swarm does not spend goes back when it finishes. A pledge is at least {minimum} MACH.
             </p>
             <p>A transfer or a monthly budget puts USDC.e, pathUSD or OUSD in the swarm's own wallet. When the swarm is done, what it did not spend goes back to those contributors pro rata.</p>
             <p className="fine">Without a browser, request a pledge with device: true and show the link and code to the person who approves.</p>

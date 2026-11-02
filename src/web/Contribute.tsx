@@ -37,7 +37,7 @@ export function asked(fallback: Mode = 'send'): Prefill {
 }
 
 function allowed(mode: Mode) {
-  return preferred.filter((token) => mode !== 'budget' || token !== 'mach')
+  return preferred
 }
 
 function needed(amount: string) {

@@ -98,6 +98,8 @@ export const headroom = 100_000n
 
 export const minPledge = 2_000_000n
 
+export const minSteer = 100_000n
+
 export const stock = reserve + headroom * 3n
 
 export const repoCost = 1_000_000n

@@ -21,6 +21,7 @@ import * as Vault from './Vault.ts'
 
 export type Pledged = {
   amount: string
+  id: string
   contributor: Address
   note: string | null
   noteId: string | null
@@ -40,6 +41,7 @@ export type Contributed = {
 
 export type Budgeted = {
   amount: string
+  id: string
   contributor: Address
   note: string | null
   period: number
@@ -196,6 +198,8 @@ export class Swarm extends DurableObject<Cloudflare.Env> {
       input.note,
     )
     this.announce(`@${(await Store.account(this.env, input.contributor)).handle} pledged ${trim(input.amount)} ${Chain.currencies[input.token].symbol}${input.note ? ` behind "${input.note}"` : ''}.`)
+    const row = await Store.find(this.env, input.swarm)
+    if (row) await this.upfront(row, input.id, input.token, BigInt(Memo.units(input.amount)))
     if (input.noteId) await this.steer(input.swarm, input.noteId, `pledged ${trim(input.amount)} ${Chain.currencies[input.token].symbol}`)
     if (!this.kv.get<string>('turn')) await this.ctx.storage.setAlarm(Date.now())
   }
@@ -221,9 +225,28 @@ export class Swarm extends DurableObject<Cloudflare.Env> {
       input.note,
     )
     const row = await Store.find(this.env, input.swarm)
-    if (row) await this.fund(row).catch((error: unknown) => this.log('error', 'Pulling the first period of the budget failed.', String(error)))
+    if (row) await this.upfront(row, input.id, input.token, BigInt(Memo.units(input.amount)))
     this.announce(`@${(await Store.account(this.env, input.contributor)).handle} set a budget of ${trim(input.amount)} ${Chain.currencies[input.token].symbol} ${per(input.period)}${input.note ? ` behind "${input.note}"` : ''}.`)
     if (!this.kv.get<string>('turn')) await this.ctx.storage.setAlarm(Date.now())
+  }
+
+  async upfront(row: Store.Row, id: string, token: Currency, amount: bigint) {
+    try {
+      if (token !== 'mach') {
+        await this.fund(row)
+        return
+      }
+      const source = await this.source(row, id)
+      if (!source || this.kv.get(`channel:${id}`)) return
+      const init = { body: JSON.stringify({ key: 'probe' }), headers: { 'content-type': 'application/json', 'gateway-app': Gateway.app(row.id) }, method: 'POST' }
+      const challenge = await fetch(this.env.GATEWAY_URL + '/v1/kv/get', init)
+      const paid = await this.attempt(row, source, { challenge: challenge.headers.get('www-authenticate') ?? '', secret: '' }, [])
+      if (!('authorization' in paid)) return this.log('error', `Could not open ${source.label}'s channel yet.`, paid.failed)
+      await fetch(this.env.GATEWAY_URL + '/v1/kv/get', { ...init, headers: { ...init.headers, authorization: paid.authorization } })
+      this.log('funds', `Opened ${source.label}'s channel with ${trim(Memo.decimal(BigInt(this.kv.get<Payer.Channel>(`channel:${id}`)?.deposit ?? String(amount))))} MACH, held in the escrow until the swarm spends it.`)
+    } catch (error) {
+      this.log('error', 'Charging the new money up front failed; it is charged on the first payment instead.', String(error))
+    }
   }
 
   async hand(swarm: string, name: string): Promise<Gateway.Result<Gateway.Minted>> {
@@ -830,7 +853,7 @@ export class Swarm extends DurableObject<Cloudflare.Env> {
     if (need > deposit) {
       const room = await this.room(row, source)
       const shortfall = need - deposit
-      additional = Payer.min(Payer.max(step, shortfall), room.amount)
+      additional = source.row && room.amount >= shortfall ? room.amount : Payer.min(Payer.max(step, shortfall), room.amount)
       if (additional < shortfall) {
         const unspent = spent === undefined ? 0n : deposit - BigInt(spent)
         return {

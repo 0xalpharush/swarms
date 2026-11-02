@@ -80,7 +80,7 @@ function units(value: string | number) {
 const decimal = z.union([z.string().regex(/^\d+(\.\d{1,6})?$/), z.number().positive()])
 
 const amount = decimal
-  .refine((value) => units(value) >= Store.minPledge, `A pledge is at least ${Memo.decimal(Store.minPledge)}.`)
+  .refine((value) => units(value) >= Store.minSteer, `A pledge is at least ${Memo.decimal(Store.minSteer)}.`)
   .refine((value) => units(value) <= 100_000_000n, 'A pledge is at most 100.')
   .describe(`The amount to pledge in its token, from ${Memo.decimal(Store.minPledge)} to 100, as a decimal string such as "2" or a number.`)
 
@@ -120,7 +120,7 @@ export const schema = {
       ),
     note,
     swarm: id,
-    token: z.enum(Chain.ids).describe('The stablecoin the swarm pulls from the contributor.'),
+    token: z.enum(Chain.pledgeable).describe('The token: a stablecoin the swarm pulls into its wallet each period, or MACH, which opens a payment channel to the gateway with the whole period at once.'),
   }),
   contribution: z.object({
     hash: z
@@ -737,7 +737,7 @@ export async function link(env: Cloudflare.Env, input: Input<'budget'>, origin: 
     link: `${origin}/s/${row.id}?${query}`,
     note,
     swarm: row.id,
-    symbol: Chain.tokens[request.token].symbol,
+    symbol: Chain.currencies[request.token].symbol,
     token: request.token,
     wallet: row.wallet,
   })
@@ -761,6 +761,7 @@ export async function pledge(env: Cloudflare.Env, input: Input<'pledge'>): Promi
   const row = await provisioned(env, found)
 
   const amount = units(request.amount)
+  if (!row.repo && amount < Store.minPledge) return Problem.fail(400, 'invalid_request', `A swarm's first pledges are at least ${Memo.decimal(Store.minPledge)}, so it can open its repository and work.`)
   const requested = await Keys.request(env, { amount, days: pledgeDays, period: 0, recipient: row.wallet, token: request.token })
   const device = request.device ? await Devices.register(requested.authorizeAccessKey, Chain.chain.id, env.SWARMS_URL) : undefined
   if (request.device && !device) return Problem.fail(502, 'upstream_failed', 'Tempo Wallet did not register the approval request.')
@@ -954,6 +955,7 @@ export async function allow(env: Cloudflare.Env, input: Input<'allowance'>): Pro
   if (!activated) return Problem.fail(409, 'conflict', 'This budget is already approved.')
   await stub(env, row.id).budgeted({
     amount: Memo.decimal(approved.limit),
+    id: allowance.id,
     contributor: approved.contributor,
     note: allowance.note,
     period: allowance.period,
@@ -1060,6 +1062,7 @@ async function activate(
   await Devices.forget(env, key.id)
   await stub(env, row.id).pledged({
     amount: Memo.decimal(approved.limit),
+    id: key.id,
     contributor: approved.contributor,
     note: key.note,
     noteId: key.note_id,

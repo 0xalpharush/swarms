@@ -113,7 +113,7 @@ export type Linked = {
   note: string | null
   swarm: string
   symbol: string
-  token: Token
+  token: Currency
   wallet: `0x${string}`
 }
 

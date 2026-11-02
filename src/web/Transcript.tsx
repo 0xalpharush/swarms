@@ -4,6 +4,7 @@ import * as Mention from '../shared/Mention.ts'
 import { decimal, units } from '../shared/Memo.ts'
 import { Alert, explain } from './Alert.tsx'
 import { choose, recorded } from './Contribute.tsx'
+import { pledge } from './Pledge.tsx'
 import { memo } from '../shared/Transfer.ts'
 import * as Api from './api.ts'
 import { here } from './boot.ts'
@@ -114,9 +115,12 @@ function Composer(props: { config: Config | undefined; draft: { at: number; text
       setBusy('Approve in Tempo Wallet…')
       await Wallet.refresh(config).catch(() => {})
       const token = choose('send', decimal(need), Wallet.snapshot().balances)
-      const hash = await Wallet.send(config, { amount: need, memo: memo(props.swarm, ''), to: props.wallet, token })
-      setBusy('Sending…')
-      await recorded(props.swarm, hash, '')
+      if (token === 'mach') await pledge(config, props.swarm, decimal(need), '', 'mach', (step) => setBusy(step === 'approve' ? 'Approve in Tempo Wallet…' : 'Sending…'))
+      else {
+        const hash = await Wallet.send(config, { amount: need, memo: memo(props.swarm, ''), to: props.wallet, token })
+        setBusy('Sending…')
+        await recorded(props.swarm, hash, '')
+      }
       setBusy('Sending…')
       const posted = await Api.say(props.swarm, { steer: decimal(need), text: `@swarm ${idea}` })
       props.onSaid(posted.message)
