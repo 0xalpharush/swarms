@@ -145,6 +145,8 @@ const recentMs = 10_000
 
 const holdMs = 90_000
 
+const heldMs = 10 * 60_000
+
 const confirmMs = 8_000
 
 const shelfMs = 30_000
@@ -806,7 +808,7 @@ export class Swarm extends DurableObject<Cloudflare.Env> {
       if (additional < shortfall) {
         const unspent = spent === undefined ? 0n : deposit - BigInt(spent)
         return {
-          busy: unspent >= perCall || Date.now() - (this.kv.get<number>('paid:' + source.id) ?? 0) < holdMs,
+          busy: Date.now() - (this.kv.get<number>('paid:' + source.id) ?? 0) < (unspent >= perCall ? heldMs : holdMs),
           failed: `It can add ${Memo.decimal(room.amount)} now, less than the ${Memo.decimal(shortfall)} its channel needs (deposit ${Memo.decimal(deposit)}, spent ${Memo.decimal(BigInt(spent ?? '0'))}, accepted ${Memo.decimal(accepted)}, required ${Memo.decimal(BigInt(snapshot?.requiredCumulative ?? '0'))}, in flight ${Memo.decimal(pending)} over ${recent.length}, this request ${Memo.decimal(price)}).`,
           room,
           small: room.amount + Payer.max(unspent, 0n) >= perCall,
