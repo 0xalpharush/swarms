@@ -130,7 +130,7 @@ export function Swarm(props: { config: Config | undefined; id: string }) {
   const room = <Room config={props.config} onBack={back} onMessages={heard} onSteered={reload} onUnread={setUnread} swarm={swarm} visible={wide || shown === 'room'} />
   const labels: Record<Tab, ReactNode> = {
     about: 'About',
-    code: swarm.code ? `Code · ${swarm.code.name}` : 'Code',
+    code: swarm.code && !phone ? `Code · ${swarm.code.name}` : 'Code',
     machines: connected ? `Machines · ${connected}` : 'Machines',
     room: <>Room<Presence members={chat.members} online={chat.online} watching={chat.watching} />{unread > 0 && <span className="tab-count">{unread}</span>}</>,
     transcript: 'Transcript',

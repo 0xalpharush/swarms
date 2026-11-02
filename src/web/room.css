@@ -707,3 +707,24 @@ button.energy:focus-visible { outline:2px solid #3f7d4e; outline-offset:2px; }
   .energy-bar { height:20px; }
   .energy-bar b { line-height:20px; }
 }
+
+@media (max-width:799px) {
+  .repo-card .code-file { max-height:none; overflow:visible; }
+  .repo-card .code-tree { height:min(200px,28vh); }
+  .swarm-head { gap:6px; padding:4px 12px 8px; }
+  .phone-views button { height:38px; }
+  .transcript-bar { padding-top:4px; padding-bottom:4px; }
+}
+@media (pointer:coarse) {
+  .transcript-who button { height:32px; padding:0 12px; }
+  .said-backed, .beat-funded .said-backed { position:relative; }
+  .said-backed::after, .mention::after, .code-file-bar button::after { content:''; position:absolute; inset:-8px -4px; }
+  .mention { position:relative; }
+  .timeline, .room-list, .room-page-panel { touch-action:pan-y; -webkit-tap-highlight-color:transparent; }
+  button, a { -webkit-tap-highlight-color:transparent; }
+}
+@media (hover:none) {
+  button.energy:hover { border-color:var(--grey-300); }
+  .transcript-who button:hover, .room-tabs button:hover { color:inherit; }
+}
+@media (pointer:coarse) { .code-file-bar button { position:relative; } }

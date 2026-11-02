@@ -3,7 +3,7 @@ import { FileTree, useFileTree } from '@pierre/trees/react'
 import { useEffect, useMemo, useState } from 'react'
 import type { Code as Repo, Update } from '../shared/Api.ts'
 import { ago, usd } from './format.ts'
-import { message } from './hooks.ts'
+import { message, useMedia } from './hooks.ts'
 import { Link } from './router.tsx'
 
 export type Commit = { author?: { email: string | null; name: string | null }; date: string | null; message: string; parents?: string[]; sha: string }
@@ -43,6 +43,7 @@ function Tree(props: { onSelect: (path: string) => void; paths: readonly string[
 
 export function Viewer(props: { base: string; path: string; sha: string }) {
   const [state, setState] = useState<{ error?: string; source?: { size: number; text?: string } }>({})
+  const narrow = useMedia('(max-width: 799px)')
 
   useEffect(() => {
     let alive = true
@@ -64,7 +65,7 @@ export function Viewer(props: { base: string; path: string; sha: string }) {
   if (state.error) return <p className="error">{state.error}</p>
   if (!state.source) return <p className="empty">Loading {props.path}…</p>
   if (!file) return <p className="empty">{props.path} is binary, {state.source.size.toLocaleString('en-US')} bytes.</p>
-  return <File className="code-view" file={file} options={theme} />
+  return <File className="code-view" file={file} options={narrow ? { ...theme, overflow: 'wrap' } : theme} />
 }
 
 export function patch(change: Change) {
@@ -76,6 +77,7 @@ export function patch(change: Change) {
 
 function Changes(props: { base: string; from: string | null; to: string }) {
   const [state, setState] = useState<{ error?: string; files?: Change[] }>({})
+  const narrow = useMedia('(max-width: 799px)')
 
   useEffect(() => {
     let alive = true
@@ -95,7 +97,7 @@ function Changes(props: { base: string; from: string | null; to: string }) {
     <div className="code-diff">
       {state.files.map((change) =>
         change.patch ? (
-          <PatchDiff className="code-view" key={change.path} options={unified} patch={patch(change)} />
+          <PatchDiff className="code-view" key={change.path} options={narrow ? { ...unified, overflow: 'wrap' } : unified} patch={patch(change)} />
         ) : (
           <p className="fine" key={change.path}>
             {change.path}: {change.state}, +{change.additions} −{change.deletions}
