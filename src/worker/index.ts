@@ -14,7 +14,8 @@ const app = new Hono<{ Bindings: Cloudflare.Env }>()
 
 app.get('*', async (c, next) => {
   const path = new URL(c.req.url).pathname
-  if (!Page.rendered(path) || !(c.req.header('accept') ?? '').includes('text/html')) return next()
+  const accept = c.req.header('accept') ?? ''
+  if (!Page.rendered(path) || (accept !== '' && !/text\/html|\*\/\*/.test(accept))) return next()
   return Page.page(c.req.raw, c.env)
 })
 
