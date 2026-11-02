@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import type { Config, Detail } from '../shared/Api.ts'
 import * as Api from './api.ts'
 import { type Change, type Commit, patch, read, unified, Viewer } from './Code.tsx'
-import { ago } from './format.ts'
+import { ago, usd } from './format.ts'
 import { message, useNow, usePoll } from './hooks.ts'
 import { Link } from './router.tsx'
 import { Status } from './Visual.tsx'
@@ -315,7 +315,7 @@ export function Repo(props: { config: Config | undefined; id: string }) {
       ) : !swarm || !props.config ? (
         <p className="empty">Loading…</p>
       ) : !code ? (
-        <p className="empty">This swarm has no repository yet: its lead creates one first thing in its first round that one funder can pay {props.config.repoAt} USD at once.</p>
+        <p className="empty">This swarm has no repository yet: its lead creates one first thing in its first round that one funder can pay {usd(props.config.repoAt)} at once.</p>
       ) : (
         <Browser base={`${props.config.gateway}/p/${code.owner}/${code.app}/git/${encodeURIComponent(code.name)}`} detail={swarm} live={swarm.status !== 'done'} />
       )}
