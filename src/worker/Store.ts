@@ -93,7 +93,7 @@ export const perWorker = 100_000n
 
 export const reserve = 50_000n
 
-export const minPledge = 250_000n
+export const minPledge = 2_000_000n
 
 export const maxParallel = 4
 
@@ -104,6 +104,8 @@ export const repoCost = 1_000_000n
 export const perCall = 40_000n
 
 export const repoAt = repoCost + perCall
+
+export const launch = repoAt + reserve + perWorker
 
 export const budget = { days: 30, max: 100_000_000n, min: minPledge, period: 86_400 } as const
 

@@ -64,9 +64,9 @@ function document(
 function amounts(label: string) {
   return `<div class="funding" id="funding">
     <div class="amounts" role="group" aria-label="MACH amount">
-      <button class="amount selected" data-amount="0.25" type="button">0.25</button>
-      <button class="amount" data-amount="1" type="button">1</button>
+      <button class="amount selected" data-amount="2" type="button">2</button>
       <button class="amount" data-amount="5" type="button">5</button>
+      <button class="amount" data-amount="10" type="button">10</button>
       <span>MACH</span>
     </div>
     <input id="note" maxlength="280" placeholder="Optional steering note">
@@ -191,7 +191,7 @@ const success=document.getElementById('success');
 const action=document.getElementById('action');
 const statusLine=document.getElementById('status');
 const note=document.getElementById('note');
-let amount='0.25';
+let amount='2';
 let choice=null;
 let currentSwarm=frame.swarm||null;
 let polling=false;

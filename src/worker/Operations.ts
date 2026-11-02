@@ -67,7 +67,7 @@ const decimal = z.union([z.string().regex(/^\d+(\.\d{1,6})?$/), z.number().posit
 const amount = decimal
   .refine((value) => units(value) >= Store.minPledge, `A pledge is at least ${Memo.decimal(Store.minPledge)}.`)
   .refine((value) => units(value) <= 100_000_000n, 'A pledge is at most 100.')
-  .describe(`The amount to pledge in its token, from ${Memo.decimal(Store.minPledge)} to 100, as a decimal string such as "0.25" or a number.`)
+  .describe(`The amount to pledge in its token, from ${Memo.decimal(Store.minPledge)} to 100, as a decimal string such as "2" or a number.`)
 
 const note = z
   .string()

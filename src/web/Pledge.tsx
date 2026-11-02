@@ -8,7 +8,7 @@ import * as Wallet from './wallet.ts'
 
 export type Step = 'request' | 'approve' | 'confirm'
 
-export const amounts = ['0.25', '1', '5'] as const
+export const amounts = ['2', '5', '10'] as const
 
 export function disclosure(token: Currency) {
   const symbol = symbols[token]
@@ -47,7 +47,7 @@ export function Amount(props: { config: Config | undefined; hint?: string; label
         {props.label ?? 'Amount'}
       </label>
       <div className="field-input">
-        <input id="amount" inputMode="decimal" onChange={(event) => props.onChange(event.target.value.replace(',', '.'))} placeholder="0.25" value={props.value} />
+        <input id="amount" inputMode="decimal" onChange={(event) => props.onChange(event.target.value.replace(',', '.'))} placeholder="2" value={props.value} />
         <span className="field-suffix">{props.suffix}</span>
       </div>
       <div className="chips">
