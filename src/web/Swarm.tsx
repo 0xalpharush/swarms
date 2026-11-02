@@ -1,5 +1,6 @@
 import { lazy, type ReactNode, Suspense, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import * as Answer from '../shared/Answer.ts'
+import * as Memo from '../shared/Memo.ts'
 import type { Config, Detail, Entry, Note, Round } from '../shared/Api.ts'
 import { merge } from '../shared/Trail.ts'
 import * as Api from './api.ts'
@@ -131,7 +132,9 @@ export function Swarm(props: { config: Config | undefined; id: string }) {
         </div>
         <dl className="swarm-figures">
           <div><dt>Raised</dt><dd>{usd(swarm.raised)}</dd></div>
-          <div><dt>{swarm.status === 'done' ? 'Spent' : 'Left'}</dt><dd>{usd(swarm.status === 'done' ? swarm.spent : swarm.remaining)}</dd></div>
+          <div><dt>Spent</dt><dd>{usd(swarm.spent)}</dd></div>
+          {returned(swarm) > 0 && <div title="Pledges that ended before they were used up: the unspent part never left the backer's wallet."><dt>Back to backers</dt><dd>{usd(Memo.decimal(returned(swarm)))}</dd></div>}
+          {swarm.status !== 'done' && <div><dt>Left</dt><dd>{usd(swarm.remaining)}</dd></div>}
           <div><dt>Backers</dt><dd>{swarm.contributors}</dd></div>
         </dl>
         {swarm.status !== 'done' && <button className="btn btn-high swarm-back" onClick={() => back(note)} type="button">Back it</button>}
@@ -246,6 +249,11 @@ function Repository(props: { config: Config | undefined; swarm: Detail }) {
       <Code gateway={props.config.gateway} repo={code} rounds={props.swarm.history} swarm={props.swarm.id} />
     </Suspense>
   )
+}
+
+function returned(swarm: Detail) {
+  const rest = BigInt(Memo.units(swarm.raised)) - BigInt(Memo.units(swarm.spent)) - BigInt(Memo.units(swarm.remaining))
+  return rest > 0n ? rest : 0n
 }
 
 function Ledger(props: { config: Config | undefined; swarm: Detail }) {
