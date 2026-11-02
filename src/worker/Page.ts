@@ -149,6 +149,6 @@ export async function page(request: Request, env: Cloudflare.Env) {
     return status
   })()
   work.catch(() => writer.abort().catch(() => {}))
-  const status = await Promise.race([gathering.then((value) => value.status), new Promise<number>((resolve) => setTimeout(() => resolve(200), 50))])
+  const status = url.pathname.startsWith('/s/') ? (await gathering).status : 200
   return new Response(readable, { headers: { 'cache-control': 'private, no-cache', 'content-type': 'text/html; charset=utf-8', link: '</fonts/ParadigmSerif-BetaRegular.woff2>; rel=preload; as=font; crossorigin' }, status })
 }
