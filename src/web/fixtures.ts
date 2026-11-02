@@ -1,5 +1,5 @@
 import * as Answer from '../shared/Answer.ts'
-import type { Account, Artifact, Budget, BudgetRequested, Budgeted, Chatter, Config, Contributed, Contribution, Currency, Detail, Entry, Form, Kind, Lent, Live as LiveEvent, Me, Member, Note, Pledge, Pledged, Posted, Requested, Room, Said, Status, Summary, Token, Update, Way } from '../shared/Api.ts'
+import type { Account, Artifact, Code, Budget, BudgetRequested, Budgeted, Chatter, Config, Contributed, Contribution, Currency, Detail, Entry, Form, Kind, Lent, Live as LiveEvent, Me, Member, Note, Pledge, Pledged, Posted, Requested, Room, Said, Status, Summary, Token, Update, Way } from '../shared/Api.ts'
 import { decimal, maxNote, units } from '../shared/Memo.ts'
 import * as Mention from '../shared/Mention.ts'
 import { problems } from '../shared/ResearchBrief.ts'
@@ -58,6 +58,7 @@ function build(input: {
   age: number
   flicker?: readonly string[]
   goal: string
+  code?: Code
   hands?: readonly string[]
   id: string
   lines: readonly Line[]
@@ -123,7 +124,7 @@ function build(input: {
     contributions,
     contributors: 0,
     createdAt: at(input.age),
-    code: null,
+    code: input.code ?? null,
     cursor: 0,
     daily: '0',
     feed,
@@ -384,6 +385,7 @@ const fixtures: Live[] = [
       [1290, 'Classified 48,113 candidate bundles; 61% DEX arbitrage, 23% liquidations, 16% sandwiches.', '0.630000'],
       [1100, "Final report.\n\n1. Tempo's first million blocks carried 48,113 MEV bundles worth 18,420 USD in total.\n2. Arbitrage between the stablecoin DEX and outside venues is 61% of it and mostly harmless: it keeps pegs tight.\n3. Sandwiches are 16% of bundles but 38% of value, concentrated in 4 searchers.\n4. Payment lanes left no room for sandwiches on transfers; every sandwich hit a DEX swap with slippage above 0.5%.\n\nData, notebooks and the classifier are in the bucket under mev/.\nSTATUS: done", '0.806120'],
     ],
+    code: { app: 'swarm-06cf5d7c8f92', name: 'solve-p-np', owner: '0x975937feafc6869a260c176854dda8764a78e122' },
     id: 'mev-map',
     lines: [
       ['error', 'The agent stopped with an error after spending $0.40.', 'The classifier ran out of memory on a 2 GiB machine.'],

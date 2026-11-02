@@ -279,9 +279,7 @@ function Repository(props: { config: Config | undefined; swarm: Detail }) {
   const code = props.swarm.code
   if (!code || !props.config)
     return (
-      <p className="empty">
-        No code yet. The agent opens its repo once one backer can cover {usd(props.config?.repoAt ?? '1.04')}.
-      </p>
+      <p className="machine-none">No code yet. The agent opens its repository once one backer can cover {usd(props.config?.repoAt ?? '1.04')}.</p>
     )
   return (
     <Suspense fallback={<p className="empty">Loading the code…</p>}>

@@ -154,6 +154,7 @@ const flows: readonly Flow[] = [
       { name: 'A sandbox opened', note: 'config and commands', steps: [{ wait: 800 }, { click: '.machine-row' }, { click: '.run button' }], url: swarm('bench-coders', '#machines') },
       { name: 'A lent machine', note: 'price and payout', steps: [{ wait: 8000 }, { click: ".machine-glyph[data-kind='hand']" }], url: swarm('bench-coders', '#machines') },
       { name: 'No machines', url: swarm('speedrun-t4', '#machines') },
+      { name: 'Code', note: 'tree, file, commits', url: swarm('mev-map', '#code') },
       { name: 'Code, no repository yet', url: swarm('bench-coders', '#code') },
       { name: 'About', url: swarm('bench-coders', '#about') },
     ],

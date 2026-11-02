@@ -336,7 +336,7 @@ export function Transcript(props: {
               {item.now?.kind === 'text' ? (
                 <div className="beat-say"><Markdown streaming text={item.now.text} /><span className="caret" /></div>
               ) : (
-                <p className="beat-text">{item.now?.kind === 'input' && <span aria-hidden="true" className="beat-mark">›</span>}{item.now?.text.slice(-400)}<span className="caret" /></p>
+                <p className="beat-text">{item.now?.kind === 'input' && <span aria-hidden="true" className="beat-mark">›</span>}{item.now?.text}<span className="caret" /></p>
               )}
             </li>
           ))}

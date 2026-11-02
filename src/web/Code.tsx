@@ -112,15 +112,22 @@ function Diffs(props: { base: string; commits: readonly Commit[]; update: Update
   return (
     <>
       {shas.map((sha) => (
-        <div key={sha}>
-          <p className="fine">
-            {sha.slice(0, 7)} {props.commits.find((commit) => commit.sha === sha)?.message.split('\n')[0]}
-          </p>
+        <div className="code-sub" key={sha}>
+          <p className="code-sub-head"><code>{sha.slice(0, 7)}</code> {props.commits.find((commit) => commit.sha === sha)?.message.split('\n')[0]}</p>
           <Changes base={props.base} from={null} to={sha} />
         </div>
       ))}
     </>
   )
+}
+
+function first(paths: readonly string[]) {
+  return paths.find((path) => /^readme(\.md)?$/i.test(path)) ?? paths.find((path) => /readme/i.test(path)) ?? paths[0]
+}
+
+function Copy(props: { text: string }) {
+  const [done, setDone] = useState(false)
+  return <button className="code-copy" onClick={() => void navigator.clipboard?.writeText(props.text).then(() => { setDone(true); setTimeout(() => setDone(false), 1500) })} type="button">{done ? 'Copied' : 'Copy path'}</button>
 }
 
 export function Code(props: { gateway: string; repo: Repo; swarm: string; updates: readonly Update[] }) {
@@ -147,39 +154,66 @@ export function Code(props: { gateway: string; repo: Repo; swarm: string; update
   const pushed = [...props.updates].filter((update) => update.commits.length).reverse()
   const commits = state.commits
   const head = commits?.[0]
+  const shown = path ?? (state.files ? first(state.files) : undefined)
+  const browser = `/s/${encodeURIComponent(props.swarm)}/code`
 
-  if (state.error) return <p className="error">{state.error}</p>
-  if (!commits || !state.files) return <p className="empty">Loading the code…</p>
+  if (state.error) return <p className="machine-none">{state.error}</p>
+  if (!commits || !state.files)
+    return (
+      <div className="repo-card" aria-busy="true">
+        <header className="repo-card-head"><span className="code-glyph" aria-hidden="true">{'</>'}</span><b>{props.repo.name}</b></header>
+        <div className="code-browse"><div className="code-tree code-ghost" /><div className="code-file code-ghost" /></div>
+      </div>
+    )
   if (!head)
     return (
-      <p className="empty">
-        The repository {props.repo.name} has no commits yet. Each commit shows up here as it lands. <Link to={`/s/${encodeURIComponent(props.swarm)}/code`}>Open the code browser</Link>
-      </p>
+      <div className="repo-card">
+        <header className="repo-card-head"><span className="code-glyph" aria-hidden="true">{'</>'}</span><b>{props.repo.name}</b><span className="repo-card-meta">empty</span></header>
+        <p className="machine-none">No commits yet. Each one shows up here as it lands.</p>
+      </div>
     )
 
   return (
-    <div className="code">
-      <p className="fine">
-        Public repository <strong>{props.repo.name}</strong>, {commits.length === 1 ? '1 commit' : `${commits.length} commits`}, last {head.date ? ago(Date.parse(head.date)) : head.sha.slice(0, 7)}. <Link to={`/s/${encodeURIComponent(props.swarm)}/code`}>Open the code browser</Link>
-      </p>
-      <div className="code-browse">
-        <Tree onSelect={setPath} paths={state.files} />
-        <div className="code-file">{path ? <Viewer base={base} path={path} sha={head.sha} /> : <p className="empty">Pick a file to read it at {head.sha.slice(0, 7)}.</p>}</div>
+    <div className="code-page">
+      <div className="repo-card">
+        <header className="repo-card-head">
+          <span className="code-glyph" aria-hidden="true">{'</>'}</span>
+          <b>{props.repo.name}</b>
+          <span className="repo-card-meta">{commits.length === 1 ? '1 commit' : `${commits.length} commits`} · {state.files.length} files · {head.date ? ago(Date.parse(head.date)) : head.sha.slice(0, 7)}</span>
+          <Link className="repo-card-open" to={browser}>Full browser →</Link>
+        </header>
+        <div className="code-browse">
+          <Tree onSelect={setPath} paths={state.files} />
+          <div className="code-file">
+            {shown ? (
+              <>
+                <div className="code-file-bar"><span>{shown}</span><code>{head.sha.slice(0, 7)}</code><Copy text={shown} /></div>
+                <Viewer base={base} path={shown} sha={head.sha} />
+              </>
+            ) : (
+              <p className="machine-none">No files.</p>
+            )}
+          </div>
+        </div>
       </div>
-      <ol className="commits">
-        {pushed.map((update) => (
-          <li className="commit" data-open={open === update.at} key={update.at}>
-            <button className="commit-head" onClick={() => setOpen(open === update.at ? undefined : update.at)} type="button">
-              <span className="commit-sha">{ago(update.at)}</span>
-              <span className="commit-message">
-                {update.commits.length === 1 ? commits.find((commit) => commit.sha === update.commits[0])?.message.split('\n')[0] ?? '1 commit' : `${update.commits.length} commits`}
-              </span>
-              <span className="commit-ago">{usd(update.spent)}</span>
-            </button>
-            {open === update.at && <Diffs base={base} commits={commits} update={update} />}
-          </li>
-        ))}
-      </ol>
+      {pushed.length > 0 && (
+        <ol className="tiles-swarm code-log">
+          {pushed.map((update) => {
+            const single = update.commits.length === 1 ? commits.find((commit) => commit.sha === update.commits[0]) : undefined
+            return (
+              <li data-open={open === update.at} key={update.at}>
+                <button aria-expanded={open === update.at} className="tile-swarm machine-row" onClick={() => setOpen(open === update.at ? undefined : update.at)} type="button">
+                  <i aria-hidden="true" className="machine-glyph" data-state={open === update.at ? 'on' : 'idle'}>±</i>
+                  <span className="tile-title">{single?.message.split('\n')[0] ?? `${update.commits.length} commits`}</span>
+                  <span className="tile-raised">{usd(update.spent)}</span>
+                  <span className="machine-sub">{update.commits.map((sha) => sha.slice(0, 7)).join(' ')} · {ago(update.at)}</span>
+                </button>
+                {open === update.at && <div className="machine-open code-open"><Diffs base={base} commits={commits} update={update} /></div>}
+              </li>
+            )
+          })}
+        </ol>
+      )}
     </div>
   )
 }
