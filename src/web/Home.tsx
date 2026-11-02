@@ -4,7 +4,7 @@ import * as Api from './api.ts'
 import { ago, usd } from './format.ts'
 import { usePoll } from './hooks.ts'
 import { open, problems } from './research.ts'
-import { Link, navigate } from './router.tsx'
+import { Link, navigate, prefetch } from './router.tsx'
 
 const order = { running: 0, paused: 1, funding: 2, done: 3 } as const
 
@@ -39,7 +39,7 @@ function Tile(props: { onPick: () => void; open: boolean; swarm: Summary }) {
   const page = `/s/${swarm.id}`
   return (
     <li data-open={props.open}>
-      <button aria-expanded={props.open} className="tile-swarm" onClick={() => (props.open ? navigate(page) : props.onPick())} type="button">
+      <button aria-expanded={props.open} className="tile-swarm" onClick={() => (props.open ? navigate(page) : props.onPick())} onFocus={() => prefetch(page)} onPointerEnter={() => prefetch(page)} onTouchStart={() => prefetch(page)} type="button">
         <i className="tile-dot" data-status={swarm.status} />
         <span className="tile-title">{swarm.title}</span>
         <span className="tile-raised">{usd(swarm.raised)}</span>
