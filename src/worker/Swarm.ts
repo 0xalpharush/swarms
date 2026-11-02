@@ -215,8 +215,10 @@ export class Swarm extends DurableObject<Cloudflare.Env> {
   async heal() {
     const now = Date.now()
     if (!this.kv.get<string>('paused') || this.kv.get<string>('turn') || now - (this.kv.get<number>('healed') ?? 0) < healMs) return
-    if ((await this.ctx.storage.getAlarm()) !== null) return
+    const alarm = await this.ctx.storage.getAlarm()
+    if (alarm !== null && alarm < now + healMs) return
     this.kv.put('healed', now)
+    console.log(JSON.stringify({ alarm, heal: this.kv.get<string>('id') }))
     await this.ctx.storage.setAlarm(now)
   }
 
