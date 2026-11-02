@@ -38,7 +38,7 @@ test('start frame publishes an X player card and device pledge flow', async () =
   assert.match(html, /name="twitter:card" content="player"/)
   assert.match(html, /name="twitter:player" content="https:\/\/swarms\.example\/x"/)
   assert.match(html, /device:true/)
-  assert.match(html, /Launch swarm/)
+  assert.match(html, /Launch/)
   assert.match(html, /Quantum-safe signatures/)
 })
 
@@ -50,7 +50,7 @@ test('swarm frame escapes research text and points the player at its own route',
   assert.match(html, /Safer &lt;signatures&gt;/)
   assert.match(html, /Test &lt;script&gt;/)
   assert.doesNotMatch(html, /<script> without placing/)
-  assert.match(html, /Back this quest/)
+  assert.match(html, />Fund</)
 })
 
 test('a working swarm frame streams the agent live from when it started', async () => {
@@ -63,7 +63,7 @@ test('a working swarm frame streams the agent live from when it started', async 
   assert.match(html, /"live":\{"since":10\}/)
   assert.match(html, /zstd &lt;wins&gt;/)
   assert.doesNotMatch(html, /\b[Rr]ound \d|ROUND|[Ee]xplorer|[Rr]esearcher/)
-  assert.match(html, /Back this quest/)
+  assert.match(html, />Fund</)
 })
 
 test('a swarm frame that is not working shows the latest update', async () => {

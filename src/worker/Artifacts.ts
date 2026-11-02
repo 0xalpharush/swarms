@@ -17,6 +17,9 @@ export function base(swarm: string) {
 export async function list(env: Cloudflare.Env, swarm: string, cached = true): Promise<Artifact[] | undefined> {
   const memo = listed.get(swarm)
   if (cached && memo && Date.now() - memo.at < fresh) return memo.artifacts
+  const key = new Request(`https://swarms.cache/artifacts/${swarm}`)
+  const shared = cached ? await caches.default.match(key).catch(() => undefined) : undefined
+  if (shared) return (await shared.json()) as Artifact[]
   const owner = await Gateway.wallet(env)
   if (!owner) return undefined
   const entries: Entry[] = []
@@ -32,6 +35,7 @@ export async function list(env: Cloudflare.Env, swarm: string, cached = true): P
   }
   const artifacts = entries.flatMap((entry) => Shelf.read(entry.key, entry.value, entry.version, base(swarm)) ?? [])
   listed.set(swarm, { artifacts, at: Date.now() })
+  await caches.default.put(key, new Response(JSON.stringify(artifacts), { headers: { 'cache-control': `max-age=${fresh / 1000}`, 'content-type': 'application/json' } })).catch(() => undefined)
   return artifacts
 }
 

@@ -162,12 +162,8 @@ export function Artifacts(props: { artifacts: readonly Artifact[] | undefined; e
   if (!list.length)
     return (
       <div className="artifact-empty">
-        <p className="label">Artifacts</p>
-        <h2>Dashboards, charts and write-ups land here</h2>
-        <p>
-          The agent publishes them as it works, so you can follow the numbers without reading every step of the transcript.
-          {props.working ? ' None yet this run.' : ''} Want one? Ask in the room, for example <span className="mention" data-swarm="true">@swarm</span> publish a live leaderboard of the results.
-        </p>
+        <h2>No dashboards yet.</h2>
+        <p>Ask for one: <span className="mention" data-swarm="true">@swarm</span> publish a live leaderboard.</p>
       </div>
     )
   const current = list.find((artifact) => artifact.slug === props.selected) ?? list[0]

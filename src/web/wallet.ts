@@ -1,10 +1,8 @@
-import { Mach, Provider, tempoWallet } from 'accounts'
-import { type Address, encodeFunctionData, type Hex } from 'viem'
-import { Abis, Actions, createClient, http } from 'viem/tempo'
-import { tempo } from 'viem/tempo/chains'
+import type { Address, Hex } from 'viem'
 import type { Account, Config, Currency } from '../shared/Api.ts'
 import * as Api from './api.ts'
 import { fixture } from './api.ts'
+import { boot, type Face, faceCookie, server } from './boot.ts'
 import * as Fixtures from './fixtures.ts'
 
 export type Session = { address: Address; token: string }
@@ -14,15 +12,24 @@ export type State = {
   address: Address | undefined
   balance: bigint | undefined
   balances: Partial<Record<Currency, bigint>>
+  pending: boolean
   session: Session | undefined
 }
 
-let provider: ReturnType<typeof Provider.create> | undefined
+let provider: Promise<Awaited<ReturnType<typeof load>>['provider']> | undefined
+
+async function load() {
+  const { Mach, Provider, tempoWallet } = await import('accounts')
+  return { Mach, provider: Provider.create({ adapter: tempoWallet(), mpp: false }) }
+}
+
+const chain = () => Promise.all([import('viem'), import('viem/tempo'), import('viem/tempo/chains')])
 
 const kept = 'swarms.session'
 
 function stored(): Session | undefined {
-  if (fixture) return undefined
+  if (server) return undefined
+  if (fixture) return Fixtures.scene.has('in') ? { address: Fixtures.visitor, token: 'fixture' } : undefined
   try {
     const value = JSON.parse(localStorage.getItem(kept) ?? 'null') as Session | null
     return value?.address && value.token ? value : undefined
@@ -31,14 +38,66 @@ function stored(): Session | undefined {
   }
 }
 
-let state: State = { account: undefined, address: undefined, balance: undefined, balances: {}, session: stored() }
+const faced = 'swarms.face'
+
+
+function face(): Face | undefined {
+  if (server || fixture) return undefined
+  try {
+    const value = JSON.parse(localStorage.getItem(faced) ?? 'null') as Face | null
+    return value?.address ? value : undefined
+  } catch {
+    return undefined
+  }
+}
+
+const seen = face()
+
+const session = stored()
+
+const same = (address: Address | undefined) => !!address && seen?.address.toLowerCase() === address.toLowerCase()
+
+let state: State = {
+  account: session && same(session.address) ? seen?.account : undefined,
+  address: session?.address ?? (fixture ? undefined : seen?.address),
+  balance: same(session?.address ?? seen?.address) && seen?.balance !== undefined ? BigInt(seen.balance) : undefined,
+  balances: {},
+  pending: !session && !!seen && !fixture,
+  session,
+}
+
+function mirror() {
+  if (server || fixture) return
+  const value = state.address ? encodeURIComponent(JSON.stringify({ account: state.account, address: state.address, balance: state.balance?.toString() } satisfies Face)) : ''
+  document.cookie = value ? `${faceCookie}=${value}; path=/; max-age=31536000; samesite=lax` : `${faceCookie}=; path=/; max-age=0; samesite=lax`
+}
+
+mirror()
+
+const seeds = new WeakMap<object, State>()
+
+const empty: State = { account: undefined, address: undefined, balance: undefined, balances: {}, pending: false, session: undefined }
+
+export function initial(): State {
+  const current = boot()
+  if (!current) return empty
+  let seed = seeds.get(current)
+  if (!seed) {
+    const remembered = current.face
+    seed = { ...empty, account: remembered?.account, address: remembered?.address, balance: remembered?.balance === undefined ? undefined : BigInt(remembered.balance), pending: !!remembered }
+    seeds.set(current, seed)
+  }
+  return seed
+}
+
+let checked = !!session || fixture
 
 Api.authorize(state.session?.token)
 
 const listeners = new Set<() => void>()
 
 function wallet() {
-  provider ??= Provider.create({ adapter: tempoWallet(), mpp: false })
+  provider ??= load().then((loaded) => loaded.provider)
   return provider
 }
 
@@ -54,6 +113,11 @@ function set(next: Partial<State>) {
       else localStorage.removeItem(kept)
     }
   }
+  if (!fixture) {
+    if (state.address) localStorage.setItem(faced, JSON.stringify({ account: state.account, address: state.address, balance: state.balance?.toString() } satisfies Face))
+    else localStorage.removeItem(faced)
+    mirror()
+  }
   for (const listener of listeners) listener()
 }
 
@@ -68,20 +132,30 @@ export function snapshot() {
   return state
 }
 
+function asked() {
+  if (Fixtures.scene.has('hang')) return new Promise<never>(() => {})
+  if (Fixtures.scene.has('deny')) return new Promise<never>((_, reject) => setTimeout(() => reject(new Error('You declined the request in Tempo Wallet.')), 900 * Fixtures.pace))
+  return new Promise((resolve) => setTimeout(resolve, 1200 * Fixtures.pace))
+}
+
 export async function restore(config: Config) {
-  if (fixture || state.address || !localStorage.getItem(remembered)) return
-  const accounts = await wallet()
-    .request({ method: 'eth_accounts' })
-    .catch(() => [] as readonly Address[])
-  const address = accounts[0]
-  if (!address) return
-  set({ address })
-  await refresh(config)
+  if (!checked) {
+    checked = true
+    if (!state.address && !localStorage.getItem(remembered)) return
+    const accounts = await (await wallet())
+      .request({ method: 'eth_accounts' })
+      .catch(() => [] as readonly Address[])
+    const address = accounts[0]
+    if (state.pending) set({ pending: false })
+    if (!address) return set({ account: undefined, address: undefined, balance: undefined, balances: {} })
+    if (address.toLowerCase() !== state.address?.toLowerCase()) set({ account: undefined, address, balance: undefined, balances: {} })
+  }
+  if (state.address) await refresh(config)
 }
 
 export async function connect(config: Config) {
   if (state.address) return state.address
-  const address = fixture ? Fixtures.visitor : (await wallet().request({ method: 'eth_requestAccounts' }))[0]
+  const address = fixture ? Fixtures.visitor : (await (await wallet()).request({ method: 'eth_requestAccounts' }))[0]
   if (!address) throw new Error('Tempo Wallet returned no account.')
   set({ address })
   void refresh(config).catch(() => {})
@@ -90,11 +164,11 @@ export async function connect(config: Config) {
 
 export async function authorize(config: Config, authorizeAccessKey: unknown) {
   if (fixture) {
-    await new Promise((resolve) => setTimeout(resolve, 1400))
+    await asked()
     set({ address: Fixtures.visitor })
     return { address: Fixtures.visitor, keyAuthorization: {} as unknown }
   }
-  const result = (await wallet().request({ method: 'wallet_connect', params: [{ capabilities: { authorizeAccessKey }, chainId: config.chainId }] } as never)) as {
+  const result = (await (await wallet()).request({ method: 'wallet_connect', params: [{ capabilities: { authorizeAccessKey }, chainId: config.chainId }] } as never)) as {
     accounts: readonly { address: Address; capabilities?: { keyAuthorization?: unknown } }[]
   }
   const account = result.accounts[0]
@@ -106,13 +180,13 @@ export async function authorize(config: Config, authorizeAccessKey: unknown) {
 
 export async function signIn(config: Config) {
   if (fixture) {
-    await new Promise((resolve) => setTimeout(resolve, 900))
+    await asked()
     const session = { address: Fixtures.visitor, token: 'fixture' } satisfies Session
     set({ address: session.address, session })
     void identify()
     return session
   }
-  const result = (await wallet().request({
+  const result = (await (await wallet()).request({
     method: 'wallet_connect',
     params: [{ capabilities: { auth: { returnToken: true, url: config.auth } }, chainId: config.chainId }],
   } as never)) as { accounts: readonly { address: Address; capabilities?: { auth?: { token?: string } } }[] }
@@ -153,13 +227,17 @@ export function signOut() {
 
 export async function send(config: Config, input: { amount: bigint; memo: Hex; to: Address; token: Currency }) {
   if (fixture) {
-    await new Promise((resolve) => setTimeout(resolve, 1400))
-    return `0x${'5a'.repeat(32)}` as Hex
+    await asked()
+    if (Fixtures.balances[input.token] < input.amount) throw Object.assign(new Error(`Your wallet holds less than this.`), { code: 'insufficient_balance' })
+    const hash = `0x${Date.now().toString(16).padStart(64, '5')}` as Hex
+    Fixtures.sent.set(hash, input.amount)
+    return hash
   }
   const address = await connect(config)
   const token = config.tokens.find((item) => item.id === input.token)
   if (!token) throw new Error('That token is not offered.')
-  const receipt = (await wallet().request({
+  const [{ encodeFunctionData }, { Abis }] = await chain()
+  const receipt = (await (await wallet()).request({
     method: 'eth_sendTransactionSync',
     params: [
       {
@@ -178,11 +256,12 @@ export async function send(config: Config, input: { amount: bigint; memo: Hex; t
 export async function refresh(config: Config) {
   const address = state.address
   if (!address) return undefined
-  const client = createClient({ chain: tempo, transport: http(config.rpc) })
+  const loaded = fixture ? undefined : await chain()
+  const client = loaded ? loaded[1].createClient({ chain: loaded[2].tempo, transport: loaded[1].http(config.rpc) }) : undefined
   const read = (token: Config['tokens'][number]) =>
-    fixture
+    !loaded || !client
       ? Promise.resolve(Fixtures.balances[token.id])
-      : Actions.token.getBalance(client, { account: address, token: token.address }).then((balance) => balance.amount)
+      : loaded[1].Actions.token.getBalance(client, { account: address, token: token.address }).then((balance) => balance.amount)
   const entries = await Promise.all(config.tokens.map(async (token) => [token.id, await read(token).catch(() => undefined)] as const))
   const balances = Object.fromEntries(entries.filter((entry): entry is readonly [Currency, bigint] => entry[1] !== undefined)) as Partial<Record<Currency, bigint>>
   if (state.address === address) set({ balance: balances.mach, balances })
@@ -194,5 +273,5 @@ export function fund(shortfall?: bigint) {
   if (fixture || !address) return Promise.resolve()
   const cents = shortfall === undefined ? 0n : (shortfall + 9_999n) / 10_000n
   const amount = cents > 0n ? `${cents / 100n}.${String(cents % 100n).padStart(2, '0')}` : undefined
-  return Mach.fund(wallet(), { address, displayName: 'Swarms', ...(amount ? { amount } : {}) })
+  return Promise.all([import('accounts'), wallet()]).then(([{ Mach }, connected]) => Mach.fund(connected, { address, displayName: 'Swarms', ...(amount ? { amount } : {}) }))
 }

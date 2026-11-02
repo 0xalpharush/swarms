@@ -118,12 +118,12 @@ const schemas = {
       left: nullable({ ...usd, description: 'What the budget can still give this period.' }),
       nextAt: nullable({ ...time, description: 'When the swarm may pull next.' }),
       note: nullable(string),
-      period: { description: 'Seconds per period; 86400 is a day.', type: 'integer' },
+      period: { description: 'Seconds per period; 2592000 is 30 days.', type: 'integer' },
       pulled: usd,
       status: { enum: ['active', 'waiting', 'revoked', 'expired', 'ended'], type: 'string' },
       token,
     },
-    "A daily budget: the swarm pulls up to amount each period from the contributor's wallet into its own.",
+    "A monthly budget: the swarm pulls up to amount each period from the contributor's wallet into its own.",
   ),
   Budgeted: object({ budget: ref('Budget'), swarm: ref('Summary') }),
   BudgetRequested: object({ authorizeAccessKey, budget: string }),
@@ -152,11 +152,11 @@ const schemas = {
       budget: nullable({ description: 'The budget a pull came from.', type: 'string' }),
       contributor: address,
       hash: { description: 'The transaction.', type: 'string' },
-      kind: { description: 'transfer, a pull from a daily budget, or a pull from a stablecoin pledge.', enum: ['transfer', 'pull', 'pledge'], type: 'string' },
+      kind: { description: 'transfer, a pull from a monthly budget, or a pull from a stablecoin pledge.', enum: ['transfer', 'pull', 'pledge'], type: 'string' },
       note: nullable(string),
       token,
     },
-    "Money in the swarm's wallet: a one-off transfer, or a pull from a daily budget.",
+    "Money in the swarm's wallet: a one-off transfer, or a pull from a monthly budget.",
   ),
   Device: object(
     {
@@ -234,6 +234,7 @@ const schemas = {
         notes: { items: ref('Note'), type: 'array' },
         pledges: { items: ref('Pledge'), type: 'array' },
         reason: nullable({ description: 'Why the swarm is waiting, when it is.', type: 'string' }),
+        why: nullable({ description: 'The reason as a code: unfunded (no money yet), money (too little payable), costly (the next call holds more than any one source can pay), repo (not enough to open its repository) or rest (stopped after repeated errors).', enum: ['unfunded', 'money', 'costly', 'repo', 'rest'], type: 'string' }),
         updates: { items: ref('Brief'), type: 'array' },
         working: nullable(ref('Working')),
       }),
@@ -296,7 +297,7 @@ const schemas = {
     answer: nullable(ref('Answer')),
     contributors: integer,
     createdAt: time,
-    daily: { ...usd, description: 'What active daily budgets give a day.' },
+    daily: { ...usd, description: 'What active monthly budgets give a day.' },
     goal: string,
     id: string,
     machines: integer,
@@ -378,7 +379,7 @@ export function document(origin: string) {
       schemas,
     },
     info: {
-      description: `Swarms are crowdfunded, long-running AI agents on the Tempo gateway, funded by pledges in MACH or a stablecoin, one-off stablecoin transfers to the swarm's wallet and daily budgets, and steered by notes weighted by the money behind them. Each swarm's backers talk in its room, where an @swarm message puts part of its author's backing behind an idea. Reading needs no account; posting needs a Tempo Wallet session from /v1/auth. A pledge is a spending key the contributor approves in Tempo Wallet, at least ${Memo.decimal(Store.minPledge)} MACH; a daily budget is a key the swarm pulls with, approved the same way. Errors are problem JSON with a stable code. The same operations are MCP tools at ${origin}/mcp.`,
+      description: `Swarms are crowdfunded, long-running AI agents on the Tempo gateway, funded by pledges in MACH or a stablecoin, one-off stablecoin transfers to the swarm's wallet and monthly budgets, and steered by notes weighted by the money behind them. Each swarm's backers talk in its room, where an @swarm message puts part of its author's backing behind an idea. Reading needs no account; posting needs a Tempo Wallet session from /v1/auth. A pledge is a spending key the contributor approves in Tempo Wallet, at least ${Memo.decimal(Store.minPledge)} MACH; a monthly budget is a key the swarm pulls with, approved the same way. Errors are problem JSON with a stable code. The same operations are MCP tools at ${origin}/mcp.`,
       title: 'Swarms',
       version: '1',
     },
@@ -480,7 +481,7 @@ export function document(origin: string) {
       '/v1/swarms/{id}/budgets': {
         post: {
           description:
-            "Starts a daily budget: pass authorizeAccessKey to Tempo Wallet's wallet_connect and post its keyAuthorization to the budget. The key may only send the token to the swarm's wallet, up to amount a day, for 30 days.",
+            "Starts a monthly budget: pass authorizeAccessKey to Tempo Wallet's wallet_connect and post its keyAuthorization to the budget. The key may only send the token to the swarm's wallet, up to amount a day, for 30 days.",
           operationId: 'requestBudget',
           parameters: [swarm],
           requestBody: {
@@ -488,7 +489,7 @@ export function document(origin: string) {
             required: true,
           },
           responses: { ...ok(ref('BudgetRequested'), 'The budget to approve.', '201'), ...failures(400, 404, 409) },
-          summary: 'Request a daily budget',
+          summary: 'Request a monthly budget',
         },
       },
       '/v1/swarms/{id}/budgets/{budget}': {
@@ -503,7 +504,7 @@ export function document(origin: string) {
             required: true,
           },
           responses: { ...ok(ref('Budgeted'), 'The active budget and its swarm.', '201'), ...failures(400, 404, 409) },
-          summary: 'Approve a daily budget',
+          summary: 'Approve a monthly budget',
         },
       },
       '/v1/swarms/{id}/contributions': {
@@ -523,6 +524,15 @@ export function document(origin: string) {
           },
           summary: 'Count a transfer',
         },
+      },
+      '/v1/problems': {
+        get: { description: 'The curated idea bank: every problem with its brief, whether it is open, and the swarm working on it if any.', operationId: 'listProblems', responses: { ...ok({ type: 'object' }, 'The problems.') }, summary: 'Idea bank' },
+      },
+      '/v1/swarms/{id}/machines': {
+        get: { description: "Every machine the swarm used: sandboxes with their settings, browsers and lent hands with price and payout, each with its state and the commands that ran on it with their output.", operationId: 'listMachines', parameters: [swarm], responses: { ...ok({ type: 'object' }, 'The machines.'), ...failures(404) }, summary: 'Machines' },
+      },
+      '/v1/swarms/{id}/backers': {
+        get: { description: 'The ideas ranked by the money behind them, and every backer with what they put in and how.', operationId: 'listBackers', parameters: [swarm], responses: { ...ok({ type: 'object' }, 'Ideas and backers.'), ...failures(404) }, summary: 'Ideas and backers' },
       },
       '/v1/swarms/{id}/artifacts': {
         get: {

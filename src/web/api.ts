@@ -1,7 +1,7 @@
 import type { Account, Artifact, BudgetRequested, Budgeted, Chatter, Config, Contributed, Currency, Detail, Entry, Issued, Lent, Live, Pledged, Posted, Problem, Requested, Room, Summary, Token } from '../shared/Api.ts'
 import * as Fixtures from './fixtures.ts'
 
-export const fixture = new URLSearchParams(location.search).has('fixture')
+export const fixture = typeof location !== 'undefined' && new URLSearchParams(location.search).has('fixture')
 
 export class Failure extends Error {
   readonly code: string
@@ -45,8 +45,8 @@ export function swarms() {
   return fixture ? Fixtures.swarms() : request<{ swarms: Summary[] }>('/api/swarms')
 }
 
-export function swarm(id: string) {
-  return fixture ? Fixtures.swarm(id) : request<Detail>(path(id))
+export function swarm(id: string, feed = true) {
+  return fixture ? Fixtures.swarm(id) : request<Detail>(feed ? path(id) : `${path(id)}?feed=0`)
 }
 
 export function feed(id: string, after: number, filter: { before?: number; who?: string } = {}) {
@@ -85,7 +85,7 @@ export function live(id: string, listener: (event: Live) => void) {
   }
 }
 
-export function create(input: { goal: string; title: string }) {
+export function create(input: { goal: string; problem?: string; title: string }) {
   return fixture ? Fixtures.create(input) : request<Summary>('/api/swarms', input)
 }
 
@@ -106,12 +106,12 @@ export function allow(id: string, budget: string, keyAuthorization: unknown) {
 }
 
 export function hands(id: string) {
-  return fixture ? Promise.resolve({ hands: [] as Lent[] }) : request<{ hands: Lent[] }>(`${path(id)}/hands`)
+  return fixture ? Promise.resolve(Fixtures.lent(id)) : request<{ hands: Lent[] }>(`${path(id)}/hands`)
 }
 
 export function hand(id: string, label: string) {
   return fixture
-    ? Promise.reject(new Failure({ detail: 'Hands need the live site.' }, 503))
+    ? Promise.resolve({ cli: "nc hand 'https://gateway.tempo.xyz/v1/hands/attach' --token hand_demo_4f2a", command: 'curl -fsSL https://nanocode.xyz/install | sh && nc hand ...', label: label ?? '', library: "import { Hand } from 'nanocode'\nawait Hand.connect(url, { token })", name: (label || 'my-machine') + '-3c1f', npm: 'npm i nanocode@build-20f97e0', swarm: id, tab: null, token: 'hand_demo_4f2a', url: 'https://gateway.tempo.xyz/v1/hands/attach' } as Issued)
     : request<Issued>(`${path(id)}/hands`, label ? { label } : {})
 }
 

@@ -1,114 +1,80 @@
-import { useEffect, useState } from 'react'
-import type { Issued, Lent, Summary } from '../shared/Api.ts'
+import { useState } from 'react'
+import type { Issued, Summary } from '../shared/Api.ts'
+import { Alert, explain } from './Alert.tsx'
 import * as Api from './api.ts'
-import { Code } from './Docs.tsx'
-import { message, useWallet } from './hooks.ts'
+import { message } from './hooks.ts'
 
-type Form = 'cli' | 'library'
+type Step = { kind: 'closed' } | { kind: 'naming'; label: string } | { kind: 'issuing'; label: string } | { error: string; kind: 'failed'; label: string } | { hand: Issued; kind: 'issued' }
+
+function Shell(props: { label: string; text: string }) {
+  const [copied, setCopied] = useState(false)
+  return (
+    <div className="shell">
+      <div className="shell-bar">
+        <span>{props.label}</span>
+        <button onClick={() => void navigator.clipboard?.writeText(props.text).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1500) })} type="button">{copied ? 'Copied' : 'Copy'}</button>
+      </div>
+      <pre>{props.text}</pre>
+    </div>
+  )
+}
 
 export function Connect(props: { swarm: Summary }) {
-  const [label, setLabel] = useState('')
-  const [issued, setIssued] = useState<Issued>()
-  const [form, setForm] = useState<Form>('cli')
-  const [lent, setLent] = useState<readonly Lent[]>([])
-  const [state, setState] = useState<{ busy?: boolean; error?: string }>({})
-  const wallet = useWallet()
-  const done = props.swarm.status === 'done'
+  const [step, setStep] = useState<Step>({ kind: 'closed' })
+  const [form, setForm] = useState<'cli' | 'library'>('cli')
+  if (props.swarm.status === 'done') return null
 
-  useEffect(() => {
-    let live = true
-    const load = () =>
-      void Api.hands(props.swarm.id)
-        .then((found) => live && setLent(found.hands))
-        .catch(() => {})
-    load()
-    const timer = setInterval(load, 10_000)
-    return () => {
-      live = false
-      clearInterval(timer)
-    }
-  }, [props.swarm.id])
-
-  const issue = async () => {
-    setState({ busy: true })
+  const issue = async (label: string) => {
+    setStep({ kind: 'issuing', label })
     try {
-      const hand = await Api.hand(props.swarm.id, label.trim())
-      setIssued(hand)
-      setLent((current) => [{ at: Date.now(), channels: null, charged: null, connected: false, earned: null, label: hand.label, name: hand.name, price: null, requests: 0 }, ...current])
-      setState({})
+      setStep({ hand: await Api.hand(props.swarm.id, label.trim()), kind: 'issued' })
     } catch (error) {
-      setState({ error: message(error) })
+      setStep({ error: message(error), kind: 'failed', label })
     }
   }
 
   return (
-    <div className="pledge connect" id="connect">
-      <h3 className="label">Connect your machine</h3>
-      <p className="fine">
-        Lend this swarm your computer and what is on it as a nanocode hand. Its agent runs commands and reads and writes files there, and is told the machine and its data are yours and to ask before anything destructive. Your hand can set its own prices, such as a price per file; the swarm pays them through the gateway from its money, and caps what each hand may charge at a fifth of what is left to spend. Stop the command to take it back.
-      </p>
-      {!done && (
-        <p className="fine">
-          {wallet.session
-            ? `Issued to ${wallet.account ? `@${wallet.account.handle}` : 'you'}, so lending it also lets you post in the swarm's room.`
-            : "Sign in with Tempo Wallet in the room first, and lending a machine also lets you post there."}
-        </p>
-      )}
-      {done && <p className="fine">This swarm is done and takes no more hands.</p>}
-      {!done && !issued && (
-        <>
-          <div className="field">
-            <label className="field-label" htmlFor="hand-label">
-              Machine
-            </label>
-            <div className="field-input">
-              <input id="hand-label" maxLength={32} onChange={(event) => setLabel(event.target.value)} placeholder="Optional, such as my-laptop" value={label} />
-            </div>
+    <ol className="tiles-swarm lend">
+      <li data-open={step.kind !== 'closed'}>
+        <button aria-expanded={step.kind !== 'closed'} className="tile-swarm machine-row" onClick={() => setStep(step.kind === 'closed' ? { kind: 'naming', label: '' } : { kind: 'closed' })} type="button">
+          <i aria-hidden="true" className="machine-glyph" data-kind="lend">+</i>
+          <span className="tile-title">Lend your machine</span>
+          <span className="tile-raised">{step.kind === 'closed' ? '' : '−'}</span>
+          <span className="machine-sub">The agent runs commands on it. You can charge for it.</span>
+        </button>
+        {step.kind !== 'closed' && (
+          <div className="machine-open">
+            {step.kind === 'issued' ? (
+              <>
+                <div className="fuel-seg" role="radiogroup">
+                  {(['cli', 'library'] as const).map((value) => (
+                    <button aria-checked={form === value} key={value} onClick={() => setForm(value)} role="radio" type="button">{value === 'cli' ? 'nanocode' : 'nanocode-ts'}</button>
+                  ))}
+                </div>
+                {form === 'cli' ? (
+                  <>
+                    <Shell label={`run in the folder you share · ${step.hand.name}`} text={step.hand.cli} />
+                    <details className="lend-more"><summary>No nanocode yet</summary><Shell label="installs it, then runs the hand" text={step.hand.command} /></details>
+                    <details className="lend-more"><summary>Charge for it</summary><Shell label="add --pricing prices.json" text={'{"payee":"0x…","describe":"Q3 data, $0.01 a file","rules":[{"paths":["data/**"],"ops":["read"],"usd":0.01}]}'} /></details>
+                  </>
+                ) : (
+                  <>
+                    <Shell label="install" text={step.hand.npm} />
+                    <Shell label="hand.mjs" text={step.hand.library} />
+                  </>
+                )}
+                <p className="machine-none">The token is shown only once. It appears above as soon as it connects.</p>
+              </>
+            ) : (
+              <form className="say-box lend-name" onSubmit={(event) => { event.preventDefault(); if (step.kind !== 'issuing') void issue(step.label) }}>
+                <input aria-label="Name it" autoFocus disabled={step.kind === 'issuing'} maxLength={32} onChange={(event) => setStep({ kind: 'naming', label: event.target.value })} placeholder="Name it, like my-laptop" value={step.label} />
+                <button className="btn btn-high lend-go" disabled={step.kind === 'issuing'} type="submit">{step.kind === 'issuing' ? 'Issuing…' : 'Get the command'}</button>
+              </form>
+            )}
+            {step.kind === 'failed' && <Alert action={{ label: 'Try again', onClick: () => void issue(step.label) }} title={explain(step.error).title} tone="bad">{explain(step.error).detail}</Alert>}
           </div>
-          <button className="btn btn-high btn-wide" disabled={state.busy} onClick={() => void issue()} type="button">
-            {state.busy ? 'Issuing a hand…' : 'Get a hand'}
-          </button>
-        </>
-      )}
-      {issued && (
-        <div className="connect-issued">
-          <p className="notice">
-            Hand <code>{issued.name}</code> is ready. Run one of these on the machine you lend; the token is shown only once.
-          </p>
-          <div className="chips">
-            {(['cli', 'library'] as const).map((value) => (
-              <button className={form === value ? 'chip chip-on' : 'chip'} key={value} onClick={() => setForm(value)} type="button">
-                {value === 'cli' ? 'nanocode CLI' : 'nanocode-ts'}
-              </button>
-            ))}
-          </div>
-          {form === 'cli' ? (
-            <>
-              <Code>{issued.cli}</Code>
-              <p className="fine">Start it in a folder you are happy to share, or add -C &lt;folder&gt;. To charge for what it holds, add --pricing prices.json with your payee address, a description and price rules, such as {'{'}"payee":"0x…","describe":"Q3 data, $0.01 a file","rules":[{'{'}"paths":["data/**"],"ops":["read"],"usd":0.01{'}'}]{'}'}. Without nanocode, this installs it and runs the same hand:</p>
-              <Code>{issued.command}</Code>
-            </>
-          ) : (
-            <>
-              <Code>{issued.npm}</Code>
-              <Code label="hand.mjs">{issued.library}</Code>
-              <p className="fine">This hand runs nanocode's in-memory shell. Pass your own workspace to Hand.connect to serve something else, and pricing ({'{'} payee, describe, price(operation) {'}'}) to charge for it.</p>
-            </>
-          )}
-        </div>
-      )}
-      {state.error && <p className="error">{state.error}</p>}
-      {lent.length > 0 && (
-        <ul className="connect-hands">
-          {lent.slice(0, 8).map((hand) => (
-            <li data-connected={hand.connected} key={hand.name}>
-              <span>{hand.name}</span>
-              <span>{[hand.price ?? 'free', `${hand.requests} request${hand.requests === 1 ? '' : 's'}`, hand.charged && `${hand.charged} charged`, hand.earned && `${hand.earned} earned`, hand.channels].filter(Boolean).join(' · ')}</span>
-              <span>{hand.connected ? 'Connected' : 'Offline'}</span>
-            </li>
-          ))}
-        </ul>
-      )}
-    </div>
+        )}
+      </li>
+    </ol>
   )
 }

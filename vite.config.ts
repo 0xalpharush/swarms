@@ -1,11 +1,13 @@
 import { cloudflare } from '@cloudflare/vite-plugin'
 import react from '@vitejs/plugin-react'
+import { fileURLToPath } from 'node:url'
 import { defineConfig } from 'vite'
 
 export default defineConfig(({ command }) => {
   const gateway = command === 'serve' ? process.env['SWARMS_GATEWAY'] : undefined
 
   return {
+    resolve: { alias: { '#ssr': fileURLToPath(new URL('./src/web/server.tsx', import.meta.url)) } },
     server: { allowedHosts: ['terminal.local'] },
     plugins: [
       react(),

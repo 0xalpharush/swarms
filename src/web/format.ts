@@ -1,3 +1,4 @@
+import { boot } from './boot.ts'
 import type { Currency } from '../shared/Api.ts'
 import { decimal, units } from '../shared/Memo.ts'
 
@@ -52,5 +53,14 @@ export function duration(ms: number) {
 }
 
 export function clock(at: number) {
-  return new Date(at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+  return new Date(at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit', timeZone: zone() })
+}
+
+export function minute(at: number) {
+  return new Date(at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', timeZone: zone() })
+}
+
+function zone() {
+  const current = boot()
+  return current ? (current.zone ?? 'UTC') : undefined
 }

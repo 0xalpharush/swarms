@@ -1,0 +1,15 @@
+alter table swarms add column problem text;
+create index swarms_problem on swarms (problem) where problem is not null;
+update swarms set problem = 'pq-signatures' where problem is null and lower(trim(title)) = lower('Better post-quantum signatures');
+update swarms set problem = 'faster-science' where problem is null and lower(trim(title)) = lower('More efficient scientific computing');
+update swarms set problem = 'reproduce' where problem is null and lower(trim(title)) = lower('Reproduce a research result');
+update swarms set problem = 'coding-models' where problem is null and lower(trim(title)) = lower('Benchmark every open-weight coding model');
+update swarms set problem = 'json-terabyte' where problem is null and lower(trim(title)) = lower('Parse a terabyte of JSON for under a dollar');
+update swarms set problem = 'log-compression' where problem is null and lower(trim(title)) = lower('Beat zstd on real-world logs');
+update swarms set problem = 'sat-solver' where problem is null and lower(trim(title)) = lower('Speed up an open-source SAT solver');
+update swarms set problem = 'protein-stability' where problem is null and lower(trim(title)) = lower('Predict protein stability from sequence');
+update swarms set problem = 'solid-electrolytes' where problem is null and lower(trim(title)) = lower('Screen solid electrolytes for lithium batteries');
+update swarms set problem = 'benchmark-leaks' where problem is null and lower(trim(title)) = lower('Find benchmark leaks in open LLM training data');
+update swarms set problem = 'solar-forecast' where problem is null and lower(trim(title)) = lower('Forecast solar output from open weather data');
+update swarms set problem = 'math-records' where problem is null and lower(trim(title)) = lower('Find better constructions for an open combinatorics problem');
+update swarms set problem = 'small-model-math' where problem is null and lower(trim(title)) = lower('Make a small open model better at math');

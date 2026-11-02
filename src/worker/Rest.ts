@@ -104,6 +104,12 @@ app.post('/v1/swarms/:id/hands', async (c) =>
   ),
 )
 
+app.get('/v1/problems', async (c) => Problem.respond(await Operations.problems(c.env)))
+
+app.get('/v1/swarms/:id/machines', async (c) => Problem.respond(await Operations.machines(c.env, { swarm: c.req.param('id') })))
+
+app.get('/v1/swarms/:id/backers', async (c) => Problem.respond(await Operations.backers(c.env, { swarm: c.req.param('id') })))
+
 app.get('/v1/swarms/:id/artifacts', async (c) =>
   Problem.respond(await Operations.artifacts(c.env, { swarm: c.req.param('id') }, new URL(c.req.url).origin)),
 )

@@ -1,5 +1,5 @@
-import type { Overview } from '../shared/Api.ts'
-import { briefInstruction, questions } from '../shared/ResearchBrief.ts'
+import type { Overview, Summary } from '../shared/Api.ts'
+import { briefInstruction, open } from '../shared/ResearchBrief.ts'
 
 const headers = {
   'cache-control': 'public, max-age=15',
@@ -17,17 +17,20 @@ function script(value: unknown) {
   return JSON.stringify(value).replace(/</g, '\\u003c').replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029')
 }
 
-function document(
-  origin: string,
-  path: string,
-  title: string,
-  description: string,
-  content: string,
-  context: unknown,
-) {
+function dollars(value: string) {
+  const number = Number(value)
+  return Number.isFinite(number) ? '$' + number.toFixed(2) : value
+}
+
+function backers(count: number) {
+  return `${count} backer${count === 1 ? '' : 's'}`
+}
+
+function document(origin: string, path: string, title: string, description: string, content: string, context: unknown, status = 200) {
   const url = `${origin}${path}`
   const image = `${origin}/xframe-card.jpg`
-  return `<!doctype html>
+  return new Response(
+    `<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -49,224 +52,420 @@ function document(
 <style>${styles}</style>
 </head>
 <body>
-<div class="app">
-  <header><a href="${attribute(origin)}" target="_blank" rel="noreferrer">SWARMS</a><span>LIVE RESEARCH FRAME</span></header>
-  <div class="world" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>
-  ${content}
-  <footer><span><b></b> Tempo mainnet</span><a href="${attribute(origin)}" target="_blank" rel="noreferrer">Open Swarms ↗</a></footer>
-</div>
+<div class="app">${content}</div>
 <script>window.__SWARM_FRAME__=${script(context)};</script>
 <script>${client}</script>
 </body>
-</html>`
+</html>`,
+    { headers, status },
+  )
 }
 
-function amounts(label: string) {
-  return `<div class="funding" id="funding">
-    <div class="amounts" role="group" aria-label="MACH amount">
-      <button class="amount selected" data-amount="2" type="button">2</button>
-      <button class="amount" data-amount="5" type="button">5</button>
-      <button class="amount" data-amount="10" type="button">10</button>
-      <span>MACH</span>
+function amounts(label: string, extra = '') {
+  return `<div class="pay">
+    ${extra}
+    <p class="big"><span>$</span><b data-big>2</b></p>
+    <div class="seg" role="radiogroup" aria-label="Amount">
+      <button aria-checked="true" data-amount="2" role="radio" type="button">$2</button>
+      <button aria-checked="false" data-amount="5" role="radio" type="button">$5</button>
+      <button aria-checked="false" data-amount="10" role="radio" type="button">$10</button>
     </div>
-    <input id="note" maxlength="280" placeholder="Optional steering note">
-    <button class="launch" id="action" type="button">${attribute(label)}</button>
+    <button class="go" data-go type="button">${attribute(label)}</button>
+    <p class="status" data-status></p>
   </div>`
 }
 
-function approval() {
-  return `<section class="approval" id="approval" hidden>
-    <div class="portal"><span>1</span><span>2</span><span>3</span></div>
-    <p class="eyebrow">WALLET CHECKPOINT</p>
-    <h2>Approve in Tempo Wallet</h2>
-    <p>Your code is <strong id="code"></strong>. The swarm starts only after you approve.</p>
-    <a class="launch" id="approve" target="_blank" rel="noreferrer">Open Tempo Wallet ↗</a>
+const wallet = `<section class="view center" data-view="approve" hidden>
+    <p class="kicker">Approve in Tempo Wallet</p>
+    <p class="code" id="code">····</p>
+    <a class="go wide" id="approve" target="_blank" rel="noreferrer">Open Tempo Wallet ↗</a>
+    <p class="hint" id="waiting">Waiting for your approval…</p>
+    <button class="back" data-back type="button">Cancel</button>
   </section>
-  <section class="approval success" id="success" hidden>
-    <div class="success-mark">✓</div>
-    <p class="eyebrow">QUEST FUNDED</p>
-    <h2 id="success-title">The swarm is moving</h2>
-    <p>Watch its agent work live, and steer it with the other backers.</p>
-    <div class="success-actions"><a class="launch" id="expedition" target="_blank" rel="noreferrer">Enter expedition ↗</a><a class="secondary" id="share" target="_blank" rel="noreferrer">Share on X</a></div>
+  <section class="view center" data-view="done" hidden>
+    <i class="mark">✓</i>
+    <h2 id="done-title">You're in.</h2>
+    <div class="row"><a class="go" id="watch" target="_blank" rel="noreferrer">Watch it ↗</a><a class="ghost" id="share" target="_blank" rel="noreferrer">Share</a></div>
+  </section>
+  <section class="view center" data-view="failed" hidden>
+    <i class="mark bad">!</i>
+    <h2 id="failed-title">You declined in Tempo Wallet.</h2>
+    <p class="hint" id="failed-detail">Nothing was charged.</p>
+    <button class="go" data-retry type="button">Try again</button>
   </section>`
-}
 
-export function start(origin: string) {
-  const title = 'Launch a research swarm'
-  const description = 'Pick a science quest, fund it with MACH and watch the research party work.'
-  const choices = questions
-    .map(
-      (question, index) =>
-        `<button class="quest" data-question="${index}" type="button"><strong>${attribute(question.label)}</strong><span>${attribute(question.hint)}</span></button>`,
-    )
+export function start(origin: string, swarms: readonly Summary[] = []) {
+  const title = 'Start a breakthrough, or be part of one'
+  const description = 'Fund research an AI does in the open. Start one, or join one already running.'
+  const ideas = open(swarms).slice(0, 4)
+  const live = swarms.filter((item) => item.status !== 'done').sort((a, b) => Number(b.status === 'running') - Number(a.status === 'running') || b.updatedAt - a.updatedAt)
+  const running = live.filter((item) => item.status === 'running').length
+  const peekIdeas = ideas.slice(0, 4).map((item) => `<span class="chip"><i class="mark-idea"></i><b>${attribute(item.label)}</b></span>`).join('')
+  const peekSwarms = live.slice(0, 4).map((item) => `<span class="chip"><i class="dot" data-status="${item.status}"></i><b>${attribute(item.title)}</b><em>${dollars(item.raised)}</em></span>`).join('')
+  const rows = ideas
+    .map((item, index) => `<li><button class="row-item idea" data-idea="${index}" type="button"><i class="mark-idea"></i><span>${attribute(item.label)}</span></button></li>`)
     .join('')
-  const content = `<main>
-    <section class="panel" id="setup">
-      <p class="eyebrow">CHOOSE · EQUIP · LAUNCH</p>
-      <h1>Start a science quest</h1>
-      <p class="lede">Pick a mission. Your swarm handles the expedition.</p>
-      <div class="quests" role="group" aria-label="Research quest">${choices}</div>
-      <div class="custom"><input id="custom" maxlength="1000" placeholder="Or ask your own research question"><button id="custom-pick" type="button">Use</button></div>
-      ${amounts('Launch swarm')}
-      <p class="status" id="status">Choose a quest to continue.</p>
-    </section>
-    ${approval()}
-  </main>`
-  return new Response(
-    document(origin, '/x', title, description, content, {
-      briefInstruction,
-      kind: 'start',
-      questions,
-      url: `${origin}/x`,
-    }),
-    { headers },
-  )
+  const joins = live
+    .slice(0, 6)
+    .map((item) => `<li><a class="row-item" href="/x/s/${encodeURIComponent(item.id)}"><i class="dot" data-status="${item.status}"></i><span>${attribute(item.title)}<small>${item.status === 'running' ? 'Live' : item.status === 'paused' ? 'Paused' : 'Not started'} · ${backers(item.contributors)}</small></span><em>${dollars(item.raised)}</em></a></li>`)
+    .join('')
+  const content = `<section class="view doors" data-view="home">
+    <button class="door door-start" data-open="start" type="button">
+      <span class="door-kicker">${ideas.length} ideas waiting</span>
+      <span class="door-title">Start a breakthrough <i>→</i></span>
+      <span class="door-peek">${peekIdeas}</span>
+    </button>
+    <button class="door door-join" data-open="join" type="button">
+      <span class="door-kicker">${running ? `<i class="live"></i>${running} live now` : `${live.length} open`}</span>
+      <span class="door-title">Be part of the future <i>→</i></span>
+      <span class="door-peek">${peekSwarms || '<span class="chip">Nothing yet. Be the first.</span>'}</span>
+    </button>
+  </section>
+  <section class="view split" data-view="start" hidden>
+    <div class="left">
+      <header class="top"><button class="back" data-back type="button">←</button><h1>Start a breakthrough</h1></header>
+      <ol class="list">${rows}<li><label class="row-item idea own"><i class="mark-idea"></i><input id="custom" maxlength="1000" placeholder="Your own idea"></label></li></ol>
+    </div>
+    ${amounts('Launch')}
+  </section>
+  <section class="view" data-view="join" hidden>
+    <header class="top"><button class="back" data-back type="button">←</button><h1>Be part of the future</h1></header>
+    ${joins ? `<ol class="list scroll">${joins}</ol>` : '<button class="empty" data-open="start" type="button">No swarms yet. <b>Start one →</b></button>'}
+  </section>
+  ${wallet}`
+  return document(origin, '/x', title, description, content, { briefInstruction, ideas, kind: 'home', url: `${origin}/x` })
 }
-
-const states = { done: 'DONE', funding: 'FUNDING', paused: 'WAITING FOR MONEY', running: 'WORKING' } as const
 
 export function swarm(origin: string, value: Overview) {
   const working = value.status === 'running' ? value.working : null
-  const title = working ? `Live: ${value.title}` : `Fund ${value.title}`
-  const description = working
-    ? "Watch this research swarm's agent work, live from the timeline: its thoughts and commands as they happen."
-    : `Join this research swarm from the timeline: ${value.contributors} backer${value.contributors === 1 ? '' : 's'}, ${value.raised} raised.`
+  const done = value.status === 'done'
+  const title = working ? `Live: ${value.title}` : done ? value.title : `Fund ${value.title}`
+  const description = working ? 'Watch this swarm work, live, and steer it.' : `${backers(value.contributors)} · ${dollars(value.raised)} raised.`
+  const page = `${origin}/s/${encodeURIComponent(value.id)}`
   const latest = value.updates.at(-1)?.excerpt ?? null
-  const body = working
-    ? `<div class="mission-top"><p class="eyebrow"><span class="onair"><i></i>LIVE</span> WORKING · <span id="elapsed">0m 00s</span></p></div>
-      <h1 class="single">${attribute(value.title)}</h1>
-      <div class="live" aria-live="polite"><p class="live-who"><b id="live-who">The agent</b> <span id="live-kind">is working</span></p><p class="live-text" id="live-text">${attribute(latest ?? 'Tuning in…')}</p></div>`
-    : `<div class="mission-top"><p class="eyebrow">${states[value.status]}</p><span>${value.contributors} BACKER${value.contributors === 1 ? '' : 'S'}</span></div>
-      <h1>${attribute(value.title)}</h1>
-      <p class="lede clamp">${attribute(latest ?? value.goal)}</p>
-      <div class="mission-stats"><span><strong>${attribute(value.raised)}</strong> raised</span><span><strong>${attribute(value.remaining)}</strong> fuel left</span><span><strong>${value.updates.length}</strong> update${value.updates.length === 1 ? '' : 's'}</span></div>`
-  const content = `<main>
-    <section class="panel mission" id="setup">
-      ${body}
-      ${amounts('Back this quest')}
-      <p class="status" id="status">${working ? '<a href="' + attribute(`${origin}/s/${encodeURIComponent(value.id)}`) + '" target="_blank" rel="noreferrer">Watch the whole transcript ↗</a> · ' : ''}Your pledge is capped. Unused MACH returns to your wallet.</p>
-    </section>
-    ${approval()}
-  </main>`
-  return new Response(
-    document(origin, `/x/s/${encodeURIComponent(value.id)}`, title, description, content, {
-      kind: 'swarm',
-      live: working ? { since: working.since } : null,
-      swarm: { id: value.id, title: value.title },
-      url: `${origin}/x/s/${encodeURIComponent(value.id)}`,
-    }),
-    { headers },
-  )
-}
-
-export function card(title: string) {
-  const safe = attribute(title.trim().slice(0, 64) || 'Fund a research swarm')
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630"><rect width="1200" height="630" fill="#eaf4df"/><path d="M0 492 300 320 610 500 900 330 1200 505V630H0Z" fill="#cbe5b7"/><path d="M0 560 290 392 600 570 910 400 1200 565" fill="none" stroke="#193d2b" stroke-width="3" opacity=".28"/><g fill="#193d2b"><circle cx="1000" cy="135" r="55"/><circle cx="1000" cy="135" r="27" fill="#eaf4df"/><path d="m945 175 55 32 55-32v65l-55 32-55-32Z"/></g><text x="82" y="112" fill="#193d2b" font-family="ui-monospace,monospace" font-size="24" letter-spacing="5">SWARM WORLD · LIVE QUEST</text><text x="80" y="240" fill="#12251b" font-family="Georgia,serif" font-size="66" font-weight="700">${safe}</text><text x="82" y="315" fill="#315342" font-family="ui-sans-serif,sans-serif" font-size="31">Fund science. Follow every researcher.</text><rect x="82" y="372" width="300" height="70" rx="35" fill="#193d2b"/><text x="232" y="417" fill="#fff" font-family="ui-sans-serif,sans-serif" font-size="25" font-weight="700" text-anchor="middle">ENTER THE QUEST</text></svg>`
-  return new Response(svg, {
-    headers: {
-      'cache-control': 'public, max-age=86400',
-      'content-type': 'image/svg+xml; charset=utf-8',
-      'x-content-type-options': 'nosniff',
-    },
+  const content = `<section class="view room" data-view="room">
+    <header class="head">
+      <i class="dot" data-status="${value.status}"></i>
+      <a class="name" href="${attribute(page)}" target="_blank" rel="noreferrer">${attribute(value.title)}</a>
+      <span class="sum">${dollars(value.raised)} · ${value.contributors}</span>
+      ${done ? `<a class="go small" href="${attribute(page)}" target="_blank" rel="noreferrer">Result ↗</a>` : '<button class="go small" data-open="fund" type="button">Fund</button>'}
+    </header>
+    <nav class="tabs" role="tablist">
+      <button aria-selected="true" data-tab="transcript" role="tab" type="button">Transcript</button>
+      <button aria-selected="false" data-tab="chat" role="tab" type="button">Room <span id="watching"></span></button>
+    </nav>
+    <ol class="feed" data-pane="transcript" aria-live="polite">
+      <li class="beat quiet" id="empty-feed">${attribute(latest ?? (working ? 'Tuning in…' : value.goal))}</li>
+      <li class="beat now" id="now" hidden><span class="who" id="now-who">Agent</span><span class="say" id="now-text"></span></li>
+    </ol>
+    <ol class="feed" data-pane="chat" hidden><li class="beat quiet" id="empty-chat">Quiet so far.</li></ol>
+    ${done ? '' : `<form class="steer" id="steer">
+      <span class="tag">@swarm</span>
+      <input id="note" maxlength="280" placeholder="Steer the agent" autocomplete="off">
+      <span class="stake" id="stake" hidden><button aria-checked="true" data-stake="2" role="radio" type="button">$2</button><button aria-checked="false" data-stake="5" role="radio" type="button">$5</button><button aria-checked="false" data-stake="10" role="radio" type="button">$10</button></span>
+      <button class="send" disabled type="submit" aria-label="Send">↑</button>
+    </form>`}
+  </section>
+  <section class="view split" data-view="fund" hidden>
+    <div class="left">
+      <header class="top"><button class="back" data-back type="button">←</button><h1>Fund it</h1></header>
+      <p class="fund-name"><i class="dot" data-status="${value.status}"></i>${attribute(value.title)}</p>
+      <p class="hint">${dollars(value.raised)} raised · ${backers(value.contributors)}</p>
+      <p class="goal">${attribute(latest ?? value.goal)}</p>
+      ${value.notes.length ? `<ol class="list notes">${value.notes.slice(0, 3).map((note) => `<li class="row-item"><span>${attribute(note.note)}</span><em>${dollars(note.weight)}</em></li>`).join('')}</ol>` : ''}
+      <p class="behind" id="behind" hidden></p>
+    </div>
+    ${amounts('Fund')}
+  </section>
+  ${wallet}`
+  return document(origin, `/x/s/${encodeURIComponent(value.id)}`, title, description, content, {
+    kind: 'swarm',
+    live: working ? { since: working.since } : null,
+    page,
+    swarm: { id: value.id, title: value.title },
+    url: `${origin}/x/s/${encodeURIComponent(value.id)}`,
   })
 }
 
+export function lost(origin: string) {
+  const content = `<section class="view center" data-view="lost">
+    <h2>This swarm drifted off.</h2>
+    <div class="row"><a class="go" href="/x">Start one</a><a class="ghost" href="/x?view=join">Join one</a></div>
+  </section>`
+  return document(origin, '/x', 'Swarms', 'Fund research an AI does in the open.', content, { kind: 'lost', url: `${origin}/x` }, 404)
+}
+
+export function card(title: string) {
+  const safe = attribute(title.trim().slice(0, 64) || 'Start a breakthrough')
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630"><rect width="1200" height="630" fill="#f6f8f2"/><rect x="60" y="60" width="1080" height="510" rx="40" fill="#1a3d2c"/><text x="120" y="160" fill="#b8d3a6" font-family="ui-monospace,monospace" font-size="26">Swarms</text><text x="118" y="300" fill="#fff" font-family="Georgia,serif" font-size="64">${safe}</text><rect x="120" y="400" width="240" height="76" rx="20" fill="#fff"/><text x="240" y="449" fill="#1a3d2c" font-family="ui-sans-serif,sans-serif" font-size="28" text-anchor="middle">Fund it →</text></svg>`
+  return new Response(svg, { headers: { 'cache-control': 'public, max-age=86400', 'content-type': 'image/svg+xml; charset=utf-8', 'x-content-type-options': 'nosniff' } })
+}
+
+const mono = 'ui-monospace,SFMono-Regular,Menlo,monospace'
+
 const styles = `
-@keyframes onair{0%,100%{opacity:1}50%{opacity:.35}}
-@keyframes drift{0%,100%{transform:translate(0,0)}50%{transform:translate(9px,-7px)}}
-@keyframes pulse{0%,100%{opacity:.28;transform:scale(.9)}50%{opacity:.78;transform:scale(1.12)}}
-*{box-sizing:border-box}html,body{height:100%;margin:0}body{background:#eaf4df;color:#13281d;font-family:Inter,ui-sans-serif,system-ui,sans-serif;overflow:hidden}.app{height:100dvh;min-height:320px;position:relative;display:grid;grid-template-rows:46px 1fr 38px;overflow:hidden;background:radial-gradient(circle at 50% -25%,#fff 0,#eaf4df 48%,#dcefd0 100%)}header,footer{position:relative;z-index:5;display:flex;align-items:center;justify-content:space-between;padding:0 18px;font:700 11px ui-monospace,SFMono-Regular,monospace;letter-spacing:.13em}header{border-bottom:1px solid rgba(25,61,43,.16)}header a,footer a{color:inherit;text-decoration:none}header span{color:#587064}footer{border-top:1px solid rgba(25,61,43,.14);letter-spacing:.04em;color:#4c6759}footer span{display:flex;align-items:center;gap:7px}footer b{width:7px;height:7px;border-radius:50%;background:#33a668;box-shadow:0 0 0 5px rgba(51,166,104,.12)}.world{position:absolute;inset:46px 0 38px;background-image:linear-gradient(rgba(25,61,43,.07) 1px,transparent 1px),linear-gradient(90deg,rgba(25,61,43,.07) 1px,transparent 1px);background-size:36px 36px;transform:perspective(500px) rotateX(58deg) scale(1.4);transform-origin:center bottom;opacity:.6}.world i{position:absolute;width:12px;height:12px;background:#2b744d;box-shadow:9px 9px 0 rgba(25,61,43,.18);transform:rotate(30deg);animation:drift 5s ease-in-out infinite}.world i:after{content:"";position:absolute;inset:3px;border-radius:50%;background:#d8ff95;animation:pulse 2s ease-in-out infinite}.world i:nth-child(1){left:12%;top:28%}.world i:nth-child(2){left:31%;top:66%;animation-delay:-1s}.world i:nth-child(3){left:69%;top:24%;animation-delay:-2s}.world i:nth-child(4){left:84%;top:70%;animation-delay:-3s}.world i:nth-child(5){left:54%;top:48%;animation-delay:-4s}main{position:relative;z-index:3;display:flex;align-items:center;justify-content:center;padding:10px 18px;min-height:0}.panel,.approval{width:min(760px,100%);background:rgba(249,252,245,.92);border:1px solid rgba(25,61,43,.2);border-radius:18px;box-shadow:0 18px 50px rgba(25,61,43,.12);padding:16px 18px;backdrop-filter:blur(10px)}.eyebrow{margin:0 0 5px;color:#397052;font:800 10px ui-monospace,SFMono-Regular,monospace;letter-spacing:.14em}h1,h2{font-family:Georgia,serif;letter-spacing:-.025em}h1{font-size:clamp(27px,5vw,42px);line-height:1;margin:0 0 5px}h2{font-size:clamp(25px,4vw,38px);margin:4px 0 8px}.lede{margin:0 0 11px;color:#4b6457;font-size:13px}.quests{display:grid;grid-template-columns:repeat(3,1fr);gap:7px;margin-bottom:8px}.quest{min-height:58px;text-align:left;padding:9px 10px;border:1px solid rgba(25,61,43,.18);border-radius:11px;background:#f8fbf5;color:inherit;cursor:pointer}.quest strong,.quest span{display:block}.quest strong{font-size:12px;line-height:1.15}.quest span{font-size:10px;line-height:1.2;color:#61776a;margin-top:4px}.quest:hover,.quest.selected{background:#1a3d2c;color:#fff;border-color:#1a3d2c;transform:translateY(-1px)}.quest.selected span{color:#cfe2d7}.custom{display:grid;grid-template-columns:1fr auto;gap:6px;margin-bottom:8px}.custom input,.funding input{width:100%;height:39px;border:1px solid rgba(25,61,43,.18);border-radius:10px;background:#fff;color:#13281d;padding:0 11px;font:500 12px inherit;outline:none}.custom input:focus,.funding input:focus{border-color:#307a51;box-shadow:0 0 0 3px rgba(48,122,81,.12)}button,.launch,.secondary{min-height:39px;border:0;border-radius:10px;font:800 12px inherit;cursor:pointer;transition:.15s ease}.custom button,.secondary{padding:0 14px;background:#dae8d2;color:#173b29}.funding{display:grid;grid-template-columns:auto minmax(120px,1fr) minmax(130px,auto);gap:7px;align-items:center}.amounts{display:flex;align-items:center;border:1px solid rgba(25,61,43,.18);border-radius:10px;background:#fff;padding:3px;height:39px}.amounts span{padding:0 7px;font:800 9px ui-monospace,SFMono-Regular,monospace;color:#557064}.amount{min-width:41px;min-height:31px;background:transparent;color:#294c39}.amount.selected{background:#d9edb4;color:#183b29}.launch{display:inline-flex;align-items:center;justify-content:center;background:#193d2b;color:#fff;text-decoration:none;padding:0 18px}.launch:hover{background:#24593e;transform:translateY(-1px)}.launch:disabled{opacity:.42;cursor:not-allowed;transform:none}.status{min-height:14px;margin:7px 2px 0;color:#597064;font-size:10px}.status.error{color:#a13f35}.mission h1{font-size:clamp(30px,6vw,52px);max-width:680px}.mission-top{display:flex;justify-content:space-between;align-items:center}.mission-top>span{font:800 9px ui-monospace,SFMono-Regular,monospace;color:#496859}.clamp{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden;max-width:680px}.mission-stats{display:flex;gap:8px;margin:9px 0 12px}.mission-stats span{padding:7px 9px;border-radius:8px;background:#e5f0dc;color:#5a7064;font-size:10px}.mission-stats strong{color:#1a432f;font-size:12px}.approval{text-align:center;max-width:560px;padding:25px}.approval p:not(.eyebrow){margin:0 auto 16px;color:#587064;font-size:13px}.approval .launch{min-width:220px}.portal{display:flex;justify-content:center;gap:10px;margin-bottom:12px}.portal span{width:42px;height:42px;border-radius:12px;display:grid;place-items:center;background:#dcecbf;color:#1b5034;font:900 16px ui-monospace,monospace;box-shadow:0 7px 18px rgba(25,61,43,.12)}.portal span:nth-child(2){transform:translateY(-8px);background:#1b5034;color:#fff}.success-mark{width:52px;height:52px;border-radius:50%;display:grid;place-items:center;margin:0 auto 12px;background:#1d7448;color:#fff;font-size:25px}.success-actions{display:flex;justify-content:center;gap:8px}.secondary{display:inline-flex;align-items:center;justify-content:center;padding:0 18px;text-decoration:none}.approval[hidden],.panel[hidden]{display:none}@media(max-width:560px){header,footer{padding:0 11px}header span{font-size:8px}.app{grid-template-rows:40px 1fr 34px}.world{inset:40px 0 34px}main{padding:7px}.panel{padding:12px}.lede{font-size:11px}.quest{padding:7px;min-height:64px}.quest strong{font-size:10px}.quest span{font-size:9px}.funding{grid-template-columns:1fr 1fr}.amounts{grid-column:1/-1}.funding .launch{grid-column:2}.funding input{grid-column:1}.mission-stats{margin:7px 0}.mission-stats span{padding:5px 7px}.approval{padding:18px}.success-actions{flex-direction:column}}@media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
-.onair{display:inline-flex;align-items:center;gap:5px;margin-right:6px;padding:3px 6px;border-radius:4px;background:#d93025;color:#fff;letter-spacing:.12em}.onair i{width:6px;height:6px;border-radius:50%;background:#fff;animation:onair 1.4s ease-in-out infinite}.mission h1.single{font-size:clamp(22px,4vw,32px);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.live{margin:8px 0 8px;padding:9px 11px;border-left:3px solid #d93025;border-radius:0 10px 10px 0;background:#fff}.live-who{margin:0 0 3px;font:700 10px ui-monospace,SFMono-Regular,monospace;letter-spacing:.06em;color:#3a5a48;text-transform:uppercase}.live-who b{color:#13281d}.live-text{margin:0;min-height:3.9em;font:italic 13px/1.3 Georgia,serif;color:#2b4436;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:3;overflow:hidden;overflow-wrap:anywhere}.crew{display:flex;gap:6px;overflow-x:auto;margin-bottom:9px;scrollbar-width:none}.member{flex-shrink:0;display:inline-flex;align-items:center;gap:6px;min-height:26px;padding:0 10px;border:1px solid rgba(25,61,43,.18);border-radius:999px;background:#f8fbf5;color:#294c39;font:700 11px inherit}.member i{width:7px;height:7px;border-radius:50%;background:#9fb3a5}.member[data-state=running] i,.member[data-state=pending] i{background:#33a668;animation:onair 1.6s ease-in-out infinite}.member[data-state=completed] i{background:#1a432f}.member[data-state=failed] i{background:#c0392b}.member.on{background:#1a3d2c;color:#fff;border-color:#1a3d2c}.member.pinned{box-shadow:0 0 0 2px #d9edb4}.status a{color:#1a432f;font-weight:700}@media (prefers-reduced-motion:reduce){.onair i,.member i{animation:none}}
+*{box-sizing:border-box}html,body{height:100%;margin:0}
+body{background:#f6f8f2;color:#161616;font:15px/1.4 Georgia,'Times New Roman',serif;overflow:hidden;-webkit-font-smoothing:antialiased}
+button,input{font:inherit;color:inherit}a{color:inherit}
+.app{position:relative;height:100dvh;padding:16px;display:flex}
+.view{flex:1;display:flex;flex-direction:column;gap:10px;min-width:0;min-height:0;animation:in .18s ease-out}
+.view[hidden]{display:none}
+@keyframes in{from{opacity:0;transform:translateY(6px)}}
+.center{align-items:center;justify-content:center;text-align:center;gap:14px}
+.split{display:grid;grid-template-columns:minmax(0,1fr) 260px;gap:16px;align-items:stretch}
+.split[hidden]{display:none}
+.left{display:flex;flex-direction:column;gap:10px;min-width:0;min-height:0}
+.left>.list:not(.notes){flex:1;display:flex;flex-direction:column}
+.left>.list:not(.notes)>li{flex:1;display:flex}
+.left>.list:not(.notes) .row-item{flex:1}
+.goal{margin:0;display:-webkit-box;overflow:hidden;font-size:16px;line-height:1.5;color:#3d3d3d;-webkit-box-orient:vertical;-webkit-line-clamp:4}
+.notes{margin-top:auto}
+.notes .row-item{cursor:default;font-size:14px}
+.fund-name{margin:0}
+.top{display:flex;align-items:center;gap:8px}
+h1{margin:0;font-weight:400;font-size:26px;line-height:1.1;letter-spacing:-.03em}
+h2{margin:0;font-weight:400;font-size:28px;letter-spacing:-.02em;max-width:620px}
+.back{flex-shrink:0;width:32px;height:32px;padding:0;border:0;border-radius:50%;background:none;font-size:18px;color:#5c7350;cursor:pointer}
+.back:hover{background:#eef2ea}
+.center .back{width:auto;padding:0 12px;font:12px ${mono}}
+.doors{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.door{display:flex;flex-direction:column;gap:10px;padding:22px;border:1px solid #dbe2d0;border-radius:22px;background:#fff;text-align:left;cursor:pointer;transition:transform .2s,box-shadow .2s}
+.door:hover{transform:translateY(-3px);box-shadow:0 20px 40px -26px #1a3d2c99}
+.door-join{border-color:#1a3d2c;background:#1a3d2c;color:#fff}
+.door-kicker{display:flex;align-items:center;gap:6px;font:11px ${mono};color:#5c7350}
+.door-join .door-kicker{color:#b8d3a6}
+.door-title{font-size:34px;line-height:1;letter-spacing:-.04em}
+.door-title i{font-style:normal;display:inline-block;transition:transform .2s}
+.door:hover .door-title i{transform:translateX(6px)}
+.door-peek{display:grid;gap:6px;margin-top:auto}
+.chip{display:flex;align-items:center;gap:8px;min-width:0;min-height:42px;padding:6px 12px;border-radius:12px;background:#f2f5ec;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.door-join .chip{background:#ffffff14}
+.chip b{flex:1;min-width:0;overflow:hidden;font-weight:400;white-space:nowrap;text-overflow:ellipsis}.chip em{flex-shrink:0;margin-left:auto;font:11px ${mono};font-style:normal;opacity:.7}
+.live{width:7px;height:7px;border-radius:50%;background:#7dff7d}
+.list{margin:0;padding:0;list-style:none;overflow:hidden;border:1px solid #e3e9dd;border-radius:14px;background:#fbfcf9}
+.list.scroll{overflow-y:auto}
+[data-view=join] .list .row-item{min-height:56px;font-size:17px}.row-item small{display:block;font:11px ui-monospace,SFMono-Regular,monospace;color:#6b6b6b}[data-view=join] .row-item span{white-space:normal}
+.list li+li{border-top:1px solid #e3e9dd}
+.row-item{display:flex;align-items:center;gap:12px;width:100%;min-height:44px;padding:9px 14px;border:0;background:none;text-align:left;font-size:16px;text-decoration:none;cursor:pointer}
+.row-item:hover{background:#fff}
+.row-item span{flex:1;min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.row-item em{font:12px ${mono};font-style:normal;color:#6b6b6b}
+.idea[aria-pressed=true]{background:#fff;box-shadow:inset 3px 0 #1a3d2c}
+.mark-idea{flex-shrink:0;width:9px;height:9px;border-radius:3px;background:#688545;transform:rotate(45deg)}
+.idea[aria-pressed=true] .mark-idea{background:#1a3d2c}
+.own{cursor:text}.own .mark-idea{background:none;border:1px dashed #a5b79c}
+.own input{flex:1;min-width:0;border:0;outline:none;background:none;font-size:16px}
+.dot{flex-shrink:0;width:9px;height:9px;border-radius:50%;background:#bdbdbd}
+.dot[data-status=running]{background:#2fae5a;box-shadow:0 0 0 4px #2fae5a22}
+.door-join .dot[data-status=running]{background:#7dff7d}
+.dot[data-status=paused],.dot[data-status=funding]{background:#e0a43c}
+.dot[data-status=done]{background:#2b2b2b}
+.empty{flex:0 0 auto;padding:28px;border:1px dashed #cfd9c6;border-radius:14px;background:none;color:#6b6b6b;font-size:16px;cursor:pointer}
+.empty b{font:13px ${mono};font-weight:400;color:#161616}
+.pay{display:flex;flex-direction:column;gap:10px;padding:16px;border:1px solid #e3e9dd;border-radius:18px;background:#fff}
+.big{flex:1;display:flex;align-items:center;justify-content:center;gap:2px;margin:0}
+.big span{font-size:34px;color:#6b6b6b;margin-top:-18px}.big b{font-weight:400;font-size:84px;line-height:1;letter-spacing:-.03em}
+.seg{display:flex;overflow:hidden;border:1px solid #dbe2d0;border-radius:12px;background:#fbfcf9}
+.seg button{flex:1;min-height:40px;border:0;background:none;font:13px ${mono};cursor:pointer}
+.seg button+button{border-left:1px solid #dbe2d0}
+.seg button[aria-checked=true]{background:#1a3d2c;color:#fff}
+.go{display:inline-flex;align-items:center;justify-content:center;min-height:50px;padding:0 20px;border:0;border-radius:12px;background:#161616;color:#fff;font:15px ui-sans-serif,system-ui,sans-serif;text-decoration:none;cursor:pointer}
+.go.small{min-height:32px;padding:0 14px;border-radius:9px;font-size:13px}
+.go.wide{min-width:220px}
+.go:disabled{background:#d6decf;color:#8a9585;cursor:default}
+.ghost{display:inline-flex;align-items:center;justify-content:center;min-height:50px;padding:0 20px;border:1px solid #dbe2d0;border-radius:12px;font:15px ui-sans-serif,system-ui,sans-serif;text-decoration:none}
+.status{min-height:15px;margin:0;font:11px/1.4 ${mono};color:#b3261e;text-align:center}
+.kicker{margin:0;font:13px ${mono};color:#5c7350}
+.code{margin:0;font:400 54px/1 ${mono};letter-spacing:.14em}
+.hint{margin:0;font:12px ${mono};color:#6b6b6b}
+.mark{display:grid;place-items:center;width:50px;height:50px;border-radius:50%;background:#1a3d2c;color:#fff;font-style:normal;font-size:22px}
+.mark.bad{background:#b3261e}
+.row{display:flex;gap:10px}
+.room{gap:0;margin:-16px;border-radius:0}
+.head{display:flex;align-items:center;gap:10px;padding:12px 16px 8px}
+.name{flex:1;min-width:0;overflow:hidden;font-size:19px;letter-spacing:-.02em;white-space:nowrap;text-overflow:ellipsis;text-decoration:none}
+.sum{flex-shrink:0;font:12px ${mono};color:#6b6b6b}
+.tabs{display:flex;gap:4px;padding:0 12px;border-bottom:1px solid #e3e9dd}
+.tabs button{display:inline-flex;align-items:center;gap:6px;height:34px;padding:0 10px;border:0;background:none;color:#6b6b6b;font:12.5px ${mono};cursor:pointer}
+.tabs button[aria-selected=true]{color:#161616;box-shadow:inset 0 -2px #161616}
+#watching{display:inline-flex;align-items:center;gap:4px;font-size:11px;color:#6b6b6b}
+#watching:not(:empty)::before{content:'';width:6px;height:6px;border-radius:50%;background:#2fbf4a}
+.feed{flex:1;min-height:0;margin:0;padding:10px 16px;overflow-y:auto;list-style:none;scrollbar-width:thin}
+.feed[hidden]{display:none}
+.beat{margin:0 0 8px;font-size:15px;line-height:1.45;overflow-wrap:anywhere}
+.beat .who{display:block;margin-bottom:2px;font:10.5px ${mono};color:#2f5f37}
+.beat.quiet{color:#6b6b6b}
+.beat.tool{overflow:hidden;font:12px/1.6 ${mono};color:#6b6b6b;white-space:nowrap;text-overflow:ellipsis}
+.beat.thinking{font-style:italic;color:#7b8576}
+.beat.said .say{display:inline-block;padding:7px 11px;border-radius:4px 14px 14px 14px;background:#eef5e6}
+.beat.chat .say{display:inline-block;padding:7px 11px;border-radius:4px 14px 14px 14px;background:#fff;border:1px solid #e3e9dd}
+.amt{display:inline-block;margin-left:6px;padding:0 6px;border-radius:9px;background:#1a3d2c;color:#fff;font:10px/1.6 ${mono}}
+.now .say::after{content:'';display:inline-block;width:6px;height:1em;margin-left:2px;vertical-align:-2px;background:#3f7d4e;animation:caret 1s steps(1) infinite}
+@keyframes caret{50%{opacity:0}}
+.steer{display:flex;align-items:center;gap:6px;margin:8px 12px 12px;padding:4px 4px 4px 6px;border:1px solid #e3e9dd;border-radius:24px;background:#fff}
+.steer:focus-within{border-color:#a5b79c}
+.tag{flex-shrink:0;padding:3px 8px;border-radius:14px;background:#1a3d2c;color:#fff;font:12px ${mono}}
+.steer input{flex:1;min-width:0;padding:8px 4px;border:0;outline:none;background:none;font-size:15px}
+.stake{display:flex;gap:3px}.stake[hidden]{display:none}
+.stake button{height:28px;padding:0 9px;border:1px solid #e3e9dd;border-radius:14px;background:#fff;font:12px ${mono};cursor:pointer}
+.stake button[aria-checked=true]{border-color:#1a3d2c;background:#1a3d2c;color:#fff}
+.send{flex-shrink:0;width:36px;height:36px;border:0;border-radius:50%;background:#1a3d2c;color:#fff;font-size:16px;cursor:pointer}
+.send:disabled{background:#e3e9dd;color:#a5b79c;cursor:default}
+.fund-name{display:flex;align-items:center;gap:10px;margin:6px 0 0;font-size:22px;line-height:1.25;letter-spacing:-.02em}
+.behind{margin:6px 0 0;padding:10px 12px;border:1px solid #c5d4b6;border-radius:12px;background:#f1f6ea;font-size:15px}
+.behind b{display:block;font:11px ${mono};font-weight:400;color:#4b6a3a}
+@media(max-width:560px){.big b{font-size:56px!important}.door-peek{margin-top:6px}.door-peek .chip:nth-child(n+3){display:none}.goal{-webkit-line-clamp:2}.notes{display:none}.pay{padding:12px}.app{padding:12px}.doors{grid-template-columns:1fr}.door{padding:16px}.door-title{font-size:26px}.door-peek .chip:nth-child(n+4){display:none}.doors{align-content:stretch}.door{gap:8px}.split{grid-template-columns:1fr;gap:10px}h1{font-size:22px}.big b{font-size:42px}.go,.ghost{min-height:44px}.code{font-size:38px}.row{flex-direction:column;width:100%}.room{margin:-12px}.sum{display:none}.stake button{padding:0 7px}}
+@media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 `
 
 const client = `
 const frame=window.__SWARM_FRAME__;
-const setup=document.getElementById('setup');
-const approval=document.getElementById('approval');
-const success=document.getElementById('success');
-const action=document.getElementById('action');
-const statusLine=document.getElementById('status');
-const note=document.getElementById('note');
-let amount='2';
-let choice=null;
-let currentSwarm=frame.swarm||null;
-let polling=false;
-const say=(text,error=false)=>{statusLine.textContent=text;statusLine.classList.toggle('error',error)};
-document.querySelectorAll('.amount').forEach(button=>button.addEventListener('click',()=>{document.querySelectorAll('.amount').forEach(item=>item.classList.remove('selected'));button.classList.add('selected');amount=button.dataset.amount}));
-if(frame.kind==='start'){
-  const custom=document.getElementById('custom');
-  const pick=index=>{choice=frame.questions[index];document.querySelectorAll('.quest').forEach((item,at)=>item.classList.toggle('selected',at===index));custom.value='';say(choice.label+' selected. Add fuel and launch.');action.disabled=false};
-  document.querySelectorAll('.quest').forEach((button,index)=>button.addEventListener('click',()=>pick(index)));
-  const customPick=()=>{const question=custom.value.trim();if(question.length<10){say('Ask a research question with at least 10 characters.',true);return}choice={label:question,title:question.slice(0,80),goal:question+'\\n\\n'+frame.briefInstruction};document.querySelectorAll('.quest').forEach(item=>item.classList.remove('selected'));say('Custom quest selected. Add fuel and launch.');action.disabled=false};
-  document.getElementById('custom-pick').addEventListener('click',customPick);
-  custom.addEventListener('keydown',event=>{if(event.key==='Enter')customPick()});
-  action.disabled=true;
-}
-if(frame.live){
-  const who=document.getElementById('live-who'),kind=document.getElementById('live-kind'),box=document.getElementById('live-text'),elapsed=document.getElementById('elapsed');
-  let stream={item:'',kind:'is working',text:'',who:null};
-  const paint=()=>{who.textContent=stream.who||'The agent';kind.textContent=stream.kind;if(stream.text)box.textContent=stream.text.slice(-240)};
-  const write=(name,label,delta,item,offset)=>{
-    const base=stream.item===item&&stream.who===name?stream.text:'';
-    stream={item,kind:label,text:(offset===null||offset===undefined?base+delta:base.slice(0,offset)+delta).slice(-2000),who:name};paint();
-  };
-  const open=()=>{
-    const source=new EventSource('/v1/swarms/'+encodeURIComponent(frame.swarm.id)+'/live');
-    source.onmessage=message=>{
-      const event=JSON.parse(message.data);
-      if(event.type==='start')frame.live.since=event.at;
-      else if(event.type==='delta')write(event.who,event.channel==='thinking'?'is thinking':event.channel==='input'?'is writing code':'is writing',event.delta,event.item,event.offset);
-      else if(event.type==='entry'&&event.entry.kind!=='thinking'){stream={item:'entry:'+event.entry.event,kind:event.entry.kind==='output'?'got back':event.entry.kind==='message'?'said':'did',text:event.entry.kind==='output'?event.entry.detail||event.entry.text:event.entry.text,who:event.entry.who};paint()}
-      else if(event.type==='end'||event.type==='idle'){source.close();setTimeout(open,event.type==='end'?1500:5000)}
-    };
-    source.onerror=()=>{source.close();setTimeout(open,4000)};
-  };
-  const tick=()=>{const seconds=Math.max(0,Math.floor((Date.now()-frame.live.since)/1000)),hours=Math.floor(seconds/3600);elapsed.textContent=(hours?hours+'h ':'')+Math.floor(seconds%3600/60)+'m '+String(seconds%60).padStart(2,'0')+'s'};
-  open();paint();tick();setInterval(tick,1000);
-}
+const query=new URLSearchParams(location.search);
+const demo=query.get('scene');
+const views=[...document.querySelectorAll('[data-view]')];
+let current=views.find(item=>!item.hidden)?.dataset.view;
+const history=[];
+const show=(name,push=true)=>{if(push&&current&&current!==name)history.push(current);views.forEach(item=>item.hidden=item.dataset.view!==name);current=name};
+const back=()=>{show(history.pop()||views[0].dataset.view,false)};
+document.querySelectorAll('[data-back]').forEach(button=>button.addEventListener('click',()=>{polling=false;back()}));
+document.querySelectorAll('[data-open]').forEach(button=>button.addEventListener('click',()=>show(button.dataset.open)));
+let amount='2',choice=null,note='',currentSwarm=frame.swarm||null,polling=false;
+document.querySelectorAll('[data-amount]').forEach(button=>button.addEventListener('click',()=>{const box=button.closest('.pay');box.querySelectorAll('[data-amount]').forEach(item=>item.setAttribute('aria-checked','false'));button.setAttribute('aria-checked','true');amount=button.dataset.amount;box.querySelector('[data-big]').textContent=amount}));
+const say=(box,text)=>{const line=box&&box.querySelector('[data-status]');if(line)line.textContent=text};
+const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 async function send(path,options){
-  const response=await fetch(path,options);
-  const data=await response.json().catch(()=>({}));
-  if(!response.ok){const error=new Error(data.detail||'The request failed.');error.status=response.status;throw error}
+  if(demo){
+    await sleep(500);
+    if(path==='/v1/swarms')return{id:'demo',title:choice.title};
+    if(/pledges$/.test(path))return{pledge:'demo',device:{userCode:'WXYZ-4821',verificationUriFull:'https://wallet.tempo.xyz',expiresAt:Date.now()+(demo==='expired'?1500:600000),interval:1}};
+    if(demo==='declined'){await sleep(900);const error=new Error('declined');error.status=403;throw error}
+    if(demo==='done'){await sleep(700);return{status:'active'}}
+    await sleep(15000);return{status:'pending'};
+  }
+  const response=await fetch(path,options);const data=await response.json().catch(()=>({}));
+  if(!response.ok){const error=new Error(data.detail||'That did not go through.');error.status=response.status;throw error}
   return data;
 }
-function pledgePath(id,pledge){return '/v1/swarms/'+encodeURIComponent(id)+'/pledges/'+encodeURIComponent(pledge)}
 function finish(){
-  polling=false;approval.hidden=true;success.hidden=false;
-  document.getElementById('success-title').textContent=currentSwarm.title+' is moving';
-  document.getElementById('expedition').href='/s/'+encodeURIComponent(currentSwarm.id);
-  const shareUrl=new URL(frame.url).origin+'/x/s/'+encodeURIComponent(currentSwarm.id);
-  document.getElementById('share').href='https://x.com/intent/post?text='+encodeURIComponent('I backed '+currentSwarm.title+' on Swarm World '+shareUrl);
+  polling=false;show('done');
+  document.getElementById('done-title').textContent="You're in."+(currentSwarm&&currentSwarm.title?' '+currentSwarm.title:'');
+  const page=new URL(frame.url).origin+'/s/'+encodeURIComponent(currentSwarm.id);
+  document.getElementById('watch').href=page;
+  document.getElementById('share').href='https://x.com/intent/post?text='+encodeURIComponent((note?'I put money behind "'+note+'" on ':'I funded ')+currentSwarm.title+' '+new URL(frame.url).origin+'/x/s/'+encodeURIComponent(currentSwarm.id));
+}
+function failed(error){
+  polling=false;show('failed');
+  const declined=error.status===403,expired=error.status===410||/expired/i.test(error.message||'');
+  document.getElementById('failed-title').textContent=declined?'You declined in Tempo Wallet.':expired?'The approval timed out.':"That didn't go through.";
+  document.getElementById('failed-detail').textContent=declined||expired?'Nothing was charged.':error.message||'';
 }
 async function poll(requested){
   if(polling)return;polling=true;
-  const expires=requested.device.expiresAt;
   try{
-    while(Date.now()<expires){
-      const result=await send(pledgePath(currentSwarm.id,requested.pledge)+'?wait=15');
+    while(polling&&Date.now()<requested.device.expiresAt){
+      const result=await send('/v1/swarms/'+encodeURIComponent(currentSwarm.id)+'/pledges/'+encodeURIComponent(requested.pledge)+'?wait=15');
+      if(!polling)return;
       if(result.status!=='pending'){finish();return}
-      await new Promise(resolve=>setTimeout(resolve,Math.max(1500,requested.device.interval*1000)));
+      await sleep(Math.max(1500,requested.device.interval*1000));
     }
-    throw new Error('The wallet approval expired. Try again.');
-  }catch(error){polling=false;approval.hidden=true;setup.hidden=false;action.disabled=false;say(error.message||'Approval failed.',true)}
+    if(polling)throw Object.assign(new Error('expired'),{status:410});
+  }catch(error){if(polling)failed(error)}
 }
-function approve(requested){
-  setup.hidden=true;approval.hidden=false;
-  document.getElementById('code').textContent=requested.device.userCode;
-  const link=document.getElementById('approve');link.href=requested.device.verificationUriFull;
-  link.addEventListener('click',()=>poll(requested),{once:true});
-  void poll(requested);
-}
-action.addEventListener('click',async()=>{
-  action.disabled=true;say(frame.kind==='start'?'Opening the expedition…':'Preparing your pledge…');
+async function pledge(box){
+  const go=box&&box.querySelector('[data-go]');if(go)go.disabled=true;say(box,'');
   try{
-    if(!currentSwarm){
-      if(!choice)throw new Error('Choose a quest first.');
-      currentSwarm=await send('/v1/swarms',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({title:choice.title,goal:choice.goal})});
-    }
-    const requested=await send('/v1/swarms/'+encodeURIComponent(currentSwarm.id)+'/pledges',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({amount,note:note.value.trim()||undefined,token:'mach',device:true})});
-    if(!requested.device)throw new Error('Tempo Wallet did not return an approval link.');
-    approve(requested);
-  }catch(error){action.disabled=false;say(error.message||'Could not start the wallet approval.',true)}
-});
+    if(!currentSwarm){if(!choice)throw new Error('Pick an idea first.');currentSwarm=await send('/v1/swarms',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({title:choice.title,goal:choice.goal,problem:choice.id})})}
+    const requested=await send('/v1/swarms/'+encodeURIComponent(currentSwarm.id)+'/pledges',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({amount,token:'mach',device:true,...(note?{note}:{})})});
+    if(!requested.device)throw new Error('Tempo Wallet did not answer.');
+    show('approve');
+    document.getElementById('code').textContent=requested.device.userCode;
+    const link=document.getElementById('approve');link.href=requested.device.verificationUriFull;
+    void poll(requested);
+  }catch(error){say(box,error.message||'That did not go through.')}
+  finally{if(go)go.disabled=frame.kind==='home'&&!choice}
+}
+document.querySelectorAll('[data-go]').forEach(button=>button.addEventListener('click',()=>pledge(button.closest('.pay'))));
+document.querySelectorAll('[data-retry]').forEach(button=>button.addEventListener('click',()=>{history.length=0;show(frame.kind==='home'?'start':note?'room':'fund',false)}));
+if(frame.kind==='home'&&(demo||query.has('demo'))){
+  const sample=[['running','Benchmark every open-weight coding model','9.04'],['running','Parse a terabyte of JSON in under a minute','4.20'],['paused','A field guide to DEX routing','2.75'],['funding','Speedrun nanoGPT on a T4','0.00']];
+  const esc=text=>text.replace(/&/g,'&amp;').replace(/</g,'&lt;');
+  document.querySelector('.door-join .door-peek').innerHTML=sample.map(([status,title,raised])=>'<span class="chip"><i class="dot" data-status="'+status+'"></i><b>'+esc(title)+'</b><em>$'+raised+'</em></span>').join('');
+  document.querySelector('.door-join .door-kicker').innerHTML='<i class="live"></i>2 live now';
+  const join=document.querySelector('[data-view=join]');join.querySelector('.empty,.list')?.remove();
+  join.insertAdjacentHTML('beforeend','<ol class="list scroll">'+sample.map(([status,title,raised])=>'<li><a class="row-item" href="#"><i class="dot" data-status="'+status+'"></i><span>'+esc(title)+'<small>'+(status==='running'?'Live':status==='paused'?'Paused':'Not started')+' · '+(3+title.length%7)+' backers</small></span><em>$'+raised+'</em></a></li>').join('')+'</ol>');
+}
+if(frame.kind==='home'){
+  const custom=document.getElementById('custom'),ideas=[...document.querySelectorAll('[data-idea]')],go=document.querySelector('[data-view=start] [data-go]');
+  const pick=index=>{choice=frame.ideas[index];ideas.forEach((item,at)=>item.setAttribute('aria-pressed',String(at===index)));custom.value='';go.disabled=false};
+  ideas.forEach((button,index)=>button.addEventListener('click',()=>pick(index)));
+  custom.addEventListener('input',()=>{const text=custom.value.trim();ideas.forEach(item=>item.setAttribute('aria-pressed','false'));choice=text.length>=10?{title:text.slice(0,80),goal:text+'\\n\\n'+frame.briefInstruction}:null;go.disabled=!choice});
+  go.disabled=true;
+  if(query.has('pick'))pick(Number(query.get('pick'))||0);
+}
+if(frame.kind==='swarm'){
+  const panes={transcript:document.querySelector('[data-pane=transcript]'),chat:document.querySelector('[data-pane=chat]')};
+  const tabs=[...document.querySelectorAll('[data-tab]')];
+  const tab=name=>{tabs.forEach(item=>item.setAttribute('aria-selected',String(item.dataset.tab===name)));Object.entries(panes).forEach(([key,pane])=>pane.hidden=key!==name);panes[name].scrollTop=panes[name].scrollHeight};
+  tabs.forEach(button=>button.addEventListener('click',()=>tab(button.dataset.tab)));
+  const nowLine=document.getElementById('now'),nowWho=document.getElementById('now-who'),nowText=document.getElementById('now-text');
+  const stick=pane=>{if(pane.scrollHeight-pane.scrollTop-pane.clientHeight<60)requestAnimationFrame(()=>pane.scrollTop=pane.scrollHeight)};
+  const beat=(pane,kind,who,text,amount)=>{
+    const item=document.createElement('li');item.className='beat '+kind;
+    if(who){const name=document.createElement('span');name.className='who';name.textContent=who;if(amount){const chip=document.createElement('span');chip.className='amt';chip.textContent='$'+Number(amount).toFixed(2);name.append(chip)}item.append(name)}
+    const body=document.createElement('span');body.className='say';body.textContent=text;item.append(body);
+    const anchor=pane===panes.transcript?nowLine:null;stick(pane);pane.insertBefore(item,anchor);
+  };
+  const entry=item=>{
+    if(item.kind==='funds'||item.kind==='status'||item.kind==='machine')return;
+    const kind=item.kind==='message'?'':item.kind==='thinking'?'thinking':item.kind==='steer'?'quiet':'tool';
+    beat(panes.transcript,kind,item.kind==='message'?(item.who||'Agent'):null,(item.kind==='tool'?'› ':'')+(item.text||''));
+  };
+  const chat=(message,names)=>{
+    if(!message.author)return;
+    const handle='@'+(names[message.author]||message.author.slice(2,8));
+    if(message.steer)beat(panes.transcript,'said',handle,message.text,message.steer.amount);
+    beat(panes.chat,message.steer?'said':'chat',handle,message.text,message.steer&&message.steer.amount);
+  };
+  const samples=()=>{
+    document.getElementById('empty-feed').remove();document.getElementById('empty-chat').remove();
+    [['message','Agent','SWE-bench Lite. Four subagents, each on its own machine, ran 75 tasks per model.'],['tool',null,'$ python -m swebench.harness.run_evaluation --run_id glm-5.3'],['thinking',null,'Cost per solved task carries the most weight among the notes.'],['message','swe-lite','GLM-5.3 resolved 31 of 75 tasks at 0.0020 MACH per resolved task.']].forEach(([kind,who,text])=>beat(panes.transcript,kind==='message'?'':kind,who,(kind==='tool'?'› ':'')+text));
+    beat(panes.transcript,'said','@orbit-0a41','@swarm Report cost per solved task, not per token','1');
+    [['@orbit-0a41','@swarm Report cost per solved task, not per token','1'],['@quark-1a2b','the GLM numbers look too good, can we rerun with cold caches?',null],['@kestrel-9c2e','+1, and publish the harness',null]].forEach(([who,text,amount])=>beat(panes.chat,amount?'said':'chat',who,text,amount));
+    document.getElementById('watching').textContent='7';
+    nowLine.hidden=false;nowWho.textContent='rust-subset';nowText.textContent='Kimi K2.7 passes 37 of 50 Rust tasks so far';
+  };
+  if(demo||query.has('demo')){samples();const goal=document.querySelector('[data-view=fund] .goal');if(goal&&!document.querySelector('[data-view=fund] .notes'))goal.insertAdjacentHTML('afterend','<ol class="list notes">'+[['Report cost per solved task, not per token','3.30'],['Include Qwen3-Coder even if slow','1.55'],['Publish the harness as a repo','0.90']].map(([text,amount])=>'<li class="row-item"><span>'+text+'</span><em>$'+amount+'</em></li>').join('')+'</ol>')}
+  else{
+    fetch('/v1/swarms/'+encodeURIComponent(frame.swarm.id)+'/feed?limit=40').then(response=>response.json()).then(page=>{const shown=(page.entries||[]).slice(-30);if(shown.length)document.getElementById('empty-feed').remove();shown.forEach(entry);panes.transcript.scrollTop=panes.transcript.scrollHeight}).catch(()=>{});
+    fetch('/v1/swarms/'+encodeURIComponent(frame.swarm.id)+'/chat').then(response=>response.json()).then(room=>{const names=Object.fromEntries((room.members||[]).map(member=>[member.address,member.handle]));if((room.messages||[]).length)document.getElementById('empty-chat').remove();(room.messages||[]).slice(-40).forEach(message=>chat(message,names));if((room.members||[]).length)document.getElementById('watching').textContent=String(room.members.length)}).catch(()=>{});
+  }
+  if(frame.live&&!demo&&!query.has('demo')){
+    let stream={item:'',text:'',who:null};
+    const write=(who,delta,item,offset)=>{const base=stream.item===item&&stream.who===who?stream.text:'';stream={item,text:(offset===null||offset===undefined?base+delta:base.slice(0,offset)+delta).slice(-600),who};nowLine.hidden=false;nowWho.textContent=who||'Agent';nowText.textContent=stream.text;stick(panes.transcript)};
+    const open=()=>{
+      const source=new EventSource('/v1/swarms/'+encodeURIComponent(frame.swarm.id)+'/live');
+      source.onmessage=message=>{const event=JSON.parse(message.data);
+        if(event.type==='delta'&&event.channel==='text')write(event.who,event.delta,event.item,event.offset);
+        else if(event.type==='entry'){if(event.entry.kind==='message'){nowLine.hidden=true;stream={item:'',text:'',who:null}}entry(event.entry)}
+        else if(event.type==='end'||event.type==='idle'){source.close();setTimeout(open,event.type==='end'?1500:5000)}};
+      source.onerror=()=>{source.close();setTimeout(open,4000)};
+    };
+    open();
+  }
+  const form=document.getElementById('steer');
+  if(form){
+    const input=document.getElementById('note'),stake=document.getElementById('stake'),sendButton=form.querySelector('.send');
+    const update=()=>{const text=input.value.trim();stake.hidden=!text;sendButton.disabled=text.length<3};
+    input.addEventListener('input',update);
+    stake.querySelectorAll('[data-stake]').forEach(button=>button.addEventListener('click',()=>{stake.querySelectorAll('[data-stake]').forEach(item=>item.setAttribute('aria-checked','false'));button.setAttribute('aria-checked','true');amount=button.dataset.stake}));
+    form.addEventListener('submit',event=>{event.preventDefault();note=input.value.trim();if(note.length<3)return;history.push('room');void pledge(null)});
+    if(query.get('note')){input.value=query.get('note');update()}
+  }
+  const behind=document.getElementById('behind');
+  document.querySelector('[data-open=fund]')?.addEventListener('click',()=>{note='';behind.hidden=true});
+  if(query.get('tab')==='chat')tab('chat');else tab('transcript');
+}
+const view=query.get('view');
+if(view&&views.some(item=>item.dataset.view===view)){if(view!==current)history.push(current);show(view,false)}
+if(demo&&query.has('go')){const box=document.querySelector('[data-view='+(view||current)+'] .pay');if(document.getElementById('note')&&document.getElementById('note').value&&!box){note=document.getElementById('note').value.trim();void pledge(null)}else void pledge(box)}
 `

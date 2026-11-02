@@ -9,6 +9,7 @@ interface __BaseEnv_Env {
 	SWARMS_GATEWAY_KEY: string;
 	SWARMS_SECRET: string;
 	SWARMS: DurableObjectNamespace<import("./src/worker/index").Swarm>;
+	ASSETS: Fetcher;
 }
 declare namespace Cloudflare {
 	interface GlobalProps {

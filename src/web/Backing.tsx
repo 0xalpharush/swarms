@@ -42,7 +42,7 @@ function More<item>(props: { items: readonly item[]; render: (item: item) => Rea
 
 export function Budgets(props: { budgets: readonly Budget[]; config: Config | undefined }) {
   const now = useNow(30_000)
-  if (props.budgets.length === 0) return <p className="empty">No daily budgets yet. A budget lets the swarm pull up to a set amount a day from your wallet, only to its own address.</p>
+  if (props.budgets.length === 0) return <p className="empty">No monthly budgets yet. A budget lets the swarm pull a set amount every 30 days from your wallet, the first at once, only to its own address.</p>
   const ordered = [...props.budgets].sort((a, b) => b.at - a.at)
   return (
     <More
@@ -52,7 +52,7 @@ export function Budgets(props: { budgets: readonly Budget[]; config: Config | un
           <Who address={budget.contributor} at={budget.at} config={props.config} />
           <p className="pledge-figures">
             <span>
-              {money(budget.amount, budget.token)} {budget.period === 86_400 ? 'a day' : `per ${Math.round(budget.period / 3600)} h`}
+              {money(budget.amount, budget.token)} {budget.period === 2_592_000 ? 'a month' : budget.period === 86_400 ? 'a day' : `per ${Math.round(budget.period / 3600)} h`}
             </span>
             <span>{mach(budget.pulled)} pulled</span>
             {budget.left !== null && (budget.status === 'active' || budget.status === 'waiting') && <span>{mach(budget.left)} left today</span>}
@@ -72,7 +72,7 @@ export function Budgets(props: { budgets: readonly Budget[]; config: Config | un
 }
 
 export function Contributions(props: { config: Config | undefined; contributions: readonly Contribution[] }) {
-  if (props.contributions.length === 0) return <p className="empty">No transfers yet. Send USDC.e, pathUSD or OUSD to the swarm's wallet, or set a daily budget.</p>
+  if (props.contributions.length === 0) return <p className="empty">No transfers yet. Send USDC.e, pathUSD or OUSD to the swarm's wallet, or set a monthly budget.</p>
   const ordered = [...props.contributions].sort((a, b) => b.at - a.at)
   return (
     <More

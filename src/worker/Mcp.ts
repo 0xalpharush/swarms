@@ -9,12 +9,12 @@ import * as Store from './Store.ts'
 function instructions(origin: string) {
   return [
     `Swarms (${origin}) are crowdfunded, long-running AI agents on the Tempo gateway. Anyone starts a swarm with a title and a goal. It waits in status funding until someone funds it, and then one nanocode agent works on it in a single continuous thread, spending on models, Modal machines and any subagents it spawns. Whenever it pauses to reply, it posts an update; the newest update is the swarm's answer, and the swarm then tells it to keep going. It keeps the code it writes in a public git repository that swarm_get names. A swarm runs until its agent reports the goal met (done), or waits whenever its money runs out (paused, and new money resumes it).`,
-    "Money comes three ways. A pledge is a spending key in MACH (the default) or OUSD, USDC.e or pathUSD that the contributor approves in Tempo Wallet, capped at the pledge: the money stays in their wallet until the swarm spends it, and what it does not spend goes back when the pledge ends. A transfer sends USDC.e, pathUSD or OUSD to the swarm's own wallet, and a daily budget lets the swarm pull up to an amount a day from the contributor's wallet; when the swarm is done, what its wallet did not spend goes back to those contributors pro rata. Transfers and budgets are made on the swarm's page or over the REST API. Contributors steer with money: any of the three may carry a note, money with the same note backs it together, the agent reads the notes ranked by the money behind them whenever it keeps going, and a note that arrives while it works reaches it at once.",
+    "Money comes three ways. A pledge is a spending key in MACH (the default) or OUSD, USDC.e or pathUSD that the contributor approves in Tempo Wallet, capped at the pledge: the money stays in their wallet until the swarm spends it, and what it does not spend goes back when the pledge ends. A transfer sends USDC.e, pathUSD or OUSD to the swarm's own wallet, and a monthly budget lets the swarm pull up to an amount a day from the contributor's wallet; when the swarm is done, what its wallet did not spend goes back to those contributors pro rata. Transfers and budgets are made on the swarm's page or over the REST API. Contributors steer with money: any of the three may carry a note, money with the same note backs it together, the agent reads the notes ranked by the money behind them whenever it keeps going, and a note that arrives while it works reaches it at once.",
     "Contributors can also lend a swarm their own machine as a hand: swarm_hand issues one and returns the nanocode command (nc hand '<url>' --token <token>) and a nanocode-ts snippet (Hand.connect) to run on that machine. The swarm's agent then runs commands there, and is told the machine and its data belong to a contributor. A hand can set its own prices, such as a price per file; the swarm pays them through the gateway from its money and caps what each hand may charge. Issue a hand only when the user asks, and make sure they know the swarm's agents will run commands on the machine.",
     "Swarms publish artifacts as they work, such as a live dashboard of their results, a chart or a write-up; swarm_artifacts lists them with a url to fetch.",
     "Every swarm has a room where its backers talk. Anyone can read it with swarm_chat. Backers post on the swarm's page after signing in with Tempo Wallet, mention each other by username (or, without one, a name made from their address such as @quark-1a2b), and steer with @swarm: such a message puts an amount of its author's backing, not yet behind a note, behind the rest of the message as a note, which weighs like any other note and reaches the agent at once if it is working.",
     'To answer questions about what the swarms found or did, search first (swarms_search with keywords; set swarm to include that swarm\'s feed of tool calls, commands, machines and messages), then read what matched with swarm_updates, swarm_answer, swarm_get or swarm_feed, and cite the swarm and when. swarms_list shows the funded swarms. Reading is free and needs no account.',
-    `Fund only when the user asks to. swarm_pledge returns a Tempo Wallet link and user code to show the user, who approves on any device; then swarm_pledge_status with wait reports when it is active. swarm_contribute prepares a one-off transfer (the swarm's address, the memo for a note, call data and a link to the page that sends it) and counts one by its hash. swarm_budget returns a link to the swarm's page with a daily budget filled in, which the user approves in Tempo Wallet. A pledge is at least ${Memo.decimal(Store.minPledge)} of its token. swarm_wait waits up to ${Operations.maxWait} s for the agent's next update.`,
+    `Fund only when the user asks to. swarm_pledge returns a Tempo Wallet link and user code to show the user, who approves on any device; then swarm_pledge_status with wait reports when it is active. swarm_contribute prepares a one-off transfer (the swarm's address, the memo for a note, call data and a link to the page that sends it) and counts one by its hash. swarm_budget returns a link to the swarm's page with a monthly budget filled in, which the user approves in Tempo Wallet. A pledge is at least ${Memo.decimal(Store.minPledge)} of its token. swarm_wait waits up to ${Operations.maxWait} s for the agent's next update.`,
   ].join('\n\n')
 }
 
@@ -47,7 +47,7 @@ function create(env: Cloudflare.Env, origin: string) {
     {
       annotations: reading,
       description:
-        'List the funded swarms, most recently active first (at most 100), each with its title, goal, status, money raised, spent and remaining, daily budgets, its wallet, machines, backers and latest answer. status filters: funding (funded, its agent has not started yet), running (its agent is working), paused (out of money; new money resumes it) or done.',
+        'List the funded swarms, most recently active first (at most 100), each with its title, goal, status, money raised, spent and remaining, monthly budgets, its wallet, machines, backers and latest answer. status filters: funding (funded, its agent has not started yet), running (its agent is working), paused (out of money; new money resumes it) or done.',
       inputSchema: Operations.schema.list.shape,
     },
     async (input) => reply(await Operations.list(env, input)),
@@ -58,7 +58,7 @@ function create(env: Cloudflare.Env, origin: string) {
     {
       annotations: reading,
       description:
-        "One swarm: its goal, status and money, its latest answer, every update (time, what it cost and a short excerpt; read them in full with swarm_updates), whether its agent is working and since when, the steering notes ranked by the money behind them and their share of everything raised, its pledges, transfers and budget pulls, daily budgets and the machines attached now.",
+        "One swarm: its goal, status and money, its latest answer, every update (time, what it cost and a short excerpt; read them in full with swarm_updates), whether its agent is working and since when, the steering notes ranked by the money behind them and their share of everything raised, its pledges, transfers and budget pulls, monthly budgets and the machines attached now.",
       inputSchema: Operations.schema.swarm.shape,
     },
     async (input) => reply(await Operations.get(env, input)),
@@ -95,6 +95,24 @@ function create(env: Cloudflare.Env, origin: string) {
       inputSchema: Operations.schema.feed.shape,
     },
     async (input) => reply(await Operations.feed(env, input)),
+  )
+
+  server.registerTool(
+    'problems_list',
+    { annotations: reading, description: 'The curated idea bank on the New page: each problem with its id, short label, hint, title and full research brief, whether it is open, and the swarm working on it if one is. Pass an open problem id as problem to swarm_create.', inputSchema: {} },
+    async () => reply(await Operations.problems(env)),
+  )
+
+  server.registerTool(
+    'swarm_machines',
+    { annotations: reading, description: "Every machine a swarm used, as its Machines tab shows them: Modal sandboxes from compute_create (with their image, CPU, memory, GPU, lease and timeout), Browserbase browsers, and contributors' lent nanocode hands (label, price, what their owners were paid, requests), each with whether it is connected, when it started and stopped, and every command that ran on it with its output.", inputSchema: Operations.schema.swarm.shape },
+    async (input) => reply(await Operations.machines(env, input)),
+  )
+
+  server.registerTool(
+    'swarm_backers',
+    { annotations: reading, description: "A swarm's Ideas tab: its ideas (notes) ranked by the money behind them, with backers and share, and every backer with what they put in and how (pledge, transfer, budget, lent machine), most first.", inputSchema: Operations.schema.swarm.shape },
+    async (input) => reply(await Operations.backers(env, input)),
   )
 
   server.registerTool(
@@ -181,13 +199,13 @@ function create(env: Cloudflare.Env, origin: string) {
     {
       annotations: { destructiveHint: false, idempotentHint: true, openWorldHint: false, readOnlyHint: true },
       description:
-        "Prepare a daily budget: the swarm may pull up to amount of a stablecoin (usdce, pathusd or ousd) a day from the user's wallet into its own, for 30 days, through a key that can only send that token to the swarm's wallet. It returns a link to the swarm's page with the budget filled in, where the user approves the key in Tempo Wallet; show it to them. swarm_get lists the budget once it is approved. Call it only when the user asks to fund the swarm daily.",
+        "Prepare a monthly budget: the swarm may pull up to amount of a stablecoin (usdce, pathusd or ousd) every 30 days from the user's wallet into its own, the first time as soon as it is approved, for a year, through a key that can only send that token to the swarm's wallet. It returns a link to the swarm's page with the budget filled in, where the user approves the key in Tempo Wallet; show it to them. swarm_get lists the budget once it is approved. Call it only when the user asks to fund the swarm daily.",
       inputSchema: Operations.schema.budget.shape,
     },
     async (input) =>
       reply(await Operations.link(env, input, origin), (value) => ({
         ...value,
-        message: `Open ${value.link} and approve the daily budget in Tempo Wallet: a key that can send at most ${value.amount} ${value.symbol} a day, only to the swarm's wallet ${value.wallet}, for ${value.days} days. It can be revoked in Tempo Wallet at any time.`,
+        message: `Open ${value.link} and approve the monthly budget in Tempo Wallet: a key that can send at most ${value.amount} ${value.symbol} every 30 days (the first pull happens at once), only to the swarm's wallet ${value.wallet}, for ${value.days} days. It can be revoked in Tempo Wallet at any time.`,
       })),
   )
 

@@ -4,7 +4,8 @@
     "composite": true,
     "tsBuildInfoFile": "node_modules/.tmp/worker.tsbuildinfo",
     "lib": ["es2023"],
-    "types": ["./worker-configuration.d.ts"]
+    "types": ["./worker-configuration.d.ts", "node", "vite/client"],
+    "paths": { "#ssr": ["./src/worker/Ssr.d.ts"] }
   },
   "include": ["src/worker", "src/shared"]
 }

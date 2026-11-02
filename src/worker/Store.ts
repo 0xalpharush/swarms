@@ -14,6 +14,7 @@ export type Row = {
   machines: number
   pool_left: number
   pool_spent: number
+  problem: string | null
   raised: number
   remaining: number
   repo: string | null
@@ -107,7 +108,7 @@ export const repoAt = repoCost + perCall
 
 export const launch = repoAt + reserve + headroom
 
-export const budget = { days: 30, max: 100_000_000n, min: minPledge, period: 86_400 } as const
+export const budget = { days: 365, max: 100_000_000n, min: minPledge, period: 2_592_000 } as const
 
 const totals = `select s.*,
   coalesce((select sum(cast(amount as integer)) from pledges where swarm = s.id and status != 'pending'), 0)
@@ -141,6 +142,7 @@ export function summary(row: Row): Summary {
     id: row.id,
     machines: row.machines,
     pool: Memo.decimal(BigInt(row.pool_left)),
+    problem: row.problem ?? null,
     raised: Memo.decimal(BigInt(row.raised)),
     remaining: Memo.decimal(BigInt(row.remaining)),
     spent: Memo.decimal(BigInt(row.spent)),
@@ -172,13 +174,13 @@ export async function find(env: Cloudflare.Env, id: string) {
 
 export async function insert(
   env: Cloudflare.Env,
-  input: Pick<Row, 'goal' | 'id' | 'title'> & { sealed_wallet: string; wallet: string },
+  input: Pick<Row, 'goal' | 'id' | 'problem' | 'title'> & { sealed_wallet: string; wallet: string },
 ) {
   const now = Date.now()
   await env.DB.prepare(
-    'insert into swarms (id, title, goal, wallet, sealed_wallet, created_at, updated_at) values (?, ?, ?, ?, ?, ?, ?)',
+    'insert into swarms (id, title, goal, problem, wallet, sealed_wallet, created_at, updated_at) values (?, ?, ?, ?, ?, ?, ?, ?)',
   )
-    .bind(input.id, input.title, input.goal, input.wallet, input.sealed_wallet, now, now)
+    .bind(input.id, input.title, input.goal, input.problem, input.wallet, input.sealed_wallet, now, now)
     .run()
 }
 
@@ -322,11 +324,12 @@ export async function allow(
 ) {
   const now = Date.now()
   await env.DB.prepare(
-    'insert into budgets (id, swarm, token, amount, period, expires_at, access_key, sealed_key, authorization, note, note_id, created_at, updated_at) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    'insert into budgets (id, swarm, kind, token, amount, period, expires_at, access_key, sealed_key, authorization, note, note_id, created_at, updated_at) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
   )
     .bind(
       input.id,
       input.swarm,
+      input.period > 0 ? 'budget' : 'pledge',
       input.token,
       input.amount,
       input.period,

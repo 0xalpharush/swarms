@@ -1,13 +1,18 @@
 import * as Answer from '../shared/Answer.ts'
-import type { Account, Artifact, Budget, BudgetRequested, Budgeted, Chatter, Config, Contributed, Contribution, Currency, Detail, Entry, Form, Kind, Live as LiveEvent, Me, Member, Note, Pledge, Pledged, Posted, Requested, Room, Said, Status, Summary, Token, Update, Way } from '../shared/Api.ts'
+import type { Account, Artifact, Budget, BudgetRequested, Budgeted, Chatter, Config, Contributed, Contribution, Currency, Detail, Entry, Form, Kind, Lent, Live as LiveEvent, Me, Member, Note, Pledge, Pledged, Posted, Requested, Room, Said, Status, Summary, Token, Update, Way } from '../shared/Api.ts'
 import { decimal, maxNote, units } from '../shared/Memo.ts'
 import * as Mention from '../shared/Mention.ts'
+import { problems } from '../shared/ResearchBrief.ts'
 
 type Line = readonly [Kind, string, (string | null)?, string?]
 
 type Backing = { amount: string; contributor: `0x${string}`; note: string }
 
-type Live = Omit<Detail, 'answer' | 'reason' | 'working'> & { chat: Said[]; cursor: number; flicker: readonly string[]; next: number; script: readonly Line[]; since: number | null; steered: Set<string>; steers: Backing[] }
+type Live = Omit<Detail, 'answer' | 'reason' | 'why' | 'working'> & { chat: Said[]; cursor: number; flicker: readonly string[]; next: number; script: readonly Line[]; since: number | null; steered: Set<string>; steers: Backing[] }
+
+export const pace = typeof window !== 'undefined' && window.top !== window ? 0.2 : 1
+
+export const scene = new Set((typeof location === 'undefined' ? '' : (new URLSearchParams(location.search).get('scene') ?? '')).split(',').filter(Boolean))
 
 const minute = 60_000
 
@@ -15,9 +20,7 @@ const started = Date.now()
 
 export const visitor = '0x7a3f5e1b2c4d6e8f9a0b1c2d3e4f5a6b7c8d9c2e'
 
-export const balance = 1_250_000n
-
-export const balances: Record<Currency, bigint> = { mach: balance, ousd: 420_000n, pathusd: 3_000_000n, usdce: 8_750_000n }
+export const balances: Record<Currency, bigint> = scene.has('broke') ? { mach: 0n, ousd: 0n, pathusd: 0n, usdce: 0n } : { mach: 1_250_000n, ousd: 420_000n, pathusd: 3_000_000n, usdce: 8_750_000n }
 
 const wallet = '0x3c93fC3eA108A4E738c10f64c4360d53C9415e5F'
 
@@ -61,6 +64,7 @@ function build(input: {
   budgets?: readonly (readonly [number, string, Token, string, string, Budget['status'], number, string | null])[]
   gifts?: readonly (readonly [number, string, Token, number, string | null, Contribution['kind']])[]
   pledges: readonly (readonly [number, string, number, string | null, Currency?])[]
+  problem?: string | undefined
   script?: readonly Line[]
   since?: number
   spent: string
@@ -132,9 +136,10 @@ function build(input: {
     notes: [],
     pledges,
     pool: '0',
+    problem: input.problem ?? null,
     raised: '0',
     remaining: '0',
-    wallet: input.budgets || input.gifts ? wallet : null,
+    wallet,
     script: input.script ?? [],
     since: input.status === 'running' ? at(input.since ?? 30) : null,
     spent: input.spent,
@@ -230,6 +235,11 @@ const benchmark: readonly Line[] = [
   ['tool', 'Ran a script: const rows = await Promise.all(models.map((model) => score(model)))', 'const rows = await Promise.all(models.map((model) => score(model)))\nconsole.table(rows)'],
   ['output', 'rust-subset finished', 'Kimi K2.7 passes 37 of 50 Rust tasks, DeepSeek V4.1 Flash 33, GLM-5.3 35. DeepSeek is the cheapest per pass at 0.0004 MACH.', 'rust-subset'],
   ['tool', 'Called kv_set', '{"app":"swarm","key":"results/rust-subset","value":{"kimi-k2.7":37,"deepseek-v4.1-flash":33,"glm-5.3":35}}'],
+  ['machine', "A contributor's machine joined the swarm as hand gpu-box-7a1c (tensorbox's 4090)."],
+  ['tool', '$ nvidia-smi --query-gpu=name,memory.total --format=csv on gpu-box-7a1c', 'name, memory.total [MiB]\nNVIDIA GeForce RTX 4090, 24564 MiB'],
+  ['tool', '$ python -m swebench.harness.run_evaluation --run_id qwen3-coder --max_workers 2 on gpu-box-7a1c', 'Running 75 instances...\n29 resolved, 46 unresolved'],
+  ['tool', 'Called browser_create', '{"minutes":15,"name":"leaderboard-check"}'],
+  ['machine', 'Shutting down a machine', '{"sandboxId":"sb-c41d9e07"}'],
 ]
 
 const parser: readonly Line[] = [
@@ -271,6 +281,7 @@ const fixtures: Live[] = [
       [2, '0.400000', 'usdce', 12, 'Report cost per solved task, not per token', 'pull'],
     ],
     id: 'bench-coders',
+    problem: 'coding-models',
     lines: [
       ['status', 'Told the agent to keep going, with $2.68 left.'],
       ['steer', 'Steered the agent toward "Include Qwen3-Coder and Kimi K2.7 even if they are slow"', '1.55 MACH behind it, 36.5% of everything contributed'],
@@ -304,6 +315,7 @@ const fixtures: Live[] = [
     budgets: [[4, '0.250000', 'pathusd', '0.180000', '0.070000', 'active', 40, 'Measure cost per GiB, not just throughput']],
     gifts: [[4, '0.180000', 'pathusd', 38, 'Measure cost per GiB, not just throughput', 'pull']],
     id: 'json-terabyte',
+    problem: 'json-terabyte',
     lines: [['status', 'Started working with $0.62 to spend.'], ...parser],
     pledges: [
       [3, '0.500000', 68, 'Measure cost per GiB, not just throughput'],
@@ -357,6 +369,7 @@ const fixtures: Live[] = [
     goal: 'Reproduce the nanoGPT speedrun on a single T4 and see how close a 15-minute budget gets to the 3.28 validation loss record.',
     updates: [],
     id: 'speedrun-t4',
+    problem: 'small-model-math',
     lines: [['status', 'Created. The first pledge starts its agent.']],
     pledges: [],
     spent: '0',
@@ -389,12 +402,33 @@ const fixtures: Live[] = [
   }),
 ]
 
-function delay<T>(value: T, ms = 160) {
-  return new Promise<T>((resolve) => setTimeout(() => resolve(structuredClone(value)), ms))
+function delay<T>(value: T, wanted = 160) {
+  const ms = wanted * pace
+  if (scene.has('wait')) return new Promise<T>(() => {})
+  if (scene.has('down')) return new Promise<T>((_, reject) => setTimeout(() => reject(fail(503, 'unavailable', 'Swarms is not answering right now.')), ms))
+  return steady(value, ms)
+}
+
+function steady<T>(value: T, ms = 160) {
+  return new Promise<T>((resolve) => setTimeout(() => resolve(structuredClone(value)), ms * pace))
+}
+
+const reasons = {
+  costly: "Waiting for money: the agent's next model call holds $0.2147, more than the $0.2083 any one contribution can pay at once. A contribution or budget pull that can cover it starts it again.",
+  money: 'Waiting for money: $0.0038 is payable now, less than one model call holds. New money keeps it going.',
+  repo: 'Waiting for $1.19 payable, with $1.04 of it from one funder, so the swarm can open its $1 code repository and still work; $0.60 is payable now.',
+  rest: 'The agent hit 3 errors in a row, so the swarm stopped to rest. New money restarts it, and so does the next budget pull at 16:37 UTC.',
+} as const
+
+function reason(swarm: Live) {
+  const picked = (['costly', 'repo', 'rest'] as const).find((key) => scene.has(key)) ?? 'money'
+  if (swarm.status === 'paused') return reasons[picked]
+  if (swarm.status === 'funding' && picked === 'repo') return reasons.repo
+  return null
 }
 
 function find(key: string) {
-  const swarm = fixtures.find((item) => item.id === key)
+  const swarm = fixtures.find((item) => item.id === key.split('~')[0])
   if (!swarm) return Promise.reject(Object.assign(new Error('No swarm has this id.'), { code: 'not_found', status: 404 }))
   tick(swarm)
   return Promise.resolve(swarm)
@@ -411,6 +445,7 @@ function summary(swarm: Live): Summary {
     id: swarm.id,
     machines: swarm.machines,
     pool: swarm.pool,
+    problem: swarm.problem,
     raised: swarm.raised,
     remaining: swarm.remaining,
     spent: swarm.spent,
@@ -431,16 +466,17 @@ function detail(swarm: Live): Detail {
     hands: swarm.hands,
     notes: swarm.notes,
     pledges: swarm.pledges,
-    reason: swarm.status === 'paused' ? 'Waiting for money: a contribution, budget or pledge keeps it going.' : null,
+    reason: reason(swarm),
+    why: reason(swarm) ? ((['costly', 'repo', 'rest'] as const).find((key) => scene.has(key)) ?? (swarm.status === 'funding' ? 'unfunded' : 'money')) : null,
     updates: swarm.updates,
     working: swarm.since === null ? null : { since: swarm.since },
   }
 }
 
 export function config(): Promise<Config> {
-  return delay({
+  return steady({
     auth: '/v1/auth',
-    budget: { days: 30, max: '100.000000', min: '2.000000', period: 86_400 },
+    budget: { days: 365, max: '100.000000', min: '2.000000', period: 2_592_000 },
     chainId: 4217,
     explorer: 'https://explore.tempo.xyz',
     gateway: 'https://gateway.tempo-dev.workers.dev',
@@ -460,7 +496,14 @@ export function config(): Promise<Config> {
 
 export function swarms() {
   for (const swarm of fixtures) tick(swarm)
-  return delay({ swarms: fixtures.map(summary) })
+  return delay({ swarms: scene.has('empty') ? [] : scene.has('many') ? [...fixtures.map(summary), ...crowd()] : fixtures.map(summary) })
+}
+
+function crowd() {
+  return problems.map((problem, index): Summary => {
+    const base = summary(fixtures[index % fixtures.length]!)
+    return { ...base, id: `${base.id}~${index}`, problem: null, title: problem.title }
+  })
 }
 
 export async function swarm(key: string) {
@@ -544,9 +587,9 @@ export function live(key: string, listener: (event: LiveEvent) => void) {
   }
 }
 
-export function create(input: { goal: string; title: string }) {
+export function create(input: { goal: string; problem?: string; title: string }) {
   const key = id(`${input.title}:${Date.now()}`)
-  const swarm = build({ age: 0, goal: input.goal, id: key, lines: [['status', 'Created. The first pledge starts its agent.']], pledges: [], spent: '0', status: 'funding', title: input.title, updates: [] })
+  const swarm = build({ age: 0, goal: input.goal, id: key, problem: input.problem, lines: [['status', 'Created. The first pledge starts its agent.']], pledges: [], spent: '0', status: 'funding', title: input.title, updates: [] })
   fixtures.unshift(swarm)
   return delay(summary(swarm), 400)
 }
@@ -581,12 +624,14 @@ function begin(swarm: Live) {
   if (swarm.script.length === 0) swarm.script = translation
 }
 
+export const sent = new Map<string, bigint>()
+
 export async function contribute(key: string, input: { hash: string; note?: string }): Promise<Contributed> {
   const swarm = await find(key)
-  const contribution: Contribution = { amount: '0.250000', at: Date.now(), budget: null, contributor: visitor, hash: input.hash as `0x${string}`, kind: 'transfer', note: input.note?.trim() || null, token: 'usdce' }
+  const contribution: Contribution = { amount: decimal(sent.get(input.hash) ?? 250_000n), at: Date.now(), budget: null, contributor: visitor, hash: input.hash as `0x${string}`, kind: 'transfer', note: input.note?.trim() || null, token: 'usdce' }
   swarm.contributions.push(contribution)
   if (contribution.note) swarm.steered.add(contribution.note)
-  push(swarm, 'funds', `${visitor.slice(0, 6)}…${visitor.slice(-4)} sent 0.25 USDC.e${contribution.note ? ' with a note' : ''}`, contribution.note, Date.now())
+  push(swarm, 'funds', `${visitor.slice(0, 6)}…${visitor.slice(-4)} sent ${contribution.amount} USDC.e${contribution.note ? ' with a note' : ''}`, contribution.note, Date.now())
   begin(swarm)
   settle(swarm)
   return delay({ contribution, swarm: summary(swarm) }, 500)
@@ -604,7 +649,7 @@ export async function allow(key: string, budget: string): Promise<Budgeted> {
   const request = allowances.get(budget)
   if (!request) throw Object.assign(new Error('No pending budget has this id.'), { code: 'not_found', status: 404 })
   allowances.delete(budget)
-  const allowed: Budget = { amount: request.amount, at: Date.now(), contributor: visitor, detail: null, expiresAt: Date.now() + 30 * 86_400_000, id: budget, left: request.amount, nextAt: null, note: request.note, period: 86_400, pulled: '0.000000', status: 'active', token: request.token }
+  const allowed: Budget = { amount: request.amount, at: Date.now(), contributor: visitor, detail: null, expiresAt: Date.now() + 365 * 86_400_000, id: budget, left: '0.000000', nextAt: null, note: request.note, period: 2_592_000, pulled: request.amount, status: 'active', token: request.token }
   swarm.budgets.push(allowed)
   push(swarm, 'funds', `${visitor.slice(0, 6)}…${visitor.slice(-4)} set a budget of ${request.amount} ${request.token === 'usdce' ? 'USDC.e' : request.token === 'pathusd' ? 'pathUSD' : 'OUSD'} a day`, request.note, Date.now())
   begin(swarm)
@@ -825,6 +870,7 @@ function members(swarm: Live): Member[] {
 function me(swarm: Live, who: `0x${string}` | undefined): Me | null {
   if (!who) return null
   const found = members(swarm).find((member) => member.address === who)
+  if (found && scene.has('spent')) return { ...found, available: '0.000000', member: true, steered: found.backed }
   return found ? { ...found, member: true } : { address: who, available: '0.000000', backed: '0.000000', handle: called(who), member: false, since: 0, steered: '0.000000', ways: [] }
 }
 
@@ -836,6 +882,11 @@ function tell(key: string, event: Chatter) {
   for (const listener of listeners.get(key) ?? []) listener(event)
 }
 
+export function lent(key: string): { hands: Lent[] } {
+  if (key !== 'bench-coders') return { hands: [] }
+  return { hands: [{ at: Date.now() - 40 * 60_000, channels: '0.042000', charged: '0.042000', connected: true, earned: '0.042000', label: "tensorbox's 4090", name: 'gpu-box-7a1c', price: '$0.002 a command', requests: 21 }] }
+}
+
 export async function room(key: string, query: { after?: number; before?: number }, who: `0x${string}` | undefined): Promise<Room> {
   const swarm = seed(await find(key))
   const messages = query.before ? swarm.chat.filter((item) => item.id < (query.before ?? 0)).slice(-100) : query.after ? swarm.chat.filter((item) => item.id > (query.after ?? 0)) : swarm.chat.slice(-100)
@@ -844,6 +895,8 @@ export async function room(key: string, query: { after?: number; before?: number
 
 export async function say(key: string, input: { steer?: string; text: string }, who: `0x${string}` | undefined): Promise<Posted> {
   const swarm = seed(await find(key))
+  if (scene.has('stall')) return new Promise<Posted>(() => {})
+  if (scene.has('mute')) return new Promise<Posted>((_, reject) => setTimeout(() => reject(fail(503, 'unavailable', 'The room is not answering right now.')), 600))
   if (!who) throw fail(401, 'unauthorized', 'Sign in with Tempo Wallet to post in a room.')
   const self = me(swarm, who)
   if (!self?.member) throw fail(403, 'not_member', 'Back this swarm first: a pledge, a transfer, a daily budget or a lent machine lets you post in its room.')

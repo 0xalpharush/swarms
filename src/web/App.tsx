@@ -1,17 +1,25 @@
 import { lazy, Suspense, useEffect, useState } from 'react'
 import type { Config } from '../shared/Api.ts'
 import { decimal } from '../shared/Memo.ts'
-import { fixture } from './api.ts'
 import { mach, short } from './format.ts'
-import { Docs } from './Docs.tsx'
 import { message, useConfig, useWallet } from './hooks.ts'
-import { Home } from './Home.tsx'
-import { New } from './New.tsx'
+import { Home, Join } from './Home.tsx'
 import { Link, navigate, usePath } from './router.tsx'
-import { Swarm } from './Swarm.tsx'
+import { Lost } from './Lost.tsx'
+import { page } from './pages.tsx'
 import * as Wallet from './wallet.ts'
 
 const Repo = lazy(() => import('./Repo.tsx').then((module) => ({ default: module.Repo })))
+
+const New = page('new', () => import('./New.tsx').then((module) => module.New))
+
+const Docs = page('docs', () => import('./Docs.tsx').then((module) => module.Docs))
+
+const Swarm = page('swarm', () => import('./Swarm.tsx').then((module) => module.Swarm))
+
+const About = page('about', () => import('./About.tsx').then((module) => module.About))
+
+const Board = lazy(() => import('./Board.tsx').then((module) => ({ default: module.Board })))
 
 function WalletButton(props: { config: Config | undefined }) {
   const wallet = useWallet()
@@ -23,6 +31,13 @@ function WalletButton(props: { config: Config | undefined }) {
     if (token && !known) void Wallet.identify()
   }, [token, known])
 
+  if (wallet.address && wallet.pending)
+    return (
+      <span aria-busy="true" className="btn btn-medium wallet">
+        <span>{wallet.account ? '@' + wallet.account.handle : short(wallet.address)}</span>
+        {wallet.balance !== undefined && <span className="wallet-balance">{mach(decimal(wallet.balance))} MACH</span>}
+      </span>
+    )
   if (wallet.address)
     return (
       <a className="btn btn-medium wallet" href={props.config ? `${props.config.explorer}/address/${wallet.address}` : undefined} rel="noreferrer" target="_blank" title={wallet.account ? `@${wallet.account.handle} · ${wallet.address}` : 'Your Tempo Wallet'}>
@@ -33,7 +48,6 @@ function WalletButton(props: { config: Config | undefined }) {
   return (
     <button
       className="btn btn-medium wallet"
-      disabled={!props.config}
       onClick={() => {
         if (props.config) Wallet.connect(props.config).then(() => setError(undefined), (reason: unknown) => setError(message(reason)))
       }}
@@ -54,29 +68,12 @@ function Header(props: { config: Config | undefined; path: string }) {
         </Link>
       </p>
       <div className="header-end">
+        <Link className={props.path === '/about' ? 'game-nav game-nav-on' : 'game-nav'} to="/about">About</Link>
         <Link className={props.path === '/new' ? 'game-nav game-nav-on' : 'game-nav'} to="/new">Start<span className="nav-long"> a swarm</span></Link>
-        <Link className={props.path === '/' || props.path.startsWith('/s/') ? 'game-nav game-nav-on' : 'game-nav'} to="/">Join<span className="nav-long"> a swarm</span></Link>
+        <Link className={props.path === '/join' || props.path.startsWith('/s/') ? 'game-nav game-nav-on' : 'game-nav'} to="/join">Join<span className="nav-long"> a swarm</span></Link>
         <WalletButton config={props.config} />
       </div>
     </header>
-  )
-}
-
-function Footer(props: { config: Config | undefined }) {
-  return (
-    <footer className="footer game-footer">
-      <p>
-        Open science. Powered by{' '}
-        <a href={props.config?.gateway ?? 'https://gateway.tempo-dev.workers.dev'} rel="noreferrer" target="_blank">
-          Tempo
-        </a>
-        .
-      </p>
-      <p>
-        <Link to="/docs">For developers</Link>
-      </p>
-      {fixture && <p className="tag tag-on">Fixture data</p>}
-    </footer>
   )
 }
 
@@ -87,7 +84,7 @@ export function App() {
   const code = /^\/s\/([^/]+)\/code\/?$/.exec(path)?.[1]
 
   useEffect(() => {
-    if (!swarm && !code) document.title = path === '/new' ? 'Fund a new question · Swarms' : path === '/docs' ? 'API and MCP · Swarms' : 'Swarms · Fund breakthroughs'
+    if (!swarm && !code) document.title = path === '/new' ? 'Start a breakthrough · Swarms' : path === '/join' ? 'Be part of the future · Swarms' : path === '/about' ? 'About · Swarms' : path === '/docs' ? 'API and MCP · Swarms' : 'Swarms · Fund breakthroughs'
   }, [path, swarm, code])
 
   useEffect(() => {
@@ -101,14 +98,26 @@ export function App() {
     return () => removeEventListener('keydown', listener)
   }, [])
 
+  if (path === '/board')
+    return (
+      <Suspense fallback={null}>
+        <Board />
+      </Suspense>
+    )
+
   return (
     <div className="app">
       <Header config={config} path={path} />
       <main>
+        <Suspense fallback={<section aria-busy="true" className="page lost" />}>
         {path === '/' ? (
           <Home />
+        ) : path === '/join' ? (
+          <Join />
         ) : path === '/new' ? (
           <New config={config} />
+        ) : path === '/about' ? (
+          <About />
         ) : path === '/docs' ? (
           <Docs config={config} />
         ) : code ? (
@@ -118,15 +127,13 @@ export function App() {
         ) : swarm ? (
           <Swarm config={config} id={decodeURIComponent(swarm)} key={swarm} />
         ) : (
-          <section className="page missing">
-            <h1 className="display">Nothing here</h1>
-            <p className="lead">
-              <Link to="/">See all swarms</Link>
-            </p>
-          </section>
+          <Lost title="Nothing out here.">
+            <Link className="lost-row" to="/join">Join one <span aria-hidden="true">→</span></Link>
+            <Link className="lost-row" to="/new">Start one <span aria-hidden="true">→</span></Link>
+          </Lost>
         )}
+        </Suspense>
       </main>
-      {!swarm && <Footer config={config} />}
     </div>
   )
 }

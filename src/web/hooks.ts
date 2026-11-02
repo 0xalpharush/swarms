@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import type { Config, Entry } from '../shared/Api.ts'
 import * as Api from './api.ts'
+import { boot, here, seeded, server } from './boot.ts'
 import * as Wallet from './wallet.ts'
 
 export function message(error: unknown) {
@@ -8,7 +9,7 @@ export function message(error: unknown) {
 }
 
 export function useConfig() {
-  const [config, setConfig] = useState<Config>()
+  const [config, setConfig] = useState<Config | undefined>(() => boot()?.config)
   useEffect(() => {
     let alive = true
     const load = () => {
@@ -31,8 +32,40 @@ export function useConfig() {
   return config
 }
 
-export function usePoll<T>(load: () => Promise<T>, ms: number, key: string) {
-  const [state, setState] = useState<{ data?: T; error?: string }>({})
+const kept = new Map<string, unknown>()
+
+function shelf(key: string) {
+  const search = here().searchParams
+  return `poll:${search.has('fixture') ? `fixture:${search.get('scene') ?? ''}:` : ''}${key}`
+}
+
+function recall<T>(key: string): T | undefined {
+  const name = shelf(key)
+  if (kept.has(name)) return kept.get(name) as T
+  try {
+    if (server) return undefined
+    const saved = sessionStorage.getItem(name)
+    return saved ? (JSON.parse(saved) as T) : undefined
+  } catch {
+    return undefined
+  }
+}
+
+function keep(key: string, data: unknown) {
+  const name = shelf(key)
+  kept.set(name, data)
+  try {
+    sessionStorage.setItem(name, JSON.stringify(data))
+  } catch {}
+}
+
+export function usePoll<T>(load: () => Promise<T>, ms: number, key: string, options: { keep?: boolean } = {}) {
+  const [state, setState] = useState<{ data?: T | undefined; error?: string }>(() => {
+    const data = seeded<T>(key) ?? (options.keep ? recall<T>(key) : undefined)
+    const failed = seeded<string>(`!${key}`)
+    return data === undefined ? (failed ? { error: failed } : {}) : { data }
+  })
+  const warm = useRef(state.data !== undefined || state.error !== undefined)
   const [version, setVersion] = useState(0)
   const current = useRef(load)
 
@@ -46,13 +79,18 @@ export function usePoll<T>(load: () => Promise<T>, ms: number, key: string) {
     const run = async () => {
       try {
         const data = await current.current()
-        if (alive) setState({ data })
+        if (!alive) return
+        if (options.keep) keep(key, data)
+        setState({ data })
       } catch (error) {
         if (alive) setState((previous) => ({ ...previous, error: message(error) }))
       }
       if (alive) timer = setTimeout(() => void run(), ms)
     }
-    void run()
+    if (warm.current) {
+      warm.current = false
+      timer = setTimeout(() => void run(), ms)
+    } else void run()
     return () => {
       alive = false
       clearTimeout(timer)
@@ -126,12 +164,19 @@ export function useLive(id: string, active: boolean, onEntry: (entry: Entry) => 
 }
 
 export function useNow(ms = 1000) {
-  const [now, setNow] = useState(() => Date.now())
+  const [now, setNow] = useState(() => boot()?.now ?? Date.now())
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), ms)
     return () => clearInterval(timer)
   }, [ms])
   return now
+}
+
+function fits(query: string, mobile: boolean) {
+  const width = mobile ? 390 : 1440
+  const min = /min-width:\s*(\d+)px/.exec(query)?.[1]
+  const max = /max-width:\s*(\d+)px/.exec(query)?.[1]
+  return (min === undefined || width >= Number(min)) && (max === undefined || width <= Number(max))
 }
 
 export function useMedia(query: string) {
@@ -142,11 +187,12 @@ export function useMedia(query: string) {
       return () => list.removeEventListener('change', listener)
     },
     () => matchMedia(query).matches,
+    () => fits(query, boot()?.mobile ?? false),
   )
 }
 
 export function useWallet() {
-  return useSyncExternalStore(Wallet.subscribe, Wallet.snapshot, Wallet.snapshot)
+  return useSyncExternalStore(Wallet.subscribe, Wallet.snapshot, Wallet.initial)
 }
 
 export function usePresence<T>(items: readonly T[], key: (item: T) => string, ms = 700) {

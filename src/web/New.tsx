@@ -1,90 +1,115 @@
 import { useEffect, useRef, useState } from 'react'
-import type { Config, Currency, Summary } from '../shared/Api.ts'
-import { decimal, maxNote, units } from '../shared/Memo.ts'
+import type { Config } from '../shared/Api.ts'
 import * as Api from './api.ts'
-import { mach, symbols } from './format.ts'
-import { message } from './hooks.ts'
-import { Amount, code, disclosure, NoteField, pledge, type Step, Tokens, valid } from './Pledge.tsx'
-import { brief, questions } from './research.ts'
+import { here } from './boot.ts'
+import { Fund, type Target } from './Contribute.tsx'
+import { usePoll } from './hooks.ts'
+import { brief, open, problems } from './research.ts'
 import { Link, navigate } from './router.tsx'
-import * as Wallet from './wallet.ts'
 
-const stages = ['Choose', 'Equip', 'Launch'] as const
-const working = { create: 'Preparing your swarm…', request: 'Preparing your budget…', approve: 'Approve in Tempo Wallet…', confirm: 'Launching…' } as const
-const titles = ['Pick your first quest.', 'Choose a budget.', 'Ready for discovery?'] as const
+const stages = ['Start', 'Fund'] as const
+const titles = ['Start a breakthrough.', 'Fund it.'] as const
+const prefill = { amount: '2', mode: 'send', note: '', token: undefined } as const
 
 function starter() {
-  const asked = new URLSearchParams(location.search).get('q')
-  return asked === null ? undefined : questions[Number(asked)]
+  const asked = here().searchParams.get('q')
+  return asked === null ? undefined : problems.find((problem) => problem.id === asked)
 }
 
 export function New(props: { config: Config | undefined }) {
   const [picked] = useState(starter)
+  const [list] = usePoll(() => Api.swarms(), 30_000, 'swarms', { keep: true })
+  const [page, setPage] = useState(0)
+  const [peek, setPeek] = useState<string | undefined>(() => (picked ? picked.id : undefined))
+  const free = list.data ? open(list.data.swarms) : list.error ? [...problems] : []
+  const shown = free.length > 6 ? Array.from({ length: 6 }, (_, index) => free[(page * 6 + index) % free.length]!).filter((item, index, all) => all.indexOf(item) === index) : free
   const [stage, setStage] = useState(picked ? 1 : 0)
   const [question, setQuestion] = useState<string>(picked?.title ?? '')
   const [title, setTitle] = useState<string>(picked?.title ?? '')
   const [goal, setGoal] = useState<string>(picked?.goal ?? '')
-  const [amount, setAmount] = useState('2')
+  const [problem, setProblem] = useState<string | undefined>(picked?.id)
   const [note, setNote] = useState('')
-  const [token, setToken] = useState<Currency>('mach')
-  const [state, setState] = useState<{ created?: Summary; error?: string; short?: boolean; step?: Step | 'create' }>({})
+  const [created, setCreated] = useState<Target>()
   const heading = useRef<HTMLHeadingElement>(null)
-  const busy = state.step !== undefined
   const questionReady = question.trim().length >= 10
-  const budgetReady = valid(amount, props.config) && !!props.config && note.length <= maxNote
-  const ready = title.trim().length >= 3 && title.trim().length <= 80 && goal.trim().length >= 10 && goal.trim().length <= 2000 && budgetReady && !busy
+  const briefReady = title.trim().length >= 3 && title.trim().length <= 80 && goal.trim().length >= 10 && goal.trim().length <= 2000
 
   useEffect(() => { heading.current?.focus({ preventScroll: true }) }, [stage])
 
-  const submit = async () => {
-    const config = props.config
-    if (!config || !ready) return
-    let created = state.created
-    try {
-      if (!created) {
-        setState({ step: 'create' })
-        created = await Api.create({ goal: goal.trim(), title: title.trim() })
-      }
-      const swarm = created
-      await pledge(config, swarm.id, amount, note, token, (step) => setState({ created: swarm, step }))
-      navigate(`/s/${swarm.id}`)
-    } catch (error) {
-      setState({ ...(created ? { created } : {}), error: message(error), short: code(error) === 'insufficient_balance' })
-    }
+  const target = async (step: (step: 'create') => void) => {
+    if (created) return created
+    step('create')
+    const swarm = await Api.create({ goal: goal.trim(), title: title.trim(), ...(problem ? { problem } : {}) })
+    const next = { id: swarm.id, wallet: swarm.wallet }
+    setCreated(next)
+    return next
   }
 
   return (
     <div className="page quest-onboarding">
       <nav aria-label="Quest setup" className="quest-steps">
-        <Link className="quest-step" data-reached="true" to="/"><span>✓</span>Path</Link>
-        {stages.map((label, index) => <button aria-current={stage === index ? 'step' : undefined} className="quest-step" data-reached={index <= stage} disabled={busy || index > stage || (index === 0 && !!state.created)} key={label} onClick={() => setStage(index)} type="button"><span>{index < stage ? '✓' : `0${index + 2}`}</span>{label}</button>)}
+        {stages.map((label, index) => <button aria-current={stage === index ? 'step' : undefined} className="quest-step" data-reached={index <= stage} disabled={index > stage} key={label} onClick={() => { if (index === 0) setCreated(undefined); setStage(index) }} type="button"><span>{index < stage ? '✓' : `0${index + 1}`}</span>{label}</button>)}
       </nav>
-      <div className="quest-heading"><p className="label">Path A · New swarm</p><h1 ref={heading} tabIndex={-1}>{titles[stage]}</h1><p>{stage === 0 ? 'Choose a challenge. Your team takes it from here.' : stage === 1 ? 'A fixed budget. You stay in control.' : 'Your question. Your team. One shared adventure.'}</p></div>
-      <form onSubmit={(event) => { event.preventDefault(); if (stage === 0 && questionReady) { if (!goal) { const next = brief(question); setTitle(next.title); setGoal(next.goal) } setStage(1) } else if (stage === 1 && budgetReady) setStage(2); else if (stage === 2) void submit() }}>
+      <div className="quest-heading"><h1 ref={heading} tabIndex={-1}>{titles[stage]}</h1></div>
+      <form onSubmit={(event) => { event.preventDefault(); if (stage === 0 && questionReady) { if (!goal) { const next = brief(question); setTitle(next.title); setGoal(next.goal) } setStage(1) } }}>
         {stage === 0 && <div className="quest-choose">
-          <div className="quest-options">{questions.map((item, index) => <button className="quest-option" key={item.title} onClick={() => { setQuestion(item.title); setTitle(item.title); setGoal(item.goal); setStage(1) }} type="button"><span aria-hidden="true" className={`quest-emblem quest-emblem-${index}`}><i /><i /><i /></span><span className="quest-option-title">{item.label}</span><span className="quest-option-hint">{item.hint}</span><span aria-hidden="true" className="quest-option-arrow">↗</span></button>)}</div>
-          <label className="quest-custom" htmlFor="question">Or ask your own<textarea id="question" maxLength={1000} onChange={(event) => { setQuestion(event.target.value); setTitle(''); setGoal('') }} placeholder="What would you love to figure out?" rows={2} value={question} /></label>
-          <button className="btn btn-high quest-next" disabled={!questionReady} type="submit">Continue <span aria-hidden="true">→</span></button>
+          <ol className="tiles-swarm ideas" data-loading={!list.data && !list.error}>
+            {!list.data && !list.error && Array.from({ length: 4 }, (_, index) => <li className="tile-ghost" key={index} />)}
+            {list.data && !free.length && <li><Link className="tile-swarm" to="/join"><i className="tile-mark" /><span className="tile-title">Every idea has a swarm. Join one</span><span className="tile-raised">→</span></Link></li>}
+            {shown.map((item) => {
+              const opened = peek === item.id
+              const choose = () => { setPeek(item.id); setQuestion(item.title); setTitle(item.title); setGoal(item.goal); setProblem(item.id) }
+              return (
+                <li data-open={opened} key={item.id}>
+                  <button aria-expanded={opened} className="tile-swarm" onClick={() => (opened ? goal.trim().length >= 10 && setStage(1) : choose())} type="button">
+                    <i className="tile-mark" data-tone={problems.indexOf(item) % 3} />
+                    <span className="tile-title">{item.label}</span>
+                  </button>
+                  {opened && (
+                    <div className="tile-swarm tile-own tile-edit">
+                      <span className="tile-more">
+                        <span className="tile-lead">{item.hint}</span>
+                        <label className="tile-edit-label" htmlFor={`brief-${item.id}`}>The brief, yours to edit</label>
+                        <textarea id={`brief-${item.id}`} maxLength={2000} onChange={(event) => setGoal(event.target.value)} rows={6} value={goal} />
+                        <button className="btn btn-high quest-next" disabled={goal.trim().length < 10} onClick={() => setStage(1)} type="button">Next <span aria-hidden="true">→</span></button>
+                      </span>
+                    </div>
+                  )}
+                </li>
+              )
+            })}
+            {free.length > 6 && <li><button className="tile-swarm tile-quiet" onClick={() => { setPage(page + 1); setPeek(undefined) }} type="button"><i className="tile-mark" data-tone="more" /><span className="tile-title">More ideas</span><span className="tile-raised">↻</span></button></li>}
+            <li data-open={peek === 'own'}>
+              {peek === 'own' ? (
+                <div className="tile-swarm tile-own">
+                  <i className="tile-mark" data-tone="own" />
+                  <label className="tile-title" htmlFor="question">Your own idea</label>
+                  <span className="tile-more">
+                    <textarea autoFocus id="question" maxLength={1000} onChange={(event) => { setQuestion(event.target.value); setTitle(''); setGoal(''); setProblem(undefined) }} placeholder="What should we crack?" rows={3} value={question} />
+                    <button className="btn btn-high quest-next" disabled={!questionReady} type="submit">Next <span aria-hidden="true">→</span></button>
+                  </span>
+                </div>
+              ) : (
+                <button className="tile-swarm tile-quiet" onClick={() => setPeek('own')} type="button"><i className="tile-mark" data-tone="own" /><span className="tile-title">Your own idea</span><span className="tile-raised">+</span></button>
+              )}
+            </li>
+          </ol>
         </div>}
         {stage === 1 && <div className="quest-budget">
-          <p className="quest-chosen"><span aria-hidden="true">✧</span>{title}</p>
-          <Amount config={props.config} label="Starting budget" onChange={setAmount} suffix={symbols[token]} value={amount} />
-          <details className="game-details"><summary>More options</summary><Tokens config={props.config} onChange={setToken} value={token} /><NoteField hint="Tell the team what to prioritize." onChange={setNote} value={note} /></details>
-          <p className="quest-budget-hint">Unused funds return when the quest ends.</p>
-          {!props.config && <p className="quest-wallet-hint" role="status">Connecting to Tempo…</p>}
-          <button className="btn btn-high quest-next" disabled={!budgetReady} type="submit">Review & launch <span aria-hidden="true">→</span></button>
+          <Fund
+            action={(label) => (label === 'Pay' ? 'Launch' : `Launch · ${label.replace('Pay ', '')}`)}
+            config={props.config}
+            least={props.config?.minPledge}
+            locked={!briefReady}
+            note={note}
+            onChange={() => { setCreated(undefined); setStage(0) }}
+            onDone={(swarm) => navigate(`/s/${swarm.id}`)}
+            onNote={setNote}
+            prefill={prefill}
+            target={target}
+            title={title}
+          />
         </div>}
-        {stage === 2 && <div className="quest-review">
-          <div className="quest-launch-emblem" aria-hidden="true"><span className="quest-emblem"><i /><i /><i /></span></div>
-          <h2>{title}</h2><p className="quest-budget-value">{valid(amount, props.config) ? mach(decimal(units(amount))) : amount} <span>{symbols[token]}</span></p>
-          <p className="quest-budget-hint">Your spending limit. No automatic top-ups.</p>
-          <details className="game-details"><summary>Research brief</summary><label className="quest-custom" htmlFor="title">Quest name<input disabled={!!state.created || busy} id="title" maxLength={80} onChange={(event) => setTitle(event.target.value)} value={title} /></label><label className="quest-custom" htmlFor="goal">What the team will investigate<textarea disabled={!!state.created || busy} id="goal" maxLength={2000} onChange={(event) => setGoal(event.target.value)} rows={6} value={goal} /></label></details>
-          <details className="game-details"><summary>Wallet permissions</summary><p>{disclosure(token)}</p></details>
-          <button className="btn btn-high quest-next" disabled={!ready} type="submit">{state.step ? working[state.step] : state.created ? 'Retry launch' : 'Launch swarm'} <span aria-hidden="true">↗</span></button>
-          <p className="quest-wallet-hint">You'll approve in Tempo Wallet.</p>
-        </div>}
-        {state.error && <p className="error" role="alert">{state.error}{state.short && token === 'mach' && <> <button className="btn btn-minimal" onClick={() => void Wallet.fund(units(amount) - (Wallet.snapshot().balances.mach ?? 0n))} type="button">Add MACH</button></>}</p>}
-        {state.created && !busy && <p className="notice">Your quest is saved. <Link to={`/s/${state.created.id}`}>Open it</Link></p>}
       </form>
     </div>
   )

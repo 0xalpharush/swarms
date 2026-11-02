@@ -1,5 +1,6 @@
 import { type MouseEvent, type ReactNode, useSyncExternalStore } from 'react'
 import { fixture } from './api.ts'
+import { here } from './boot.ts'
 
 function subscribe(listener: () => void) {
   addEventListener('popstate', listener)
@@ -7,13 +8,16 @@ function subscribe(listener: () => void) {
 }
 
 export function usePath() {
-  return useSyncExternalStore(subscribe, () => location.pathname)
+  return useSyncExternalStore(subscribe, () => location.pathname, () => here().pathname)
 }
 
 export function href(path: string) {
   if (!fixture) return path
-  const url = new URL(path, location.origin)
+  const base = here()
+  const url = new URL(path, base.origin)
+  const scene = base.searchParams.get('scene')
   url.searchParams.set('fixture', '')
+  if (scene) url.searchParams.set('scene', scene)
   return `${url.pathname}${url.search}${url.hash}`
 }
 

@@ -1,6 +1,6 @@
 import type { Summary } from '../shared/Api.ts'
 
-export { brief, questions } from '../shared/ResearchBrief.ts'
+export { brief, open, problems } from '../shared/ResearchBrief.ts'
 
 export const areas = [
   { id: 'cryptography', label: 'Cryptography', match: /\b(cryptograph\w*|post.quantum|signature\w*|lattice\w*|encryption|zero.knowledge|zkp)\b/i },

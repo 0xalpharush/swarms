@@ -1,22 +1,30 @@
 import { Hono } from 'hono'
 import * as Artifacts from './Artifacts.ts'
 import * as Operations from './Operations.ts'
+import * as Page from './Page.ts'
 import * as Problem from './Problem.ts'
 import * as Rest from './Rest.ts'
 import * as Sessions from './Sessions.ts'
+import * as Store from './Store.ts'
 import * as XFrames from './XFrames.ts'
 
 export { Swarm } from './Swarm.ts'
 
 const app = new Hono<{ Bindings: Cloudflare.Env }>()
 
-app.get('/x', (c) => XFrames.start(new URL(c.req.url).origin))
+app.get('*', async (c, next) => {
+  const path = new URL(c.req.url).pathname
+  if (!Page.rendered(path) || !(c.req.header('accept') ?? '').includes('text/html')) return next()
+  return Page.page(c.req.raw, c.env)
+})
+
+app.get('/x', async (c) => XFrames.start(new URL(c.req.url).origin, (await Store.list(c.env).catch(() => [])).map((row) => Store.summary(row))))
 
 app.get('/x/card.svg', (c) => XFrames.card(c.req.query('title') ?? 'Fund a research swarm'))
 
 app.get('/x/s/:id', async (c) => {
   const result = await Operations.get(c.env, { swarm: c.req.param('id') })
-  return result.ok ? XFrames.swarm(new URL(c.req.url).origin, result.value) : Problem.json(result)
+  return result.ok ? XFrames.swarm(new URL(c.req.url).origin, result.value) : result.status === 404 ? XFrames.lost(new URL(c.req.url).origin) : Problem.json(result)
 })
 
 app.get('/a/:id/:slug', (c) => c.redirect(`${new URL(c.req.url).pathname}/`, 301))
@@ -47,7 +55,7 @@ app.get('/api/swarms', async (c) => Problem.respond(await Operations.list(c.env,
 
 app.post('/api/swarms', async (c) => Problem.respond(await Operations.create(c.env, await Rest.body(c.req.raw)), 201))
 
-app.get('/api/swarms/:id', async (c) => Problem.respond(await Operations.detail(c.env, { swarm: c.req.param('id') })))
+app.get('/api/swarms/:id', async (c) => Problem.respond(await Operations.detail(c.env, { swarm: c.req.param('id') }, c.req.query('feed') !== '0')))
 
 app.get('/api/swarms/:id/feed', async (c) =>
   Problem.respond(

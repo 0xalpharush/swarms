@@ -1,16 +1,15 @@
 import { type KeyboardEvent, type ReactNode, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
-import type { Config, Detail, Me, Member, Said, Way } from '../shared/Api.ts'
-import { maxNote, units } from '../shared/Memo.ts'
+import type { Config, Detail, Me, Member, Room as RoomState, Said, Way } from '../shared/Api.ts'
+import { seeded } from './boot.ts'
+import { decimal, maxNote, units } from '../shared/Memo.ts'
 import * as Mention from '../shared/Mention.ts'
 import * as Api from './api.ts'
-import { percent, usd } from './format.ts'
+import { percent, usd, minute } from './format.ts'
 import { message as reason, useNow, useWallet } from './hooks.ts'
 import { code } from './Pledge.tsx'
 import * as Wallet from './wallet.ts'
 
 const ways = { budget: 'daily budget', machine: 'machine', pledge: 'pledge', transfer: 'transfer' } as const satisfies Record<Way, string>
-
-const presets = ['0.25', '0.5', '1', '2'] as const
 
 export function tint(address: string) {
   let value = 0
@@ -25,15 +24,8 @@ function merge(list: readonly Said[], more: readonly Said[]) {
   return [...byId.values()].sort((a, b) => a.id - b.id)
 }
 
-function plain(amount: string) {
-  return amount.replace(/(\.\d*?)0+$/, '$1').replace(/\.$/, '')
-}
 
-function minute(at: number) {
-  return new Date(at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })
-}
-
-function Avatar(props: { address: string; handle: string; size?: 'small' }) {
+export function Avatar(props: { address: string; handle: string; size?: 'small' }) {
   return (
     <span aria-hidden className="avatar" data-size={props.size} style={{ background: tint(props.address) }}>
       {props.handle.charAt(0).toUpperCase()}
@@ -57,71 +49,12 @@ function Words(props: { handles: ReadonlySet<string>; me: ReadonlySet<string>; t
   )
 }
 
-function Rename(props: { address: string; name: string | null; onDone: () => void }) {
-  const [open, setOpen] = useState(false)
-  const [value, setValue] = useState('')
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState<string>()
-  const made = Mention.handle(props.address)
-  const wanted = value.trim().replace(/^@/, '').toLowerCase()
-  const wrong = wanted ? Mention.invalid(wanted) : undefined
-
-  if (!open)
-    return (
-      <button
-        className="btn btn-minimal"
-        onClick={() => {
-          setValue(props.name ?? '')
-          setError(undefined)
-          setOpen(true)
-        }}
-        type="button"
-      >
-        {props.name ? 'Rename' : 'Pick a username'}
-      </button>
-    )
-
-  const save = async (name: string | null) => {
-    setBusy(true)
-    setError(undefined)
-    try {
-      await Wallet.rename(name)
-      setOpen(false)
-      props.onDone()
-    } catch (failure) {
-      setError(reason(failure))
-    } finally {
-      setBusy(false)
-    }
-  }
-
+function Backed(props: { onBack: ((note: string) => void) | undefined; steer: NonNullable<Said['steer']> }) {
+  const steer = props.steer
   return (
-    <form
-      className="rename"
-      onSubmit={(event) => {
-        event.preventDefault()
-        if (wanted && !wrong) void save(wanted)
-      }}
-    >
-      <label className="rename-field">
-        <span>@</span>
-        <input aria-label="Username" autoFocus maxLength={Mention.maxName + 1} onChange={(event) => setValue(event.target.value)} placeholder={made} spellCheck={false} value={value} />
-      </label>
-      <div className="rename-actions">
-        <button className="btn btn-high" disabled={busy || !wanted || !!wrong || wanted === props.name} type="submit">
-          {busy ? 'Saving…' : 'Save'}
-        </button>
-        {props.name && (
-          <button className="btn btn-minimal" disabled={busy} onClick={() => void save(null)} type="button">
-            Go back to @{made}
-          </button>
-        )}
-        <button className="btn btn-minimal" onClick={() => setOpen(false)} type="button">
-          Cancel
-        </button>
-      </div>
-      <p className={error || wrong ? 'error' : 'fine'}>{error ?? wrong ?? 'Every room shows it, and others mention you with it. Letters, digits, - and _.'}</p>
-    </form>
+    <button className="said-backed" disabled={!props.onBack} onClick={() => props.onBack?.(steer.note)} type="button" title={`${usd(steer.weight)} in all behind this idea, ${percent(steer.share)} of the money. ${steer.live ? 'Reached the agent at once.' : 'Read when it resumes.'}`}>
+      {usd(steer.amount)}{props.onBack && <b aria-hidden="true">+</b>}
+    </button>
   )
 }
 
@@ -129,6 +62,7 @@ export function Room(props: {
   config: Config | undefined
   onArtifact: (slug: string) => void
   onBack: (note: string) => void
+  onMessages?: (messages: readonly Said[], me: Me | null, members: readonly Member[], online: readonly string[], watching: number) => void
   onSteered: () => void
   onUnread: (count: number) => void
   swarm: Detail
@@ -139,21 +73,20 @@ export function Room(props: {
   const wallet = useWallet()
   const token = wallet.session?.token
   const now = useNow(1000)
-  const [messages, setMessages] = useState<readonly Said[]>([])
-  const [members, setMembers] = useState<readonly Member[]>([])
+  const [seed] = useState(() => seeded<RoomState>(`room:${props.swarm.id}`))
+  const [messages, setMessages] = useState<readonly Said[]>(() => seed?.messages ?? [])
+  const [members, setMembers] = useState<readonly Member[]>(() => seed?.members ?? [])
   const [me, setMe] = useState<Me | null>(null)
-  const [loaded, setLoaded] = useState(false)
+  const [loaded, setLoaded] = useState(!!seed)
   const [failed, setFailed] = useState<string>()
-  const [earlier, setEarlier] = useState(false)
+  const [earlier, setEarlier] = useState(() => (seed?.messages.length ?? 0) >= 100)
   const [online, setOnline] = useState<readonly string[]>([])
   const [watching, setWatching] = useState(0)
   const [typing, setTyping] = useState<Readonly<Record<string, number>>>({})
-  const [roster, setRoster] = useState(false)
   const [text, setText] = useState('')
   const [caret, setCaret] = useState(0)
   const [pick, setPick] = useState(0)
   const [closed, setClosed] = useState(false)
-  const [steer, setSteer] = useState<string>()
   const [sending, setSending] = useState(false)
   const [signing, setSigning] = useState(false)
   const [problem, setProblem] = useState<{ short?: boolean; text: string }>()
@@ -221,6 +154,11 @@ export function Room(props: {
     if (token) line.current?.hello()
   }, [token])
 
+  const onMessages = props.onMessages
+  useEffect(() => {
+    onMessages?.(messages, me, members, online, watching)
+  }, [messages, me, members, online, watching, onMessages])
+
   const newest = messages.at(-1)?.id
   const seen = useRef<number | undefined>(undefined)
   const onUnread = props.onUnread
@@ -253,7 +191,6 @@ export function Room(props: {
   const handleOf = (address: string) => called.get(address as `0x${string}`) ?? Mention.handle(address)
   const handles = new Set(members.flatMap((member) => [member.handle, Mention.handle(member.address)]))
   const myNames = new Set(me ? [me.handle, Mention.handle(me.address)] : [])
-  const refresh = () => void load(last.current)
   const mine = me?.member ? me : undefined
   const query = mine && !closed ? /(^|\s)@([a-z0-9_-]*)$/i.exec(text.slice(0, caret)) : null
   const options = query
@@ -266,8 +203,6 @@ export function Room(props: {
     : []
   const steering = Mention.steers(text)
   const idea = Mention.idea(text)
-  const available = mine ? units(mine.available) : 0n
-  const amount = steer !== undefined && /^\d*\.?\d{0,6}$/.test(steer) && steer !== '' && steer !== '.' ? units(steer) : 0n
   const typers = Object.entries(typing).filter(([address, until]) => until > now && address !== me?.address).map(([address]) => handleOf(address))
 
   const complete = (handle: string) => {
@@ -307,7 +242,6 @@ export function Room(props: {
       requestAnimationFrame(() => list.current?.scrollTo({ top: list.current.scrollHeight }))
       setText('')
       setCaret(0)
-      setSteer(undefined)
       if (amount) props.onSteered()
     } catch (error) {
       setProblem({ short: code(error) === 'insufficient_balance', text: reason(error) })
@@ -324,8 +258,9 @@ export function Room(props: {
       if (idea.length < 3) return setProblem({ text: 'Say what the swarm should do after @swarm.' })
       if (idea.length > maxNote) return setProblem({ text: `Keep the idea to ${maxNote} characters; it becomes a note the agent keeps reading.` })
       setProblem(undefined)
-      setSteer(available >= 500_000n ? '0.5' : available > 0n ? plain(mine.available) : '')
-      return
+      setText('')
+      setCaret(0)
+      return props.onBack(idea)
     }
     void post(body)
   }
@@ -384,80 +319,33 @@ export function Room(props: {
   const here = online.filter((address) => members.some((member) => member.address === address))
 
   let gate: ReactNode = null
-  if (!token)
+  if (!token && wallet.pending) gate = <div aria-busy="true" className="room-gate room-gate-wait" />
+  else if (!token)
     gate = (
       <div className="room-gate">
-        <ol className="room-steps">
-          <li>Back it</li>
-          <li>Sign in</li>
-          <li>Talk and steer</li>
-        </ol>
-        <p>Backers talk here and steer the swarm with <span className="mention" data-swarm="true">@swarm</span>. Anyone can read along.</p>
+        <p className="room-gate-title">Fund it to talk and steer with <span className="mention" data-swarm="true">@swarm</span>.</p>
         <div className="room-gate-actions">
           <button className="btn btn-high" disabled={!props.config || signing} onClick={() => void signIn()} type="button">
-            {signing ? 'Approve in Tempo Wallet…' : 'Sign in with Tempo Wallet'}
+            {signing ? 'Approve in Tempo Wallet…' : 'Sign in'}
           </button>
-          {!done && <button className="btn btn-low" onClick={() => props.onBack('')} type="button">Back this swarm</button>}
+          {!done && <button className="btn btn-low" onClick={() => props.onBack('')} type="button">Fund →</button>}
         </div>
       </div>
     )
   else if (me && !me.member)
     gate = (
       <div className="room-gate">
-        <ol className="room-steps">
-          <li>Back it</li>
-          <li data-done="true">Sign in</li>
-          <li>Talk and steer</li>
-        </ol>
-        <p>
-          You are <b>@{me.handle}</b>. {done ? 'This swarm is done and takes no new backers, so its room is read-only for you.' : 'Back this swarm with any amount, a daily budget or a lent machine to post here.'}
+        <p className="room-gate-title">
+          Hi <b>@{me.handle}</b>. {done ? "It's finished, so the room is read only." : 'Fund it to join in.'}
         </p>
         <div className="room-gate-actions">
-          {!done && <button className="btn btn-high" onClick={() => props.onBack('')} type="button">Back this swarm</button>}
-          <Rename address={me.address} name={wallet.account?.name ?? null} onDone={refresh} />
-          <button className="btn btn-minimal" onClick={() => Wallet.signOut()} type="button">Sign out</button>
+          {!done && <button className="btn btn-high" onClick={() => props.onBack('')} type="button">Fund →</button>}
         </div>
       </div>
     )
 
   return (
     <section aria-label="The swarm's room" className="room">
-      <header className="room-head">
-        <div>
-          <h2>Room</h2>
-          <p className="room-count">
-            {members.length} backer{members.length === 1 ? '' : 's'} · {watching || 1} watching
-          </p>
-        </div>
-        <button aria-expanded={roster} className="room-online" onClick={() => setRoster(!roster)} title="Who backs this swarm" type="button">
-          {(here.length ? here : ranked.map((member) => member.address)).slice(0, 5).map((address) => (
-            <span className="room-face" data-online={online.includes(address)} key={address}>
-              <Avatar address={address} handle={handleOf(address)} size="small" />
-            </span>
-          ))}
-          <span className="room-online-label">{roster ? 'Close' : here.length ? `${here.length} here` : 'Backers'}</span>
-        </button>
-      </header>
-      {roster && (
-        <ol className="roster">
-          {ranked.map((member) => (
-            <li key={member.address}>
-              <button disabled={!mine} onClick={() => mention(member.handle)} title={mine ? `Mention @${member.handle}` : member.address} type="button">
-                <Avatar address={member.address} handle={member.handle} />
-                <span className="roster-name">
-                  @{member.handle}
-                  {member.address === me?.address && <span className="tag">you</span>}
-                  {online.includes(member.address) && <i className="roster-dot" title="Here now" />}
-                </span>
-                <span className="roster-meta">
-                  {usd(member.backed)} in · {member.ways.map((way) => ways[way]).join(', ')}
-                </span>
-              </button>
-            </li>
-          ))}
-          {!ranked.length && <li className="roster-empty">No backers yet. The first one opens the room.</li>}
-        </ol>
-      )}
       <ol
         aria-live="polite"
         className="room-list"
@@ -474,20 +362,22 @@ export function Room(props: {
           </li>
         )}
         {!loaded && <li className="room-empty">{failed ? `Could not load the room. ${failed}` : 'Opening the room…'}</li>}
-        {loaded && !messages.length && <li className="room-empty">Quiet so far. Backers who sign in can say hello, mention each other with @ and steer the swarm with @swarm.</li>}
+        {loaded && !messages.length && <li className="room-empty">Quiet so far. Be the first to say hi.</li>}
         {messages.map((item, index) => {
           const author = item.author
           if (!author)
             return (
               <li className="said said-system" data-artifact={!!item.artifact} key={item.id}>
-                <p>
-                  <Words handles={handles} me={myNames} text={item.text} />
-                  <time dateTime={new Date(item.at).toISOString()}>{minute(item.at)}</time>
-                </p>
-                {item.artifact && (
-                  <button className="said-open" onClick={() => item.artifact && props.onArtifact(item.artifact.slug)} type="button">
-                    Open {item.artifact.title} →
+                {item.artifact ? (
+                  <button className="said-link" onClick={() => item.artifact && props.onArtifact(item.artifact.slug)} type="button">
+                    <Words handles={handles} me={myNames} text={item.text} /> <span aria-hidden="true">→</span>
+                    <time dateTime={new Date(item.at).toISOString()}>{minute(item.at)}</time>
                   </button>
+                ) : (
+                  <p>
+                    <Words handles={handles} me={myNames} text={item.text} />
+                    <time dateTime={new Date(item.at).toISOString()}>{minute(item.at)}</time>
+                  </p>
                 )}
               </li>
             )
@@ -505,17 +395,13 @@ export function Room(props: {
                     </button>
                     {author === me?.address && <span className="tag">you</span>}
                     <time dateTime={new Date(item.at).toISOString()}>{minute(item.at)}</time>
+                    {item.steer && <Backed onBack={done ? undefined : props.onBack} steer={item.steer} />}
                   </p>
                 )}
                 <p className="said-text">
                   <Words handles={handles} me={myNames} text={item.text} />
+                  {follow && item.steer && <> <Backed onBack={done ? undefined : props.onBack} steer={item.steer} /></>}
                 </p>
-                {item.steer && (
-                  <p className="said-steer">
-                    <b>Steer</b> {usd(item.steer.amount)} behind it · {usd(item.steer.weight)} in all, {percent(item.steer.share)} of the money ·{' '}
-                    {item.steer.live ? 'reached the agent at once' : 'read when it resumes'}
-                  </p>
-                )}
               </div>
             </li>
           )
@@ -539,48 +425,6 @@ export function Room(props: {
       <footer className="room-foot">
         <p className="room-typing">{typers.length ? `@${typers.slice(0, 2).join(', @')} ${typers.length === 1 ? 'is' : 'are'} typing…` : ''}</p>
         {gate}
-        {mine && steer !== undefined && (
-          <div className="steer">
-            <p className="label">Steer the swarm</p>
-            <p className="steer-idea">“{idea}”</p>
-            {available > 0n ? (
-              <>
-                <p className="steer-ask">How much of your backing goes behind it?</p>
-                <div className="chips">
-                  {[...presets.filter((value) => units(value) < available), plain(mine.available)].map((value, index, all) => (
-                    <button className={steer === value ? 'chip chip-on' : 'chip'} key={value} onClick={() => setSteer(value)} type="button">
-                      {index === all.length - 1 ? `All ${usd(value)}` : usd(value)}
-                    </button>
-                  ))}
-                  <input aria-label="Amount to steer with" className="steer-input" inputMode="decimal" onChange={(event) => setSteer(event.target.value.replace(',', '.'))} value={steer} />
-                </div>
-                <p className="fine">
-                  {usd(mine.available)} of the {usd(mine.backed)} you put in is not behind a note yet. This moves weight, not money: the agent weighs every note by the money behind it{props.swarm.status === 'running' ? ', and hears this one now' : ' when it resumes'}.
-                </p>
-              </>
-            ) : (
-              <p className="fine">Everything you put in ({usd(mine.backed)}) is behind notes already. Put new money behind this idea to steer with it.</p>
-            )}
-            <div className="steer-actions">
-              {available > 0n && (
-                <button className="btn btn-high" disabled={sending || amount < Mention.smallestSteer || amount > available} onClick={() => void post(text.trim(), steer)} type="button">
-                  {sending ? 'Steering…' : `Steer with ${amount > 0n ? usd(steer) : '…'}`}
-                </button>
-              )}
-              <button
-                className="btn btn-low"
-                onClick={() => {
-                  setSteer(undefined)
-                  props.onBack(idea)
-                }}
-                type="button"
-              >
-                Put new money behind it
-              </button>
-              <button className="btn btn-minimal" onClick={() => setSteer(undefined)} type="button">Cancel</button>
-            </div>
-          </div>
-        )}
         {mine && (
           <div className="composer">
             {options.length > 0 && (
@@ -611,7 +455,6 @@ export function Room(props: {
                 setCaret(event.target.selectionStart)
                 setPick(0)
                 setClosed(false)
-                if (steer !== undefined && !Mention.steers(event.target.value)) setSteer(undefined)
                 if (Date.now() - typed.current > 3000) {
                   typed.current = Date.now()
                   line.current?.typing()
@@ -619,12 +462,12 @@ export function Room(props: {
               }}
               onKeyDown={keys}
               onSelect={(event) => setCaret(event.currentTarget.selectionStart)}
-              placeholder={done ? 'Talk about what it found…' : 'Message the room. @ to mention, @swarm to steer'}
+              placeholder={done ? 'Talk about what it found…' : 'Say something. @swarm to steer'}
               ref={area}
               rows={2}
               value={text}
             />
-            <button className="btn btn-high room-send" disabled={!text.trim() || sending} onClick={submit} type="button">
+            <button aria-label="Send" className="room-send" disabled={!text.trim() || sending} onClick={submit} type="button">
               {steering && !done ? 'Steer…' : 'Send'}
             </button>
           </div>
@@ -636,22 +479,11 @@ export function Room(props: {
               <>
                 {' '}
                 <button className="btn btn-minimal" onClick={() => props.onBack(idea)} type="button">
-                  Put new money behind it
+                  Fund it →
                 </button>
               </>
             )}
           </p>
-        )}
-        {mine && (
-          <div className="room-me">
-            <span>
-              You are <b>@{mine.handle}</b> · {usd(mine.available)} to steer with
-            </span>
-            <div className="room-me-actions">
-              <Rename address={mine.address} name={wallet.account?.name ?? null} onDone={refresh} />
-              <button className="btn btn-minimal" onClick={() => Wallet.signOut()} type="button">Sign out</button>
-            </div>
-          </div>
         )}
       </footer>
     </section>

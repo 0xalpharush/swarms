@@ -21,6 +21,7 @@ import type {
   Linked,
   Me,
   Member,
+  Note,
   Overview,
   Page,
   Pending,
@@ -40,6 +41,7 @@ import type {
 import * as Answer from '../shared/Answer.ts'
 import * as Connect from '../shared/Connect.ts'
 import * as Memo from '../shared/Memo.ts'
+import * as Transfer from '../shared/Transfer.ts'
 import * as Mention from '../shared/Mention.ts'
 import * as Artifacts from './Artifacts.ts'
 import * as Chain from './Chain.ts'
@@ -53,6 +55,9 @@ import * as Store from './Store.ts'
 import type { Snapshot } from './Payer.ts'
 import type { Paid, Swarm } from './Swarm.ts'
 import * as Vault from './Vault.ts'
+import * as Fleet from '../shared/Fleet.ts'
+import * as Brief from '../shared/ResearchBrief.ts'
+import { ids } from '../shared/ResearchBrief.ts'
 
 export const statuses = ['funding', 'running', 'paused', 'done'] as const satisfies readonly Status[]
 
@@ -108,10 +113,10 @@ export const schema = {
   approval: z.object({ ...authorization, pledge: pledgeId, swarm: id }),
   budget: z.object({
     amount: decimal
-      .refine((value) => units(value) >= Store.budget.min, `A daily budget is at least ${Memo.decimal(Store.budget.min)}.`)
-      .refine((value) => units(value) <= Store.budget.max, `A daily budget is at most ${Memo.decimal(Store.budget.max)}.`)
+      .refine((value) => units(value) >= Store.budget.min, `A monthly budget is at least ${Memo.decimal(Store.budget.min)}.`)
+      .refine((value) => units(value) <= Store.budget.max, `A monthly budget is at most ${Memo.decimal(Store.budget.max)}.`)
       .describe(
-        `Tokens the swarm may pull a day, from ${Memo.decimal(Store.budget.min)} to ${Memo.decimal(Store.budget.max)}, as a decimal string or a number.`,
+        `Tokens the swarm pulls every 30 days, the first time on approval, from ${Memo.decimal(Store.budget.min)} to ${Memo.decimal(Store.budget.max)}, as a decimal string or a number.`,
       ),
     note,
     swarm: id,
@@ -146,6 +151,7 @@ export const schema = {
       .min(10)
       .max(2000)
       .describe('What the swarm should find out or build, what done looks like and what its updates should report.'),
+    problem: z.enum(ids).optional().describe('The id of the idea-bank problem this swarm works on, from GET /v1/problems. A problem with an open swarm is not offered again until that swarm finishes.'),
     title: z.string().trim().min(3).max(80).describe('A short name for the swarm.'),
   }),
   hand: z.object({
@@ -345,12 +351,12 @@ export async function create(env: Cloudflare.Env, input: Input<'create'>): Promi
   if (!parsed.ok) return parsed
 
   const swarm = { goal: parsed.value.goal, id: identifier(), title: parsed.value.title }
-  await Store.insert(env, { ...swarm, ...(await Vault.create(env.SWARMS_SECRET)) })
+  await Store.insert(env, { ...swarm, problem: parsed.value.problem ?? null, ...(await Vault.create(env.SWARMS_SECRET)) })
   const [row] = await Promise.all([Store.find(env, swarm.id), logged(Search.swarm(env, swarm))])
   return row ? Problem.ok(Store.summary(row)) : Problem.fail(502, 'unavailable', 'The swarm was not saved.')
 }
 
-export async function detail(env: Cloudflare.Env, input: Input<'swarm'>): Promise<Problem.Result<Detail>> {
+export async function detail(env: Cloudflare.Env, input: Input<'swarm'>, feed = true): Promise<Problem.Result<Detail>> {
   const parsed = parse(schema.swarm, input)
   if (!parsed.ok) return parsed
   const loaded = await load(env, parsed.value.swarm)
@@ -370,11 +376,12 @@ export async function detail(env: Cloudflare.Env, input: Input<'swarm'>): Promis
     budgets,
     code: view.code,
     contributions,
-    feed: view.feed,
+    feed: feed ? view.feed : [],
     hands: view.hands,
     notes,
     pledges,
     reason: view.reason,
+    why: view.why,
     updates: view.updates,
     working: view.working,
   })
@@ -404,6 +411,7 @@ export async function get(env: Cloudflare.Env, input: Input<'swarm'>): Promise<P
     notes,
     pledges,
     reason: view.reason,
+    why: view.why,
     updates: view.updates.map(({ text, ...update }) => ({ ...update, excerpt: Answer.excerpt(text) })),
     working: view.working,
   })
@@ -572,7 +580,7 @@ export async function say(env: Cloudflare.Env, input: Input<'say'>, address?: Ad
   const members = await Store.members(env, row.id)
   const author = members.find((member) => member.address === address)
   if (!author)
-    return Problem.fail(403, 'not_member', "Back this swarm first: a pledge, a transfer, a daily budget or a lent machine lets you post in its room.")
+    return Problem.fail(403, 'not_member', "Back this swarm first: a pledge, a transfer, a monthly budget or a lent machine lets you post in its room.")
 
   const steering = Mention.steers(request.text)
   if (!steering && request.steer !== undefined) return Problem.fail(400, 'invalid_request', 'steer goes with a message that mentions @swarm.')
@@ -685,7 +693,7 @@ export async function transfer(env: Cloudflare.Env, input: Input<'transfer'>, or
 
   const note = request.note || null
   const amount = request.amount === undefined ? null : units(request.amount)
-  const memo = Memo.memo(row.id, note)
+  const memo = Transfer.memo(row.id, note)
   const token = Chain.tokens[request.token]
   const query = new URLSearchParams({
     fund: 'transfer',
@@ -841,7 +849,7 @@ export async function contribute(
   const memos = logs.flatMap((log) =>
     log.eventName === 'TransferWithMemo' && log.args.to.toLowerCase() === wallet ? [log.args.memo.toLowerCase()] : [],
   )
-  if (text && !memos.includes(Memo.memo(row.id, text).toLowerCase()))
+  if (text && !memos.includes(Transfer.memo(row.id, text).toLowerCase()))
     return Problem.fail(
       400,
       'invalid_request',
@@ -1091,4 +1099,29 @@ function excerpt(entry: Entry, terms: readonly string[], size = 240) {
   const pattern = new RegExp([...terms].sort((a, b) => b.length - a.length).join('|'), 'giu')
   const marked = text.slice(start, start + size).replace(pattern, (found) => `«${found}»`)
   return `${start > 0 ? '…' : ''}${marked}${start + size < text.length ? '…' : ''}`
+}
+
+export async function problems(env: Cloudflare.Env): Promise<Problem.Result<{ problems: (Brief.Problem & { open: boolean; swarm: string | null })[] }>> {
+  const rows = await Store.list(env)
+  const taken = new Map(rows.filter((row) => row.status !== 'done' && row.problem).map((row) => [row.problem as string, row.id]))
+  return Problem.ok({ problems: Brief.problems.map((item) => ({ ...item, open: !taken.has(item.id), swarm: taken.get(item.id) ?? null })) })
+}
+
+export async function machines(env: Cloudflare.Env, input: Input<'swarm'>): Promise<Problem.Result<{ machines: Fleet.Machine[] }>> {
+  const parsed = parse(schema.swarm, input)
+  if (!parsed.ok) return parsed
+  const loaded = await load(env, parsed.value.swarm)
+  if (!loaded) return missing()
+  const [entries, lent] = await Promise.all([stub(env, parsed.value.swarm).feed(0, { limit: 2000 }), hands(env, input)])
+  return Problem.ok({ machines: Fleet.fleet(entries, loaded.view.hands, lent.ok ? lent.value.hands : []) })
+}
+
+export async function backers(env: Cloudflare.Env, input: Input<'swarm'>): Promise<Problem.Result<{ backers: Member[]; ideas: Note[] }>> {
+  const parsed = parse(schema.swarm, input)
+  if (!parsed.ok) return parsed
+  const row = await Store.find(env, parsed.value.swarm)
+  if (!row) return missing()
+  const view = await stub(env, row.id).view()
+  const [members, ideas] = await Promise.all([Store.members(env, row.id), Store.notes(env, row.id, BigInt(row.raised), new Set(view.steered))])
+  return Problem.ok({ backers: [...members].sort((a, b) => Number(BigInt(Math.round(Number(b.backed) * 1e6)) - BigInt(Math.round(Number(a.backed) * 1e6)))), ideas })
 }

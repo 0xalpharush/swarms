@@ -11,6 +11,8 @@ import * as Gateway from './Gateway.ts'
 import * as Hands from './Hands.ts'
 import * as Keys from './Keys.ts'
 import * as Payer from './Payer.ts'
+import * as Phase from './Phase.ts'
+import type { Why } from '../shared/Api.ts'
 import * as Seal from './Seal.ts'
 import * as Search from './Search.ts'
 import * as Sessions from './Sessions.ts'
@@ -51,6 +53,7 @@ export type View = {
   hands: Hand[]
   left: string | null
   reason: string | null
+  why: Why | null
   steered: string[]
   turns: Search.Turn[]
   updates: Update[]
@@ -154,6 +157,7 @@ const shelfMs = 30_000
 export class Swarm extends DurableObject<Cloudflare.Env> {
   stepping: Promise<number | null> | undefined
   paying: Promise<unknown> = Promise.resolve()
+  funding: Promise<void> | undefined
   signers = new Map<string, Promise<Signer>>()
   clients = new Map<string, Payer.Client>()
 
@@ -216,7 +220,9 @@ export class Swarm extends DurableObject<Cloudflare.Env> {
       `${short(input.contributor)} set a budget of ${trim(input.amount)} ${Chain.currencies[input.token].symbol} ${per(input.period)}${input.note ? ' with a note' : ''}`,
       input.note,
     )
-    this.announce(`@${(await Store.account(this.env, input.contributor)).handle} set a daily budget of ${trim(input.amount)} ${Chain.currencies[input.token].symbol}${input.note ? ` behind "${input.note}"` : ''}.`)
+    const row = await Store.find(this.env, input.swarm)
+    if (row) await this.fund(row).catch((error: unknown) => this.log('error', 'Pulling the first period of the budget failed.', String(error)))
+    this.announce(`@${(await Store.account(this.env, input.contributor)).handle} set a budget of ${trim(input.amount)} ${Chain.currencies[input.token].symbol} ${per(input.period)}${input.note ? ` behind "${input.note}"` : ''}.`)
     if (!this.kv.get<string>('turn')) await this.ctx.storage.setAlarm(Date.now())
   }
 
@@ -263,6 +269,7 @@ export class Swarm extends DurableObject<Cloudflare.Env> {
       hands: this.kv.get<Hand[]>('hands') ?? [],
       left: this.kv.get<string>('left') ?? null,
       reason: this.kv.get<string>('paused') ?? null,
+      why: this.kv.get<string>('paused') ? (this.kv.get<Why>('why') ?? 'money') : null,
       steered: this.steered(),
       turns,
       updates: updates(turns),
@@ -367,8 +374,10 @@ export class Swarm extends DurableObject<Cloudflare.Env> {
     if (!row) return null
 
     await this.upgrade(row)
-    if (this.kv.get<string>('turn')) return this.follow(row)
-    if (row.status === 'done') return this.settle(row)
+    const phase = Phase.of(this.kv, row.status === 'done')
+    if (phase === 'settled') return null
+    if (phase === 'working') return this.follow(row)
+    if (phase === 'settling') return this.settle(row)
     return this.advance(row)
   }
 
@@ -414,7 +423,7 @@ export class Swarm extends DurableObject<Cloudflare.Env> {
     const wanted = BigInt(this.kv.get<string>('wanted') ?? '0')
     if (wanted > money.biggest) {
       const wake = await this.wake(row.id)
-      await this.pause(row, worked ? 'paused' : 'funding', costly(wanted, money.biggest))
+      await this.pause(row, worked ? 'paused' : 'funding', costly(wanted, money.biggest), 'costly')
       return wake
     }
     if (!this.kv.get<string>('repo') && (money.biggest < Store.repoAt || money.left < Store.launch)) {
@@ -423,6 +432,7 @@ export class Swarm extends DurableObject<Cloudflare.Env> {
         row,
         worked ? 'paused' : 'funding',
         `Waiting for ${dollars(Store.launch)} payable, with ${dollars(Store.repoAt)} of it from one funder, so the swarm can open its $1 code repository and still work; ${dollars(money.left)} is payable now.${wake ? ` The next budget pull or resting contribution is at ${clock(wake)} UTC.` : ''}`,
+        'repo',
       )
       return wake
     }
@@ -448,12 +458,14 @@ export class Swarm extends DurableObject<Cloudflare.Env> {
       return Date.now() + retryMs
     }
 
+    Phase.check(Phase.of(this.kv, row.status === 'done'), 'working')
     const now = Date.now()
     await this.cap(row, money.left / Hands.share)
     this.kv.put('fresh', false)
     this.kv.put('shelved', true)
     this.kv.put('turn', sent.value.request_id)
     this.kv.delete('paused')
+    this.kv.delete('why')
     this.kv.put('n', n)
     this.kv.put('started', now)
     if (resumed) this.kv.put('since', now)
@@ -582,13 +594,14 @@ export class Swarm extends DurableObject<Cloudflare.Env> {
         wanted > money.biggest
           ? costly(wanted, money.biggest)
           : `Waiting for money: the next request needed more than the ${dollars(money.left)} the contributions can pay now.${wake ? ` The next budget pull or resting contribution is at ${clock(wake)} UTC.` : ' New money keeps it going.'}`,
+        wanted > money.biggest ? 'costly' : 'money',
       )
       return wake
     }
     if (failures >= maxFailures) {
       this.kv.put('failures', 0)
       const wake = await this.wake(row.id)
-      await this.pause(row, 'paused', `The agent hit ${failures} errors in a row, so the swarm stopped to rest. New money restarts it${wake ? `, and so does the next budget pull at ${clock(wake)} UTC` : ''}.`)
+      await this.pause(row, 'paused', `The agent hit ${failures} errors in a row, so the swarm stopped to rest. New money restarts it${wake ? `, and so does the next budget pull at ${clock(wake)} UTC` : ''}.`, 'rest')
       return wake
     }
     return status === 'completed' ? Math.max(Date.now(), started + quickMs) : Date.now() + settleMs
@@ -785,7 +798,7 @@ export class Swarm extends DurableObject<Cloudflare.Env> {
 
     if (!channel) {
       const room = await this.room(row, source)
-      const deposit = Payer.min(Payer.max(step, price), room.amount)
+      const deposit = source.row ? room.amount : Payer.min(Payer.max(step, price), room.amount)
       if (deposit < price)
         return { failed: `It can put in ${Memo.decimal(room.amount)} now, less than the ${Memo.decimal(price)} this request holds.`, price, room, small: room.amount >= perCall }
       const authorization = await mppx.createCredential(offered.response, { depositRaw: String(deposit) })
@@ -963,14 +976,21 @@ export class Swarm extends DurableObject<Cloudflare.Env> {
     return { biggest, left, row: (await Store.find(this.env, row.id)) ?? row }
   }
 
-  async fund(row: Store.Row) {
+  fund(row: Store.Row) {
+    this.funding ??= this.refill(row).finally(() => {
+      this.funding = undefined
+    })
+    return this.funding
+  }
+
+  async refill(row: Store.Row) {
     if (!row.wallet || !row.sealed_wallet) return
     const owner = await Vault.account(this.env, row)
     const channel = this.kv.get<Payer.Channel>('channel:pool')
     const inside = channel ? Payer.max(BigInt(channel.deposit) - BigInt(this.kv.get<string>('spent:pool') ?? channel.signed), 0n) : 0n
     let balances = await Vault.balances(this.env, row.wallet)
     const have = inside + Vault.total(balances)
-    if (have < Store.stock && (await this.pull(row, Store.stock - have)) > 0n) balances = await Vault.balances(this.env, row.wallet)
+    if ((await this.pull(row, have < Store.stock ? Store.stock - have : 0n)) > 0n) balances = await Vault.balances(this.env, row.wallet)
 
     for (const id of ['pathusd', 'usdce'] as const) {
       const amount = balances[id] - Vault.dust
@@ -1032,18 +1052,23 @@ export class Swarm extends DurableObject<Cloudflare.Env> {
     }
     if (!ready.length) return 0n
 
-    const count = Math.max(1, Math.min(ready.length, Number(need / smallestPull)))
-    const chosen = ready.slice(0, count).sort((a, b) => (a.room < b.room ? -1 : a.room > b.room ? 1 : 0))
+    const due = ready.filter((item) => item.allowance.period > 0)
+    const pledged = ready.filter((item) => !item.allowance.period)
+    const count = need > 0n ? Math.max(1, Math.min(pledged.length, Number(need / smallestPull))) : 0
+    const chosen = [...due, ...pledged.slice(0, count).sort((a, b) => (a.room < b.room ? -1 : a.room > b.room ? 1 : 0))]
     let wanted = need
+    let pulled = 0n
     for (const [index, { allowance, room }] of chosen.entries()) {
       const remaining = BigInt(chosen.length - index)
-      const share = (wanted + remaining - 1n) / remaining
+      const share = allowance.period > 0 ? room : (wanted + remaining - 1n) / remaining
+      if (share <= 0n) continue
       const result = await Keys.pull(this.env, allowance, { amount: share, recipient: row.wallet, room })
       if (!result.ok) {
         await this.refused(allowance, result)
         continue
       }
       wanted -= result.amount
+      pulled += result.amount
       const budget = allowance.period > 0
       await Store.give(this.env, {
         amount: String(result.amount),
@@ -1072,10 +1097,10 @@ export class Swarm extends DurableObject<Cloudflare.Env> {
         result.hash,
       )
       if (budget && allowance.note_id && BigInt(allowance.pulled) === 0n)
-        await this.steer(row.id, allowance.note_id, `put a daily budget of ${trim(Memo.decimal(BigInt(allowance.amount)))} ${Chain.currencies[allowance.token].symbol}`)
-      if (wanted <= 0n) break
+        await this.steer(row.id, allowance.note_id, `put a budget of ${trim(Memo.decimal(BigInt(allowance.amount)))} ${Chain.currencies[allowance.token].symbol} ${per(allowance.period)}`)
+      if (wanted <= 0n && chosen.slice(index + 1).every((item) => !item.allowance.period)) break
     }
-    return need - wanted
+    return pulled
   }
 
   async refused(allowance: Store.Allowance, result: Extract<Keys.Pulled, { ok: false }>) {
@@ -1096,7 +1121,8 @@ export class Swarm extends DurableObject<Cloudflare.Env> {
     this.log('funds', `The swarm could not pull from ${short(allowance.contributor ?? '')}'s ${allowance.period ? 'budget' : 'pledge'}: ${changes.detail ?? result.detail}`, result.detail)
   }
 
-  async pause(row: Store.Row, status: 'funding' | 'paused', reason?: string) {
+  async pause(row: Store.Row, status: 'funding' | 'paused', reason?: string, why: Why = status === 'funding' ? 'unfunded' : 'money') {
+    if (Phase.of(this.kv, row.status === 'done') !== 'idle') return
     const text =
       reason ??
       (status === 'funding'
@@ -1107,13 +1133,17 @@ export class Swarm extends DurableObject<Cloudflare.Env> {
       await this.sweep(row)
       if (status === 'paused') this.announce(text)
     }
-    if (row.status === status && this.kv.get<string>('paused') === text) return
+    if (row.status === status && this.kv.get<string>('paused') === text && this.kv.get<Why>('why') === why) return
     this.kv.put('paused', text)
+    this.kv.put('why', why)
     await Store.update(this.env, row.id, { status })
     this.log('status', text)
   }
 
   async done(row: Store.Row, reason: string) {
+    Phase.check(Phase.of(this.kv, row.status === 'done'), 'settling')
+    this.kv.delete('turn')
+    this.kv.delete('returning')
     this.kv.delete('paused')
     this.kv.delete('payer')
     this.kv.delete('since')
@@ -1810,7 +1840,7 @@ function clock(at: number) {
 }
 
 function per(period: number) {
-  return period === 86_400 ? 'a day' : period % 3600 === 0 ? `every ${period / 3600} h` : `every ${period} s`
+  return period === 2_592_000 ? 'a month' : period === 86_400 ? 'a day' : period % 3600 === 0 ? `every ${period / 3600} h` : `every ${period} s`
 }
 
 function percent(share: number) {

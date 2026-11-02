@@ -15,6 +15,7 @@ export type Summary = {
   id: string
   machines: number
   pool: string
+  problem: string | null
   raised: string
   remaining: string
   spent: string
@@ -149,6 +150,7 @@ export type Detail = Summary & {
   pledges: Pledge[]
   reason: string | null
   updates: Update[]
+  why: Why | null
   working: Working | null
 }
 
@@ -182,6 +184,8 @@ export type Pending = { amount: string; device: Device | null; note: string | nu
 
 export type Brief = Omit<Update, 'text'> & { excerpt: string }
 
+export type Why = 'unfunded' | 'money' | 'costly' | 'repo' | 'rest'
+
 export type Overview = Summary & {
   budgets: Budget[]
   code: Code | null
@@ -191,6 +195,7 @@ export type Overview = Summary & {
   pledges: Pledge[]
   reason: string | null
   updates: Brief[]
+  why: Why | null
   working: Working | null
 }
 
