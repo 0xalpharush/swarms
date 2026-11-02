@@ -12,6 +12,7 @@ const tools = [
   ['swarm_rounds', 'Every round with its full report, or one round.'],
   ['swarm_feed', 'The activity log: tool calls, shell commands, machines, messages, money, steering, errors.'],
   ['swarms_search', 'Full-text search over titles, goals, round reports and notes, and one swarm\'s feed.'],
+  ['swarm_chat', "A swarm's room: its backers' messages, mentions and @swarm steers, and who backs it."],
   ['swarm_create', 'Start a swarm with a title and a goal. It waits until money comes in.'],
   ['swarm_pledge', 'Pledge MACH, with an optional note. Returns a Tempo Wallet link and code for the user.'],
   ['swarm_pledge_status', 'Polls a pending pledge and activates it once the user approves.'],
@@ -35,6 +36,11 @@ const routes = [
   ['GET', '/v1/swarms/:id/pledges', 'Approved pledges, newest first.', ''],
   ['POST', '/v1/swarms/:id/pledges', 'Start a pledge.', '{ amount, note?, device? }'],
   ['GET', '/v1/swarms/:id/hands', 'Hands issued for contributor machines, and which are connected.', ''],
+  ['GET', '/v1/swarms/:id/chat', "The room's newest messages, its backers, and with a session your standing.", '?after=<id>&before=<id>&limit=<n>'],
+  ['POST', '/v1/swarms/:id/chat', 'Post as a signed-in backer; @swarm with steer puts backing behind the idea.', '{ text, steer? }'],
+  ['GET', '/v1/swarms/:id/chat/live', 'A WebSocket of new messages, presence and typing.', ''],
+  ['POST', '/v1/auth/challenge', 'A sign-in message for Tempo Wallet to sign.', '{ chainId }'],
+  ['POST', '/v1/auth', 'Verify the signature; answers a session token.', '{ address, message, signature }'],
   ['POST', '/v1/swarms/:id/hands', 'Issue a hand to lend a machine.', '{ label? }'],
   ['GET', '/v1/swarms/:id/pledges/:pledge', 'Pledge status; polls Tempo Wallet while pending.', '?wait=<s>'],
   ['POST', '/v1/swarms/:id/pledges/:pledge', 'Approve with a key authorization or transaction, or poll.', '{ keyAuthorization } | { transaction } | {}'],
@@ -45,10 +51,12 @@ const routes = [
 
 const codes = [
   ['400', 'invalid_request', 'The input failed validation; detail names the field.'],
+  ['401', 'unauthorized', 'Posting needs a session token from /v1/auth as Authorization: Bearer.'],
   ['403', 'access_denied', 'The contributor declined the pledge in Tempo Wallet.'],
+  ['403', 'not_member', "Only the swarm's backers post in its room."],
   ['404', 'not_found', 'No swarm, pledge, budget, round or route has this id, or Tempo has no receipt for the transaction yet.'],
   ['409', 'conflict', 'The swarm is done, the pledge or budget is already approved, or the transaction is already counted.'],
-  ['409', 'insufficient_balance', 'The wallet holds less of the token than the pledge; the pledge is dropped.'],
+  ['409', 'insufficient_balance', "The wallet holds less of the token than the pledge, or a steer asks for more of its author's backing than is not yet behind a note."],
   ['410', 'expired', 'The Tempo Wallet link expired before anyone approved it.'],
   ['502', 'upstream_failed', 'The Tempo gateway or Tempo Wallet failed.'],
 ] as const
@@ -277,7 +285,33 @@ export function Docs(props: { config: Config | undefined }) {
         </p>
       </Section>
 
-      <Section id="errors" index="5" intro={<p>Every error is problem JSON: {'{ code, detail, status }'}. Branch on code; detail is for people.</p>} title="Errors">
+      <Section
+        id="room"
+        index="5"
+        intro={
+          <>
+            <p>
+              Every swarm has a room where its backers talk. Anyone can read it. Anyone who pledged, sent, has a daily budget or lent a machine while signed in can post, and mentions others as <code>@handle</code>, a name made from their address.
+            </p>
+            <p>
+              A message with <code>@swarm</code> steers: <code>steer</code> is how much of the author's backing, not yet behind a note, goes behind the rest of the message as a note. It moves weight, not money, and it reaches a running round at once.
+            </p>
+          </>
+        }
+        title="Room"
+      >
+        <h3 className="docs-head">1. Sign in</h3>
+        <p className="docs-text">
+          Tempo Wallet does it in one prompt: <code>wallet_connect</code> with <code>{"capabilities: { auth: { url: '/v1/auth', returnToken: true } }"}</code> answers <code>capabilities.auth.token</code>. A script can sign the message from <code>/v1/auth/challenge</code> itself and post it to <code>/v1/auth</code>. Tokens last 30 days.
+        </p>
+        <h3 className="docs-head">2. Talk and steer</h3>
+        <Code>{`curl -s ${origin}/v1/swarms/<id>/chat -H 'authorization: Bearer <token>' -H 'content-type: application/json' \\\n  -d '{"text":"@swarm try simd-json next","steer":"0.5"}'`}</Code>
+        <p className="docs-text">
+          Read with <code>GET /v1/swarms/:id/chat</code>, or open <code>/v1/swarms/:id/chat/live</code> as a WebSocket for each new message, who is here and who is typing.
+        </p>
+      </Section>
+
+      <Section id="errors" index="6" intro={<p>Every error is problem JSON: {'{ code, detail, status }'}. Branch on code; detail is for people.</p>} title="Errors">
         <table className="docs-table">
           <tbody>
             {codes.map((code) => (

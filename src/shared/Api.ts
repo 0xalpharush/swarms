@@ -182,6 +182,7 @@ export type Detail = Summary & {
 }
 
 export type Config = {
+  auth: string
   budget: { days: number; max: string; min: string; period: number }
   chainId: number
   explorer: string
@@ -257,3 +258,37 @@ export type Budgeted = { budget: Budget; swarm: Summary }
 export type Contributed = { contribution: Contribution; swarm: Summary }
 
 export type Problem = { code: string; detail: string; status: number }
+
+export type Way = 'pledge' | 'budget' | 'transfer' | 'machine'
+
+export type Member = {
+  address: `0x${string}`
+  available: string
+  backed: string
+  handle: string
+  since: number
+  steered: string
+  ways: Way[]
+}
+
+export type Me = Member & { member: boolean }
+
+export type Steer = { amount: string; backers: number; note: string; noteId: string; round: number | null; share: number; weight: string }
+
+export type Said = {
+  at: number
+  author: `0x${string}` | null
+  id: number
+  mentions: `0x${string}`[]
+  steer: Steer | null
+  text: string
+}
+
+export type Room = { me: Me | null; members: Member[]; messages: Said[]; next: number }
+
+export type Posted = { me: Me; message: Said }
+
+export type Chatter =
+  | { message: Said; type: 'said' }
+  | { online: `0x${string}`[]; type: 'presence'; watching: number }
+  | { address: `0x${string}`; type: 'typing' }

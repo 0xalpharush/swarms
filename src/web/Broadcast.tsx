@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { type ReactNode, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { Detail, Entry, Researcher, Round } from '../shared/Api.ts'
 import * as Api from './api.ts'
 import { ago, clock, duration, usd } from './format.ts'
@@ -92,7 +92,7 @@ function now(stream: Stream | undefined, member: Member, live: boolean) {
   return { label: member.state === 'running' ? 'Now' : 'Last', text: member.action ?? 'Waiting for an update' }
 }
 
-export function Broadcast(props: { live: Live; onEntries: (entries: readonly Entry[]) => void; swarm: Detail; entries: readonly Entry[] }) {
+export function Broadcast(props: { empty?: ReactNode; live: Live; onEntries: (entries: readonly Entry[]) => void; swarm: Detail; entries: readonly Entry[] }) {
   const swarm = props.swarm
   const initial = useMemo(asked, [])
   const [chosen, setChosen] = useState<number | undefined>(initial.round)
@@ -198,6 +198,7 @@ export function Broadcast(props: { live: Live; onEntries: (entries: readonly Ent
         <p className="broadcast-badge" data-live="false"><i />OFF AIR</p>
         <h2>The broadcast starts with round 1</h2>
         <p>Once money is in, the lead and its explorers work here in the open: every thought, command and result as it happens.</p>
+        {props.empty}
       </section>
     )
 
@@ -294,7 +295,7 @@ function Stage(props: { airing: boolean; answered: boolean; entries: readonly En
       )}
       <Timeline entries={props.entries} live={live} members={props.members} onFocus={props.onFocus} />
       {live && <Now member={member} stream={props.stream} />}
-      {result && member.id === 'lead' && props.answered && <p className="stage-answered">This round's report is the answer above. <a href="#answer">Read it ↑</a></p>}
+      {result && member.id === 'lead' && props.answered && <p className="stage-answered">This round's report is the swarm's answer. <a href="#answer">Read it →</a></p>}
       {result && !(member.id === 'lead' && props.answered) && (
         <details className="stage-result" open={member.id !== 'lead'}>
           <summary className="label">{member.id === 'lead' ? 'Round report' : 'Result'}</summary>
@@ -407,30 +408,6 @@ function Ticker(props: { entries: readonly Entry[]; live: boolean; names: Readon
           )
         })}
       </ol>
-    </div>
-  )
-}
-
-const verbs = { error: 'hit an error', funds: 'moved money', machine: 'is on a machine', message: 'said', output: 'got back', status: 'changed course', steer: 'was steered', thinking: 'thought', tool: 'ran' } as const
-
-export function OnAir(props: { id: string }) {
-  const [heard, setHeard] = useState<{ item: string; label: string; text: string; who: string }>()
-  const names = useRef(new Map<string, string>([['lead', 'Lead researcher']]))
-  useEffect(() => {
-    const hear = (who: string, label: string, item: string, delta: string, replace = false) =>
-      setHeard((previous) => ({ item, label, text: (replace || previous?.item !== item || previous.who !== who ? delta : previous.text + delta).slice(-220), who }))
-    return Api.live(props.id, (event) => {
-      if (event.type === 'thinking') hear('lead', 'is thinking', event.item, event.delta)
-      if (event.type === 'text') hear('lead', 'is writing', event.item, event.delta)
-      if (event.type === 'delta') hear(speaker(event.who), event.channel === 'thinking' ? 'is thinking' : event.channel === 'input' ? 'is writing code' : 'is writing', `${event.channel}:${event.item}`, event.delta)
-      if (event.type === 'researcher') names.current.set(event.researcher.id, event.researcher.name)
-      if (event.type === 'entry' && event.entry.kind !== 'thinking') hear(speaker(event.entry.who), verbs[event.entry.kind], `entry:${event.entry.event}`, line(event.entry.kind === 'output' ? event.entry.detail ?? event.entry.text : event.entry.text), true)
-    })
-  }, [props.id])
-  return (
-    <div aria-live="off" className="onair">
-      <p className="onair-head"><span className="broadcast-badge" data-live="true"><i />LIVE</span>{heard ? <span><b style={{ color: hue(heard.who) }}>{names.current.get(heard.who) ?? 'An explorer'}</b> {heard.label}</span> : <span>Tuning in…</span>}</p>
-      <p className="onair-text">{heard?.text ?? 'The team is on the case.'}</p>
     </div>
   )
 }

@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react'
 import type { Issued, Lent, Summary } from '../shared/Api.ts'
 import * as Api from './api.ts'
+import * as Mention from '../shared/Mention.ts'
 import { Code } from './Docs.tsx'
-import { message } from './hooks.ts'
+import { message, useWallet } from './hooks.ts'
 
 type Form = 'cli' | 'library'
 
@@ -12,6 +13,7 @@ export function Connect(props: { swarm: Summary }) {
   const [form, setForm] = useState<Form>('cli')
   const [lent, setLent] = useState<readonly Lent[]>([])
   const [state, setState] = useState<{ busy?: boolean; error?: string }>({})
+  const session = useWallet().session
   const done = props.swarm.status === 'done'
 
   useEffect(() => {
@@ -46,6 +48,13 @@ export function Connect(props: { swarm: Summary }) {
       <p className="fine">
         Lend this swarm your computer and what is on it as a nanocode hand. Its lead agent and explorers run commands and read and write files there, and are told the machine and its data are yours and to ask before anything destructive. Your hand can set its own prices, such as a price per file; the swarm pays them through the gateway from its money, and caps what each hand may charge in a round at a fifth of what the round may spend. Stop the command to take it back.
       </p>
+      {!done && (
+        <p className="fine">
+          {session
+            ? `Issued to @${Mention.handle(session.address)}, so lending it also lets you post in the swarm's room.`
+            : "Sign in with Tempo Wallet in the room first, and lending a machine also lets you post there."}
+        </p>
+      )}
       {done && <p className="fine">This swarm is done and takes no more hands.</p>}
       {!done && !issued && (
         <>

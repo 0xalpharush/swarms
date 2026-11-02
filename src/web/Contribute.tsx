@@ -130,6 +130,13 @@ export function Box(props: { config: Config | undefined; note: string; noteRef: 
       {props.swarm.status === 'done' && <p className="fine">It takes no more money. What it did not spend went back: each key's channel closed into its wallet, and the swarm's wallet to everyone who sent or was pulled, in proportion.</p>}
       {props.swarm.status !== 'done' && (
         <>
+          {text && (
+            <p className="pledge-behind">
+              <span className="label">Behind the note</span>
+              <span>“{text}”</span>
+              <button className="btn btn-minimal" disabled={busy} onClick={() => props.onNote('')} type="button">Clear</button>
+            </p>
+          )}
           <Amount config={props.config} label={mode === 'budget' ? 'Per day' : 'Amount'} least={least ?? smallest} onChange={setAmount} suffix={mode === 'budget' ? `${symbol} a day` : symbol} value={amount} />
           <details className="game-details"><summary>Funding options</summary>
           <div className="modes" role="tablist">

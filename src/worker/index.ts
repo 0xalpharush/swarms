@@ -2,6 +2,7 @@ import { Hono } from 'hono'
 import * as Operations from './Operations.ts'
 import * as Problem from './Problem.ts'
 import * as Rest from './Rest.ts'
+import * as Sessions from './Sessions.ts'
 import * as XFrames from './XFrames.ts'
 
 export { Swarm } from './Swarm.ts'
@@ -16,6 +17,10 @@ app.get('/x/s/:id', async (c) => {
   const result = await Operations.get(c.env, { swarm: c.req.param('id') })
   return result.ok ? XFrames.swarm(new URL(c.req.url).origin, result.value) : Problem.json(result)
 })
+
+app.all(Sessions.path, (c) => Sessions.auth(c.env).fetch(c.req.raw))
+
+app.all(`${Sessions.path}/*`, (c) => Sessions.auth(c.env).fetch(c.req.raw))
 
 app.get('/api/config', (c) => c.json(Operations.config(c.env)))
 
@@ -56,10 +61,28 @@ app.post('/api/swarms/:id/budgets/:budget', async (c) =>
   ),
 )
 
+app.get('/api/swarms/:id/chat', async (c) =>
+  Problem.respond(await Operations.room(c.env, { ...c.req.query(), swarm: c.req.param('id') }, await Sessions.who(c.env, c.req.raw))),
+)
+
+app.post('/api/swarms/:id/chat', async (c) =>
+  Problem.respond(
+    await Operations.say(c.env, { ...(await Rest.body(c.req.raw)), swarm: c.req.param('id') }, await Sessions.who(c.env, c.req.raw)),
+    201,
+  ),
+)
+
+app.get('/api/swarms/:id/chat/live', async (c) => Rest.socket(await Operations.chatter(c.env, { swarm: c.req.param('id') }, c.req.raw)))
+
+app.get('/v1/swarms/:id/chat/live', async (c) => Rest.socket(await Operations.chatter(c.env, { swarm: c.req.param('id') }, c.req.raw)))
+
 app.get('/api/swarms/:id/hands', async (c) => Problem.respond(await Operations.hands(c.env, { swarm: c.req.param('id') })))
 
 app.post('/api/swarms/:id/hands', async (c) =>
-  Problem.respond(await Operations.hand(c.env, { ...(await Rest.body(c.req.raw)), swarm: c.req.param('id') }), 201),
+  Problem.respond(
+    await Operations.hand(c.env, { ...(await Rest.body(c.req.raw)), swarm: c.req.param('id') }, await Sessions.who(c.env, c.req.raw)),
+    201,
+  ),
 )
 
 app.post('/api/swarms/:id/pledges', async (c) =>

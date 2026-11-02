@@ -2,6 +2,7 @@ import { z } from 'zod'
 import * as Memo from '../shared/Memo.ts'
 import * as Operations from './Operations.ts'
 import * as Problem from './Problem.ts'
+import * as Sessions from './Sessions.ts'
 import * as Store from './Store.ts'
 
 type Json = Record<string, unknown>
@@ -113,6 +114,7 @@ const schemas = {
     'The public repository that keeps the swarm\'s code, read without a key from the gateway at /p/<owner>/<app>/git/<name>/files, read, log and diff.',
   ),
   Config: object({
+    auth: { description: "Where to sign in with Tempo Wallet: wallet_connect's capabilities.auth url.", type: 'string' },
     budget: object({ days: integer, max: usd, min: usd, period: integer }),
     chainId: integer,
     explorer: string,
@@ -308,6 +310,51 @@ const schemas = {
     wallet: nullable({ ...address, description: "The swarm's own wallet, which takes transfers and budget pulls." }),
     workers: { description: 'Explorers at work in the running round.', type: 'integer' },
   }),
+  Room: object({
+    me: nullable({ ...ref('Me'), description: 'The signed-in caller, when the request carries a session token.' }),
+    members: { items: ref('Member'), type: 'array' },
+    messages: { items: ref('Said'), type: 'array' },
+    next: { description: 'The newest message id; pass it as after to read what comes next.', type: 'integer' },
+  }),
+  Me: {
+    allOf: [ref('Member'), object({ member: { description: 'Whether the caller backs the swarm and may post.', type: 'boolean' } })],
+  },
+  Member: object(
+    {
+      address,
+      available: { ...usd, description: 'What the backer put in that is not behind a note yet: what an @swarm message can steer with.' },
+      backed: { ...usd, description: 'Everything the backer pledged, sent or had pulled, stablecoins at par.' },
+      handle: { description: 'The name the room shows, derived from the address.', type: 'string' },
+      since: time,
+      steered: { ...usd, description: 'What the backer put behind notes, with money or with @swarm.' },
+      ways: { items: { enum: ['pledge', 'budget', 'transfer', 'machine'], type: 'string' }, type: 'array' },
+    },
+    "A backer of the swarm, who may post in its room. A lent machine counts when its hand was issued to a signed-in caller.",
+  ),
+  Posted: object({ me: ref('Me'), message: ref('Said') }),
+  Said: object(
+    {
+      at: time,
+      author: nullable({ ...address, description: 'The backer who wrote it; null for the swarm\'s own messages about money and rounds.' }),
+      id: integer,
+      mentions: { description: 'Backers the message mentions with @<handle>.', items: address, type: 'array' },
+      steer: nullable(ref('Steer')),
+      text: string,
+    },
+    'A message in a swarm\'s room.',
+  ),
+  Steer: object(
+    {
+      amount: { ...usd, description: "What the author put behind the idea from their backing." },
+      backers: integer,
+      note: { description: 'The idea: the message without @swarm.', type: 'string' },
+      noteId: string,
+      round: nullable({ description: 'The running round it steered at once; null when it waits for the next round.', type: 'integer' }),
+      share: { description: 'The note\'s weight as a share of everything raised.', type: 'number' },
+      weight: { ...usd, description: 'Everything behind the note now.' },
+    },
+    'An @swarm message: part of its author\'s backing put behind the rest of the message as a steering note.',
+  ),
   Waited: object({
     changed: { type: 'boolean' },
     reason: { enum: ['ended', 'idle', 'timeout'], type: 'string' },
@@ -332,7 +379,7 @@ export function document(origin: string) {
       schemas,
     },
     info: {
-      description: `Swarms are crowdfunded, long-running AI agents on the Tempo gateway, funded by pledges in MACH or a stablecoin, one-off stablecoin transfers to the swarm's wallet and daily budgets, and steered by notes weighted by the money behind them. Reading needs no account. A pledge is a spending key the contributor approves in Tempo Wallet, at least ${Memo.decimal(Store.minPledge)} MACH; a daily budget is a key the swarm pulls with, approved the same way. Errors are problem JSON with a stable code. The same operations are MCP tools at ${origin}/mcp.`,
+      description: `Swarms are crowdfunded, long-running AI agents on the Tempo gateway, funded by pledges in MACH or a stablecoin, one-off stablecoin transfers to the swarm's wallet and daily budgets, and steered by notes weighted by the money behind them. Each swarm's backers talk in its room, where an @swarm message puts part of its author's backing behind an idea. Reading needs no account; posting needs a Tempo Wallet session from /v1/auth. A pledge is a spending key the contributor approves in Tempo Wallet, at least ${Memo.decimal(Store.minPledge)} MACH; a daily budget is a key the swarm pulls with, approved the same way. Errors are problem JSON with a stable code. The same operations are MCP tools at ${origin}/mcp.`,
       title: 'Swarms',
       version: '1',
     },
@@ -460,6 +507,60 @@ export function document(origin: string) {
           summary: 'Count a transfer',
         },
       },
+      '/v1/swarms/{id}/chat': {
+        get: {
+          description: "The swarm's room: its newest messages (or those after or before an id), its members, and with a session token the caller's standing.",
+          operationId: 'getChat',
+          parameters: [
+            swarm,
+            parameter('after', 'query', { default: 0, minimum: 0, type: 'integer' }, 'Messages after this id; 0 returns the newest.'),
+            parameter('before', 'query', { minimum: 1, type: 'integer' }, 'Messages before this id.'),
+            parameter('limit', 'query', { default: 100, maximum: 200, minimum: 1, type: 'integer' }, 'Messages at most.'),
+          ],
+          responses: { ...ok(ref('Room'), 'The room.'), ...failures(400, 404) },
+          summary: 'Read the room',
+        },
+        post: {
+          description: `Posts to the room as the signed-in backer: send Authorization: Bearer <token> from /v1/auth. @<handle> mentions a backer. A message with @swarm steers the swarm: steer is how much of the author's backing not yet behind a note goes behind the rest of the message as a note, which weighs like any other note and steers a running round at once.`,
+          operationId: 'postChat',
+          parameters: [swarm],
+          requestBody: { content: { 'application/json': { schema: input(Operations.schema.say.omit({ swarm: true })) } }, required: true },
+          responses: { ...ok(ref('Posted'), 'The message and the author\'s standing after it.', '201'), ...failures(400, 401, 403, 404, 409) },
+          summary: 'Post to the room',
+        },
+      },
+      '/v1/swarms/{id}/chat/live': {
+        get: {
+          description:
+            'A WebSocket. The server sends {type: said, message} for every new message, {type: presence, online, watching} as people come and go, and {type: typing, address}. Send {type: hello, token} to be counted online as the session\'s backer, {type: typing} while writing, and the text ping to get pong.',
+          operationId: 'chatLive',
+          parameters: [swarm],
+          responses: { '101': { description: 'Switching to the WebSocket.' }, ...failures(400, 404) },
+          summary: 'Room live',
+        },
+      },
+      '/v1/auth/challenge': {
+        post: {
+          description:
+            "Sign-in with Tempo Wallet (accounts' Handler.auth): a single-use SIWE message to sign. Tempo Wallet's wallet_connect does the whole exchange with capabilities.auth = { url: '/v1/auth', returnToken: true }.",
+          operationId: 'authChallenge',
+          requestBody: { content: { 'application/json': { schema: object({ chainId: integer }) } } },
+          responses: ok(object({ message: string }), 'The message to sign.'),
+          summary: 'Sign-in challenge',
+        },
+      },
+      '/v1/auth': {
+        post: {
+          description: `Verifies the signed challenge and answers a session token for Authorization: Bearer, valid for ${Sessions.days} days.`,
+          operationId: 'authVerify',
+          requestBody: {
+            content: { 'application/json': { schema: object({ address, message: string, signature: string }) } },
+            required: true,
+          },
+          responses: ok(object({ token: string }), 'The session token.'),
+          summary: 'Sign in',
+        },
+      },
       '/v1/swarms/{id}/hands': {
         get: {
           operationId: 'listHands',
@@ -469,7 +570,7 @@ export function document(origin: string) {
         },
         post: {
           description:
-            "Issues a hand for a contributor's own machine: a unique name under the swarm's gateway app, with the nanocode CLI command and a nanocode-ts snippet that attach it. The swarm's lead agent and explorers use connected hands in every round, and are told they belong to contributors.",
+            "Issues a hand for a contributor's own machine: a unique name under the swarm's gateway app, with the nanocode CLI command and a nanocode-ts snippet that attach it. The swarm's lead agent and explorers use connected hands in every round, and are told they belong to contributors. With a session token from /v1/auth, the caller joins the swarm's room as a backer.",
           operationId: 'issueHand',
           parameters: [swarm],
           requestBody: { content: { 'application/json': { schema: input(Operations.schema.hand.omit({ swarm: true })) } } },

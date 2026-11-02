@@ -5,6 +5,7 @@ import * as Mcp from './Mcp.ts'
 import * as OpenApi from './OpenApi.ts'
 import * as Operations from './Operations.ts'
 import * as Problem from './Problem.ts'
+import * as Sessions from './Sessions.ts'
 
 export const app = new Hono<{ Bindings: Cloudflare.Env }>()
 
@@ -15,6 +16,10 @@ export async function body(request: Request): Promise<Record<string, unknown>> {
 
 export function stream(result: Problem.Result<Response>) {
   return result.ok ? new Response(result.value.body, result.value) : Problem.json(result)
+}
+
+export function socket(result: Problem.Result<Response>) {
+  return result.ok ? result.value : Problem.json(result)
 }
 
 export function contributed(result: Problem.Result<{ contributed: Contributed; created: boolean }>) {
@@ -94,7 +99,21 @@ app.post('/v1/swarms/:id/budgets/:budget', async (c) =>
 app.get('/v1/swarms/:id/hands', async (c) => Problem.respond(await Operations.hands(c.env, { swarm: c.req.param('id') })))
 
 app.post('/v1/swarms/:id/hands', async (c) =>
-  Problem.respond(await Operations.hand(c.env, { ...(await body(c.req.raw)), swarm: c.req.param('id') }), 201),
+  Problem.respond(
+    await Operations.hand(c.env, { ...(await body(c.req.raw)), swarm: c.req.param('id') }, await Sessions.who(c.env, c.req.raw)),
+    201,
+  ),
+)
+
+app.get('/v1/swarms/:id/chat', async (c) =>
+  Problem.respond(await Operations.room(c.env, { ...c.req.query(), swarm: c.req.param('id') }, await Sessions.who(c.env, c.req.raw))),
+)
+
+app.post('/v1/swarms/:id/chat', async (c) =>
+  Problem.respond(
+    await Operations.say(c.env, { ...(await body(c.req.raw)), swarm: c.req.param('id') }, await Sessions.who(c.env, c.req.raw)),
+    201,
+  ),
 )
 
 app.get('/v1/swarms/:id/pledges', async (c) => Problem.respond(await Operations.pledges(c.env, { swarm: c.req.param('id') })))

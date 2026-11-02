@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useRef, useState } from 'react'
+import { lazy, type ReactNode, Suspense, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import * as Answer from '../shared/Answer.ts'
 import type { Config, Detail, Entry, Note, Round } from '../shared/Api.ts'
 import { merge } from '../shared/Trail.ts'
@@ -9,22 +9,46 @@ import { Budgets, Contributions, Pledges } from './Backing.tsx'
 import { Connect } from './Connect.tsx'
 import { Box } from './Contribute.tsx'
 import { ago, duration, mach, percent, short, usd } from './format.ts'
-import { type Draft, useBroadcast, useNow, usePoll } from './hooks.ts'
+import { type Draft, useBroadcast, useMedia, useNow, usePoll } from './hooks.ts'
 import { Machines } from './Machines.tsx'
 import { Markdown } from './Markdown.tsx'
+import { Room } from './Room.tsx'
 import { Link } from './router.tsx'
 import { Bar, Status } from './Visual.tsx'
-
 
 const Code = lazy(() => import('./Code.tsx').then((module) => ({ default: module.Code })))
 
 const rounds = { cancelled: 'Cancelled', completed: 'Completed', failed: 'Failed', running: 'Running' } as const satisfies Record<Round['status'], string>
 
+const tabs = ['transcript', 'room', 'answer', 'fund', 'code', 'machines', 'brief'] as const
+
+type Tab = (typeof tabs)[number]
+
+function subscribe(listener: () => void) {
+  addEventListener('hashchange', listener)
+  addEventListener('popstate', listener)
+  return () => {
+    removeEventListener('hashchange', listener)
+    removeEventListener('popstate', listener)
+  }
+}
+
+function useTab() {
+  const hash = useSyncExternalStore(subscribe, () => location.hash.slice(1))
+  const tab: Tab = (tabs as readonly string[]).includes(hash) ? (hash as Tab) : new URLSearchParams(location.search).has('fund') ? 'fund' : 'transcript'
+  const choose = (next: Tab) => {
+    history.replaceState(null, '', `${location.pathname}${location.search}${next === 'transcript' ? '' : `#${next}`}`)
+    dispatchEvent(new HashChangeEvent('hashchange'))
+  }
+  return [tab, choose] as const
+}
 
 export function Swarm(props: { config: Config | undefined; id: string }) {
   const [detail, reload] = usePoll(() => Api.swarm(props.id), 5000, props.id)
   const [entries, setEntries] = useState<readonly Entry[]>([])
   const [note, setNote] = useState('')
+  const [tab, setTab] = useTab()
+  const wide = useMedia('(min-width: 1100px)')
   const last = useRef(0)
   const box = useRef<HTMLDivElement>(null)
   const loaded = detail.data !== undefined
@@ -80,39 +104,112 @@ export function Swarm(props: { config: Config | undefined; id: string }) {
 
   const swarm = detail.data
   const live = swarm.status === 'running'
+  const shown: Tab = wide && tab === 'room' ? 'transcript' : tab
+  const connected = swarm.hands.filter((hand) => hand.connected).length
   const back = (text: string) => {
     setNote(text)
-    box.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })
-    setTimeout(() => document.getElementById('amount')?.focus({ preventScroll: true }), 400)
+    setTab('fund')
+    setTimeout(() => document.getElementById('amount')?.focus({ preventScroll: true }), 120)
+  }
+  const room = <Room config={props.config} onBack={back} onSteered={reload} swarm={swarm} />
+  const labels: Record<Tab, ReactNode> = {
+    answer: swarm.answer ? `Answer · R${swarm.answer.round}` : 'Answer',
+    brief: 'Brief',
+    code: swarm.code ? `Code · ${swarm.code.name}` : 'Code',
+    fund: swarm.status === 'done' ? 'Backers' : 'Back it',
+    machines: connected ? `Machines · ${connected}` : 'Machines',
+    room: 'Room',
+    transcript: live ? <><i className="tab-live" />Transcript</> : 'Transcript',
   }
 
   return (
-    <article className="page swarm game-swarm" data-status={swarm.status}>
-      <div className="quest-title"><div><Meta swarm={swarm} /><h1>{swarm.title}</h1></div><span className="quest-mode">{Api.fixture ? 'DEMO QUEST' : 'LIVE QUEST'}</span></div>
-      {swarm.status !== 'running' && <p className="banner">{swarm.status === 'done' ? 'Done. The answer below is what the swarm found.' : swarm.reason ?? (swarm.status === 'paused' ? 'Paused: the money is used up. A contribution, budget or pledge starts the next round.' : 'No money behind it yet. The first contribution starts round 1.')}</p>}
-      {live && <Broadcast entries={entries} live={stream} onEntries={(next) => setEntries((previous) => merge(previous, next))} swarm={swarm} />}
-      {(swarm.answer || live) && (
-        <section className="quest-findings" id="answer">
-          <h2 className="answer-head">{swarm.status === 'done' ? 'Answer' : 'Latest answer'}</h2>
-          <Latest draft={draft} swarm={swarm} />
-        </section>
-      )}
-      {!live && <Broadcast entries={entries} live={stream} onEntries={(next) => setEntries((previous) => merge(previous, next))} swarm={swarm} />}
-      {swarm.status !== 'done' && (
-        <section className="quest-funding" id="fund">
-          <Box config={props.config} note={note} noteRef={box} onDone={reload} onNote={setNote} swarm={swarm} />
-        </section>
-      )}
-      <div>
-        <div className="mission-extras">
-          <details className="game-details"><summary>Code{swarm.code ? ` · ${swarm.code.name}` : ''}</summary><Repository config={props.config} swarm={swarm} /></details>
-          <details className="game-details"><summary>The research question</summary><p>{swarm.goal}</p></details>
-          <details className="game-details"><summary>Activity log</summary><Feed entries={entries} live={live} names={new Map(swarm.researchers.map((item) => [item.id, item.name]))} /></details>
-          <details className="game-details"><summary>Machines · {swarm.hands.filter((hand) => hand.connected).length} connected</summary><Machines hands={swarm.hands} live={live} /><Connect swarm={swarm} /></details>
-          <details className="game-details"><summary>Research rounds</summary><History draft={draft} history={swarm.history} /></details>
-          <details className="game-details"><summary>Community notes</summary><Notes notes={swarm.notes} onBack={back} done={swarm.status === 'done'} /></details>
-          <details className="game-details"><summary>Funding record</summary><Ledger config={props.config} swarm={swarm} /><Budgets budgets={swarm.budgets} config={props.config} /><Contributions config={props.config} contributions={swarm.contributions} /><Pledges config={props.config} pledges={swarm.pledges} /></details>
+    <article className="page swarm room-page" data-status={swarm.status}>
+      <header className="swarm-head">
+        <div className="swarm-name">
+          <Meta swarm={swarm} />
+          <h1>{swarm.title}</h1>
         </div>
+        <dl className="swarm-figures">
+          <div><dt>Raised</dt><dd>{usd(swarm.raised)}</dd></div>
+          <div><dt>{swarm.status === 'done' ? 'Spent' : 'Left'}</dt><dd>{usd(swarm.status === 'done' ? swarm.spent : swarm.remaining)}</dd></div>
+          <div><dt>Backers</dt><dd>{swarm.contributors}</dd></div>
+        </dl>
+        {swarm.status !== 'done' && <button className="btn btn-high swarm-back" onClick={() => back(note)} type="button">Back it</button>}
+      </header>
+      {swarm.status !== 'running' && <p className="banner">{swarm.status === 'done' ? 'Done. The answer is what the swarm found; the transcript replays every round.' : swarm.reason ?? (swarm.status === 'paused' ? 'Paused: the money is used up. A contribution, budget or pledge starts the next round.' : 'No money behind it yet. The first contribution starts round 1.')}</p>}
+      <div className="room-layout">
+        <section className="room-main">
+          <nav aria-label="Swarm" className="room-tabs" role="tablist">
+            {tabs.filter((item) => item !== 'room' || !wide).map((item) => (
+              <button aria-controls={`panel-${item}`} aria-selected={shown === item} key={item} onClick={() => setTab(item)} role="tab" type="button">
+                {labels[item]}
+              </button>
+            ))}
+          </nav>
+          <div className="room-panel" data-tab={shown} hidden={shown !== 'transcript'} id="panel-transcript" role="tabpanel">
+            <Broadcast
+              empty={swarm.status !== 'done' && <button className="btn btn-high" onClick={() => back(note)} type="button">Back it to start round 1</button>}
+              entries={entries}
+              live={stream}
+              onEntries={(next) => setEntries((previous) => merge(previous, next))}
+              swarm={swarm}
+            />
+          </div>
+          {shown !== 'transcript' && (
+            <div className="room-panel room-page-panel" data-tab={shown} id={`panel-${shown}`} role="tabpanel">
+              {shown === 'answer' && (
+                <>
+                  <section className="quest-findings">
+                    <h2 className="answer-head">{swarm.status === 'done' ? 'Answer' : 'Latest answer'}</h2>
+                    <Latest draft={draft} swarm={swarm} />
+                  </section>
+                  <section className="panel-section">
+                    <h2 className="panel-head">Every round</h2>
+                    <History draft={draft} history={swarm.history} />
+                  </section>
+                </>
+              )}
+              {shown === 'fund' && (
+                <div className="fund-panel">
+                  {swarm.status !== 'done' && (
+                    <section className="quest-funding">
+                      <Box config={props.config} note={note} noteRef={box} onDone={reload} onNote={setNote} swarm={swarm} />
+                    </section>
+                  )}
+                  <div className="fund-record">
+                    <Ledger config={props.config} swarm={swarm} />
+                    <section className="panel-section">
+                      <h2 className="panel-head">Notes, by the money behind them</h2>
+                      <Notes notes={swarm.notes} onBack={back} done={swarm.status === 'done'} />
+                    </section>
+                    <details className="game-details"><summary>Funding record</summary><Budgets budgets={swarm.budgets} config={props.config} /><Contributions config={props.config} contributions={swarm.contributions} /><Pledges config={props.config} pledges={swarm.pledges} /></details>
+                  </div>
+                </div>
+              )}
+              {shown === 'code' && <Repository config={props.config} swarm={swarm} />}
+              {shown === 'machines' && (
+                <>
+                  <Machines hands={swarm.hands} live={live} />
+                  <Connect swarm={swarm} />
+                </>
+              )}
+              {shown === 'brief' && (
+                <>
+                  <section className="panel-section">
+                    <h2 className="panel-head">The question</h2>
+                    <p className="brief-goal">{swarm.goal}</p>
+                  </section>
+                  <section className="panel-section">
+                    <h2 className="panel-head">Activity log</h2>
+                    <Feed entries={entries} live={live} names={new Map(swarm.researchers.map((item) => [item.id, item.name]))} />
+                  </section>
+                </>
+              )}
+              {shown === 'room' && room}
+            </div>
+          )}
+        </section>
+        {wide && <aside className="room-side">{room}</aside>}
       </div>
     </article>
   )

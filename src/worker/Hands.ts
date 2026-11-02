@@ -1,7 +1,7 @@
 import type { Lent, Terms } from '../shared/Api.ts'
 import type { Listed } from './Gateway.ts'
 
-export type Row = { created_at: number; label: string; name: string; swarm: string }
+export type Row = { contributor: string | null; created_at: number; label: string; name: string; swarm: string }
 
 export const limit = 32
 
@@ -20,11 +20,11 @@ function suffix() {
   return Array.from(crypto.getRandomValues(new Uint8Array(3)), (byte) => byte.toString(16).padStart(2, '0')).join('')
 }
 
-export async function issue(env: Cloudflare.Env, swarm: string, label: string) {
+export async function issue(env: Cloudflare.Env, swarm: string, label: string, contributor: string | null) {
   for (let attempt = 0; attempt < 3; attempt++) {
     const name = `${slug(label)}-${suffix()}`
-    const result = await env.DB.prepare('insert or ignore into hands (swarm, name, label, created_at) values (?, ?, ?, ?)')
-      .bind(swarm, name, label, Date.now())
+    const result = await env.DB.prepare('insert or ignore into hands (swarm, name, label, contributor, created_at) values (?, ?, ?, ?, ?)')
+      .bind(swarm, name, label, contributor, Date.now())
       .run()
     if (result.meta.changes > 0) return name
   }

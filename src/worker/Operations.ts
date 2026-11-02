@@ -17,13 +17,17 @@ import type {
   Kind,
   Lent,
   Linked,
+  Me,
+  Member,
   Overview,
   Page,
   Pending,
   Pledge,
   Pledged,
+  Posted,
   Prepared,
   Requested,
+  Room,
   Round,
   Running,
   Status,
@@ -33,12 +37,14 @@ import type {
 import * as Answer from '../shared/Answer.ts'
 import * as Connect from '../shared/Connect.ts'
 import * as Memo from '../shared/Memo.ts'
+import * as Mention from '../shared/Mention.ts'
 import * as Chain from './Chain.ts'
 import * as Devices from './Devices.ts'
 import * as Hands from './Hands.ts'
 import * as Keys from './Keys.ts'
 import * as Problem from './Problem.ts'
 import * as Search from './Search.ts'
+import * as Sessions from './Sessions.ts'
 import * as Store from './Store.ts'
 import type { Snapshot } from './Payer.ts'
 import type { Paid, Swarm } from './Swarm.ts'
@@ -184,9 +190,31 @@ export const schema = {
     swarm: id,
     wait: seconds(0, `Seconds to keep polling Tempo Wallet while the pledge is pending, at most ${maxWait}.`),
   }),
+  room: z.object({
+    after: z.coerce.number().int().min(0).default(0).describe('Return the messages after this id; 0 returns the newest.'),
+    before: z.coerce.number().int().min(1).optional().describe('Return the messages before this id, to read further back.'),
+    limit: z.coerce.number().int().min(1).max(200).default(100).describe('At most this many messages.'),
+    swarm: id,
+  }),
   round: z.object({
     round: z.coerce.number().int().min(1).optional().describe('Only this round.'),
     swarm: id,
+  }),
+  say: z.object({
+    steer: decimal
+      .refine((value) => units(value) >= Mention.smallestSteer, `A steer is at least ${Memo.decimal(Mention.smallestSteer)}.`)
+      .refine((value) => units(value) <= 100_000_000n, 'A steer is at most 100.')
+      .optional()
+      .describe(
+        "With @swarm in text: how many dollars of the author's backing not yet behind a note go behind this idea, as a decimal string or a number.",
+      ),
+    swarm: id,
+    text: z
+      .string()
+      .trim()
+      .min(1)
+      .max(Mention.maxText)
+      .describe('The message. @<handle> mentions a backer. @swarm steers the swarm with the rest of the text as a note, weighted by steer.'),
   }),
   search: z.object({
     kind: z.enum(sources).optional().describe('Only hits of this kind.'),
@@ -273,6 +301,7 @@ async function load(env: Cloudflare.Env, id: string) {
 
 export function config(env: Cloudflare.Env): Config {
   return {
+    auth: Sessions.path,
     budget: {
       days: Store.budget.days,
       max: Memo.decimal(Store.budget.max),
@@ -502,7 +531,89 @@ export async function wait(env: Cloudflare.Env, input: Input<'wait'>, signal?: A
   }
 }
 
-export async function hand(env: Cloudflare.Env, input: Input<'hand'>): Promise<Problem.Result<Issued>> {
+export async function room(env: Cloudflare.Env, input: Input<'room'>, address?: Address): Promise<Problem.Result<Room>> {
+  const parsed = parse(schema.room, input)
+  if (!parsed.ok) return parsed
+  const query = parsed.value
+  if (!(await Store.exists(env, query.swarm))) return missing()
+
+  const [messages, members] = await Promise.all([
+    stub(env, query.swarm).messages({ after: query.after, before: query.before, limit: query.limit }),
+    Store.members(env, query.swarm),
+  ])
+  return Problem.ok({ me: address ? self(members, address) : null, members, messages, next: messages.at(-1)?.id ?? query.after })
+}
+
+export async function say(env: Cloudflare.Env, input: Input<'say'>, address?: Address): Promise<Problem.Result<Posted>> {
+  const parsed = parse(schema.say, input)
+  if (!parsed.ok) return parsed
+  const request = parsed.value
+  if (!address) return Problem.fail(401, 'unauthorized', 'Sign in with Tempo Wallet to post in a room.')
+  const row = await Store.find(env, request.swarm)
+  if (!row) return missing()
+
+  const members = await Store.members(env, row.id)
+  const author = members.find((member) => member.address === address)
+  if (!author)
+    return Problem.fail(403, 'not_member', "Back this swarm first: a pledge, a transfer, a daily budget or a lent machine lets you post in its room.")
+
+  const steering = Mention.steers(request.text)
+  if (!steering && request.steer !== undefined) return Problem.fail(400, 'invalid_request', 'steer goes with a message that mentions @swarm.')
+  let steer: { amount: string; note: string; noteId: string } | null = null
+  if (steering) {
+    if (row.status === 'done') return Problem.fail(409, 'conflict', 'This swarm is done, so @swarm no longer steers it.')
+    const note = Mention.idea(request.text)
+    if (note.length < 3) return Problem.fail(400, 'invalid_request', 'Say what the swarm should do after @swarm.')
+    if (note.length > Memo.maxNote) return Problem.fail(400, 'invalid_request', `A steer is at most ${Memo.maxNote} characters besides @swarm.`)
+    if (request.steer === undefined)
+      return Problem.fail(
+        400,
+        'invalid_request',
+        `@swarm steers the swarm with money: send steer, how much of your ${dollars(author.available)} not yet behind a note goes behind this idea.`,
+      )
+    const amount = units(request.steer)
+    const noteId = await Store.noteId(note)
+    if (!(await Store.steer(env, { amount, contributor: address, id: identifier(), note, note_id: noteId, swarm: row.id })))
+      return Problem.fail(
+        409,
+        'insufficient_balance',
+        `You have ${dollars(author.available)} of backing not yet behind a note, less than ${dollars(Memo.decimal(amount))}. Put new money behind this idea instead.`,
+      )
+    await logged(Search.note(env, row.id, noteId, note))
+    steer = { amount: Memo.decimal(amount), note, noteId }
+  }
+
+  const named = Mention.mentioned(request.text)
+  const message = await stub(env, row.id).say({
+    author: address,
+    mentions: members.filter((member) => named.includes(member.handle)).map((member) => member.address),
+    steer,
+    swarm: row.id,
+    text: request.text,
+  })
+  return Problem.ok({ me: self(steer ? await Store.members(env, row.id) : members, address), message })
+}
+
+export async function chatter(env: Cloudflare.Env, input: Input<'swarm'>, request: Request): Promise<Problem.Result<Response>> {
+  const parsed = parse(schema.swarm, input)
+  if (!parsed.ok) return parsed
+  if (request.headers.get('upgrade')?.toLowerCase() !== 'websocket') return Problem.fail(400, 'invalid_request', 'Open this route as a WebSocket.')
+  if (!(await Store.exists(env, parsed.value.swarm))) return missing()
+
+  return Problem.ok(await stub(env, parsed.value.swarm).fetch(new Request(`https://swarm/chat?swarm=${encodeURIComponent(parsed.value.swarm)}`, request)))
+}
+
+function dollars(amount: string) {
+  return '$' + amount.replace(/(\.\d*?)0+$/, '$1').replace(/\.$/, '')
+}
+
+function self(members: readonly Member[], address: Address): Me {
+  const found = members.find((member) => member.address === address)
+  if (found) return { ...found, member: true }
+  return { address, available: Memo.decimal(0n), backed: Memo.decimal(0n), handle: Mention.handle(address), member: false, since: 0, steered: Memo.decimal(0n), ways: [] }
+}
+
+export async function hand(env: Cloudflare.Env, input: Input<'hand'>, contributor?: Address): Promise<Problem.Result<Issued>> {
   const parsed = parse(schema.hand, input)
   if (!parsed.ok) return parsed
   const found = await Store.find(env, parsed.value.swarm)
@@ -514,7 +625,7 @@ export async function hand(env: Cloudflare.Env, input: Input<'hand'>): Promise<P
 
   const label = parsed.value.label ?? ''
   for (let attempt = 0; attempt < 3; attempt++) {
-    const name = await Hands.issue(env, row.id, label)
+    const name = await Hands.issue(env, row.id, label, contributor ?? null)
     if (!name) break
     const minted = await stub(env, row.id).hand(row.id, name)
     if (minted.ok)

@@ -47,9 +47,9 @@ function Header(props: { config: Config | undefined; path: string }) {
         </Link>
       </p>
       <div className="header-end">
-        <Link className={props.path === '/' ? 'game-nav game-nav-on' : 'game-nav'} to="/">World</Link>
-        <Link className={props.path === '/new' ? 'game-nav game-nav-on' : 'game-nav'} to="/new">New quest</Link>
-        {props.path.startsWith('/s/') && <WalletButton config={props.config} />}
+        <Link className={props.path === '/new' ? 'game-nav game-nav-on' : 'game-nav'} to="/new">Start<span className="nav-long"> a swarm</span></Link>
+        <Link className={props.path === '/' || props.path.startsWith('/s/') ? 'game-nav game-nav-on' : 'game-nav'} to="/">Join<span className="nav-long"> a swarm</span></Link>
+        <WalletButton config={props.config} />
       </div>
     </header>
   )

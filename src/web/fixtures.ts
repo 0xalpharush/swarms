@@ -1,10 +1,13 @@
 import * as Answer from '../shared/Answer.ts'
-import type { Budget, BudgetRequested, Budgeted, Config, Contributed, Contribution, Currency, Detail, Entry, Kind, Live as LiveEvent, Note, Pledge, Pledged, Requested, Researcher, Round, Status, Summary, Token } from '../shared/Api.ts'
-import { decimal, units } from '../shared/Memo.ts'
+import type { Budget, BudgetRequested, Budgeted, Chatter, Config, Contributed, Contribution, Currency, Detail, Entry, Kind, Live as LiveEvent, Me, Member, Note, Pledge, Pledged, Posted, Requested, Researcher, Room, Round, Said, Status, Summary, Token, Way } from '../shared/Api.ts'
+import { decimal, maxNote, units } from '../shared/Memo.ts'
+import * as Mention from '../shared/Mention.ts'
 
 type Line = readonly [Kind, string, (string | null)?]
 
-type Live = Omit<Detail, 'answer' | 'reason' | 'researchers'> & { cursor: number; flicker: readonly string[]; next: number; script: readonly Line[]; steered: Set<string> }
+type Backing = { amount: string; contributor: `0x${string}`; note: string }
+
+type Live = Omit<Detail, 'answer' | 'reason' | 'researchers'> & { chat: Said[]; cursor: number; flicker: readonly string[]; next: number; script: readonly Line[]; steered: Set<string>; steers: Backing[] }
 
 const minute = 60_000
 
@@ -113,6 +116,7 @@ function build(input: {
   }))
   return settle({
     budgets,
+    chat: [],
     contributions,
     contributors: 0,
     createdAt: at(input.age),
@@ -139,6 +143,7 @@ function build(input: {
     spent: input.spent,
     status: input.status,
     steered: new Set(input.steered ?? []),
+    steers: [],
     title: input.title,
     updatedAt: feed.at(-1)?.at ?? at(input.age),
     workers: input.workers,
@@ -162,8 +167,8 @@ function settle(swarm: Live) {
   swarm.daily = decimal(swarm.budgets.filter((budget) => budget.status === 'active' || budget.status === 'waiting').reduce((sum, budget) => sum + units(budget.amount), 0n))
   swarm.pool = decimal(given > units(swarm.spent) / 2n ? given - units(swarm.spent) / 2n : 0n)
   swarm.machines = swarm.hands.filter((hand) => hand.connected).length
-  const groups = new Map<string, (Pledge | Contribution)[]>()
-  for (const backing of [...swarm.pledges, ...swarm.contributions]) if (backing.note) groups.set(backing.note, [...(groups.get(backing.note) ?? []), backing])
+  const groups = new Map<string, (Pledge | Contribution | Backing)[]>()
+  for (const backing of [...swarm.pledges, ...swarm.contributions, ...swarm.steers]) if (backing.note) groups.set(backing.note, [...(groups.get(backing.note) ?? []), backing])
   swarm.notes = [...groups]
     .map(([note, pledges]): Note => {
       const weight = pledges.reduce((sum, pledge) => sum + units(pledge.amount), 0n)
@@ -300,6 +305,7 @@ const fixtures: Live[] = [
       [8, '0.150000', 22, 'Try a second pass at temperature 0'],
       [0, '0.300000', 9, 'Include Qwen3-Coder and Kimi K2.7 even if they are slow', 'usdce'],
       [1, '0.250000', 3, 'Report cost per solved task, not per token'],
+      [0, '1.000000', 100, null],
     ],
     script: benchmark,
     spent: '1.873412',
@@ -464,6 +470,7 @@ function demoTeam(swarm: Live): Researcher[] {
 
 export function config(): Promise<Config> {
   return delay({
+    auth: '/v1/auth',
     budget: { days: 30, max: '100.000000', min: '0.250000', period: 86_400 },
     chainId: 4217,
     explorer: 'https://explore.tempo.xyz',
@@ -645,4 +652,191 @@ export async function allow(key: string, budget: string): Promise<Budgeted> {
   begin(swarm)
   settle(swarm)
   return delay({ budget: allowed, swarm: summary(swarm) }, 600)
+}
+
+const talk: Record<string, readonly (readonly [number | null, string, number, string?])[]> = {
+  'bench-coders': [
+    [null, 'Round 3 started with $2.68 to spend and room for 3 explorers.', 46],
+    [1, 'Qwen3-Coder timed out on 40 tasks last round. Giving it its own machine was the right call.', 44],
+    [3, '@2 are you still pushing cost per solved task? Per-token numbers made round 2 look cheaper than it was.', 41],
+    [2, '@3 yes. A model that is cheap per token but fails half the tasks is not cheap.', 40],
+    [2, '@swarm Report cost per solved task, not per token', 39, '0.400000'],
+    [5, 'Has anyone looked at the Rust subset? 50 tasks feels small for a ranking.', 30],
+    [0, '@5 small, but every task has hidden tests. I would rather have 50 honest ones than 500 leaky ones.', 27],
+    [null, '@8 pledged 0.15 MACH behind "Try a second pass at temperature 0".', 22],
+    [8, '@swarm Try a second pass at temperature 0', 21, '0.100000'],
+    [4, 'The harness repo is up. I forked it to run the same thing on my own GPU box.', 12],
+    [1, '@4 lend the box to the swarm? It could run Qwen there instead of renting a T4.', 10],
+    [4, 'Doing that now.', 9],
+  ],
+  'json-terabyte': [
+    [null, 'Round 2 started with $0.62 to spend and room for 3 explorers.', 29],
+    [3, 'sonic-rs at 1.55 GiB/s on 8 CPUs is already past what I expected.', 25],
+    [6, '@3 the baseline matters though. serde_json makes the speedup legible to everyone else.', 20],
+    [5, 'Curious whether 16 CPUs buys anything. The lead thinks it is memory bound.', 11],
+  ],
+  'mev-map': [
+    [null, 'Round 4 completed, spending $0.405. Final report: 48,113 MEV bundles worth 18,420 USD in the first million blocks.', 1100],
+    [5, 'Sandwiches at 38% of value from 4 searchers is the headline.', 1095],
+    [1, '@5 and none of them on transfers. Payment lanes did their job.', 1092],
+    [null, 'Done. The lead agent reports the goal is met. What the swarm did not spend goes back to its backers.', 1090],
+  ],
+}
+
+const remarks = [
+  'The explorer just moved to a 4-CPU machine instead of waiting for a T4. Cheaper too.',
+  'Retrying in the same region instead of moving to eu-west was the right call.',
+  '+1 to publishing the exact prompts with the results.',
+  '@0 what made you back this one?',
+  'Watching the cost column more than the solve rate at this point.',
+]
+
+const listeners = new Map<string, Set<(event: Chatter | { type: 'open' | 'closed' }) => void>>()
+
+function spoken(text: string) {
+  return text.replace(/@(\d)\b/g, (_, index: string) => `@${Mention.handle(people[Number(index)] ?? visitor)}`)
+}
+
+function mentions(swarm: Live, text: string) {
+  const named = Mention.mentioned(text)
+  return members(swarm).filter((member) => named.includes(member.handle)).map((member) => member.address)
+}
+
+function steering(swarm: Live, amount: string, note: string): Said['steer'] {
+  const found = swarm.notes.find((item) => item.note === note)
+  return { amount, backers: found?.backers ?? 1, note, noteId: found?.id ?? id(note), round: swarm.status === 'running' ? swarm.rounds : null, share: found?.share ?? 0, weight: found?.weight ?? amount }
+}
+
+function seed(swarm: Live) {
+  if (swarm.chat.length || !talk[swarm.id]) return swarm
+  for (const [person, line, minutes, amount] of talk[swarm.id] ?? []) {
+    const author = person === null ? null : (people[person] ?? visitor)
+    const text = spoken(line)
+    let steer: Said['steer'] = null
+    if (author && amount) {
+      swarm.steers.push({ amount, contributor: author, note: Mention.idea(text) })
+      settle(swarm)
+      steer = steering(swarm, amount, Mention.idea(text))
+    }
+    swarm.chat.push({ at: at(minutes), author, id: swarm.chat.length + 1, mentions: mentions(swarm, text), steer, text })
+  }
+  return swarm
+}
+
+function members(swarm: Live): Member[] {
+  const found = new Map<`0x${string}`, { backed: bigint; since: number; steered: bigint; ways: Set<Way> }>()
+  const add = (address: `0x${string}`, amount: bigint, steered: bigint, way: Way | undefined, when: number) => {
+    const known = found.get(address) ?? { backed: 0n, since: when, steered: 0n, ways: new Set<Way>() }
+    known.backed += amount
+    known.steered += steered
+    known.since = Math.min(known.since, when)
+    if (way) known.ways.add(way)
+    found.set(address, known)
+  }
+  for (const pledge of swarm.pledges) add(pledge.contributor, units(pledge.amount), pledge.note ? units(pledge.amount) : 0n, 'pledge', pledge.at)
+  for (const gift of swarm.contributions) if (gift.kind !== 'pledge') add(gift.contributor, units(gift.amount), gift.note ? units(gift.amount) : 0n, gift.kind === 'transfer' ? 'transfer' : 'budget', gift.at)
+  for (const budget of swarm.budgets) if (budget.contributor) add(budget.contributor, 0n, 0n, 'budget', budget.at)
+  for (const steer of swarm.steers) if (found.has(steer.contributor)) add(steer.contributor, 0n, units(steer.amount), undefined, Date.now())
+  return [...found].sort((a, b) => a[1].since - b[1].since).map(([address, item]) => ({
+    address,
+    available: decimal(item.backed > item.steered ? item.backed - item.steered : 0n),
+    backed: decimal(item.backed),
+    handle: Mention.handle(address),
+    since: item.since,
+    steered: decimal(item.steered),
+    ways: [...item.ways],
+  }))
+}
+
+function me(swarm: Live, who: `0x${string}` | undefined): Me | null {
+  if (!who) return null
+  const found = members(swarm).find((member) => member.address === who)
+  return found ? { ...found, member: true } : { address: who, available: '0.000000', backed: '0.000000', handle: Mention.handle(who), member: false, since: 0, steered: '0.000000', ways: [] }
+}
+
+function fail(status: number, code: string, detail: string) {
+  return Object.assign(new Error(detail), { code, status })
+}
+
+function tell(key: string, event: Chatter) {
+  for (const listener of listeners.get(key) ?? []) listener(event)
+}
+
+export async function room(key: string, query: { after?: number; before?: number }, who: `0x${string}` | undefined): Promise<Room> {
+  const swarm = seed(await find(key))
+  const messages = query.before ? swarm.chat.filter((item) => item.id < (query.before ?? 0)).slice(-100) : query.after ? swarm.chat.filter((item) => item.id > (query.after ?? 0)) : swarm.chat.slice(-100)
+  return delay({ me: me(swarm, who), members: members(swarm), messages, next: messages.at(-1)?.id ?? query.after ?? 0 })
+}
+
+export async function say(key: string, input: { steer?: string; text: string }, who: `0x${string}` | undefined): Promise<Posted> {
+  const swarm = seed(await find(key))
+  if (!who) throw fail(401, 'unauthorized', 'Sign in with Tempo Wallet to post in a room.')
+  const self = me(swarm, who)
+  if (!self?.member) throw fail(403, 'not_member', 'Back this swarm first: a pledge, a transfer, a daily budget or a lent machine lets you post in its room.')
+  const text = input.text.trim()
+  let steer: Said['steer'] = null
+  if (Mention.steers(text)) {
+    const note = Mention.idea(text)
+    if (note.length < 3 || note.length > maxNote) throw fail(400, 'invalid_request', 'Say what the swarm should do after @swarm, in at most 280 characters.')
+    if (!input.steer) throw fail(400, 'invalid_request', '@swarm steers the swarm with money: say how much of your backing goes behind it.')
+    if (units(input.steer) > units(self.available)) throw fail(409, 'insufficient_balance', `You have $${self.available} of backing not yet behind a note. Put new money behind this idea instead.`)
+    swarm.steers.push({ amount: decimal(units(input.steer)), contributor: who, note })
+    swarm.steered.add(note)
+    settle(swarm)
+    steer = steering(swarm, decimal(units(input.steer)), note)
+    if (swarm.status === 'running') push(swarm, 'steer', `Steered the running round toward "${note}"`, null, Date.now())
+  }
+  const message: Said = { at: Date.now(), author: who, id: (swarm.chat.at(-1)?.id ?? 0) + 1, mentions: mentions(swarm, text), steer, text }
+  swarm.chat.push(message)
+  tell(key, { message, type: 'said' })
+  return delay({ me: me(swarm, who) ?? { ...self }, message }, 250)
+}
+
+export function chatter(key: string, listener: (event: Chatter | { type: 'open' | 'closed' }) => void) {
+  let alive = true
+  let timer: ReturnType<typeof setTimeout> | undefined
+  let here = false
+  let turn = 0
+  const set = listeners.get(key) ?? new Set()
+  set.add(listener)
+  listeners.set(key, set)
+  const presence = () => listener({ online: [people[1], people[4], ...(here ? [visitor as `0x${string}`] : [])], type: 'presence', watching: 7 + (here ? 1 : 0) })
+  const next = () => {
+    timer = setTimeout(() => {
+      void find(key).then((swarm) => {
+        if (!alive) return
+        if (swarm.status !== 'running') return next()
+        const person = [1, 3, 5, 4, 2][turn % 5] ?? 1
+        const author = people[person] ?? visitor
+        listener({ address: author, type: 'typing' })
+        setTimeout(() => {
+          if (!alive) return
+          const text = spoken(remarks[turn % remarks.length] ?? '')
+          turn++
+          const message: Said = { at: Date.now(), author, id: (seed(swarm).chat.at(-1)?.id ?? 0) + 1, mentions: mentions(swarm, text), steer: null, text }
+          swarm.chat.push(message)
+          tell(key, { message, type: 'said' })
+          next()
+        }, 2400)
+      })
+    }, 14_000 + ((turn * 7919) % 9000))
+  }
+  setTimeout(() => {
+    if (!alive) return
+    listener({ type: 'open' })
+    presence()
+    next()
+  }, 200)
+  return {
+    close: () => {
+      alive = false
+      clearTimeout(timer)
+      set.delete(listener)
+    },
+    hello: () => {
+      here = true
+      presence()
+    },
+    typing: () => {},
+  }
 }

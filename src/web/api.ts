@@ -1,4 +1,4 @@
-import type { BudgetRequested, Budgeted, Config, Contributed, Currency, Detail, Entry, Issued, Lent, Live, Pledged, Problem, Requested, Summary, Token } from '../shared/Api.ts'
+import type { BudgetRequested, Budgeted, Chatter, Config, Contributed, Currency, Detail, Entry, Issued, Lent, Live, Pledged, Posted, Problem, Requested, Room, Summary, Token } from '../shared/Api.ts'
 import * as Fixtures from './fixtures.ts'
 
 export const fixture = new URLSearchParams(location.search).has('fixture')
@@ -15,8 +15,15 @@ export class Failure extends Error {
 
 let loaded: Promise<Config> | undefined
 
+let bearer: string | undefined
+
+export function authorize(token: string | undefined) {
+  bearer = token
+}
+
 async function request<T>(path: string, body?: unknown): Promise<T> {
-  const response = await fetch(path, body === undefined ? undefined : { body: JSON.stringify(body), headers: { 'content-type': 'application/json' }, method: 'POST' })
+  const headers: Record<string, string> = bearer ? { authorization: `Bearer ${bearer}` } : {}
+  const response = await fetch(path, body === undefined ? { headers } : { body: JSON.stringify(body), headers: { ...headers, 'content-type': 'application/json' }, method: 'POST' })
   const data: unknown = await response.json().catch(() => undefined)
   if (response.ok) return data as T
   throw new Failure((data ?? {}) as Partial<Problem>, response.status)
@@ -106,6 +113,58 @@ export function hand(id: string, label: string) {
   return fixture
     ? Promise.reject(new Failure({ detail: 'Hands need the live site.' }, 503))
     : request<Issued>(`${path(id)}/hands`, label ? { label } : {})
+}
+
+export function room(id: string, query: { after?: number; before?: number } = {}) {
+  const search = new URLSearchParams()
+  if (query.after) search.set('after', String(query.after))
+  if (query.before) search.set('before', String(query.before))
+  return fixture ? Fixtures.room(id, query, bearer ? Fixtures.visitor : undefined) : request<Room>(`${path(id)}/chat?${search}`)
+}
+
+export function say(id: string, input: { steer?: string; text: string }) {
+  return fixture ? Fixtures.say(id, input, bearer ? Fixtures.visitor : undefined) : request<Posted>(`${path(id)}/chat`, input)
+}
+
+export type Line = { close: () => void; hello: () => void; typing: () => void }
+
+export function chatter(id: string, listener: (event: Chatter | { type: 'open' | 'closed' }) => void): Line {
+  if (fixture) return Fixtures.chatter(id, listener)
+  let alive = true
+  let socket: WebSocket | undefined
+  let timer: ReturnType<typeof setTimeout> | undefined
+  let ping: ReturnType<typeof setInterval> | undefined
+  const send = (data: string) => {
+    if (socket?.readyState === WebSocket.OPEN) socket.send(data)
+  }
+  const hello = () => send(JSON.stringify({ token: bearer ?? '', type: 'hello' }))
+  const open = () => {
+    socket = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}${path(id)}/chat/live`)
+    socket.onopen = () => {
+      if (bearer) hello()
+      listener({ type: 'open' })
+      ping = setInterval(() => send('ping'), 30_000)
+    }
+    socket.onmessage = (message) => {
+      if (message.data !== 'pong') listener(JSON.parse(String(message.data)) as Chatter)
+    }
+    socket.onclose = () => {
+      clearInterval(ping)
+      listener({ type: 'closed' })
+      if (alive) timer = setTimeout(open, 3000)
+    }
+  }
+  open()
+  return {
+    close: () => {
+      alive = false
+      clearTimeout(timer)
+      clearInterval(ping)
+      socket?.close()
+    },
+    hello,
+    typing: () => send('{"type":"typing"}'),
+  }
 }
 
 export function confirm(id: string, pledge: string, keyAuthorization: unknown) {

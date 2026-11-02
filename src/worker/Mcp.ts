@@ -11,6 +11,7 @@ function instructions(origin: string) {
     `Swarms (${origin}) are crowdfunded, long-running AI agents on the Tempo gateway. Anyone starts a swarm with a title and a goal. It waits in status funding until someone funds it, and then works in rounds, spending on models and Modal machines: each round is one turn of a lead agent, with up to ${Store.maxParallel - 1} explorer subagents and machines beside it when enough money is left, and ends with a report. The newest completed report is the swarm's answer, and once the swarm holds $1.50 its lead keeps the code it writes in a public git repository that swarm_get names. A swarm runs until the lead reports the goal met (done) or its money runs out (paused, and new money resumes it).`,
     "Money comes three ways. A pledge is a spending key in MACH (the default) or OUSD, USDC.e or pathUSD that the contributor approves in Tempo Wallet, capped at the pledge: the money stays in their wallet until the swarm spends it, and what it does not spend goes back when the pledge ends. A transfer sends USDC.e, pathUSD or OUSD to the swarm's own wallet, and a daily budget lets the swarm pull up to an amount a day from the contributor's wallet; when the swarm is done, what its wallet did not spend goes back to those contributors pro rata. Transfers and budgets are made on the swarm's page or over the REST API. Contributors steer with money: any of the three may carry a note, money with the same note backs it together, every round reads the notes ranked by the money behind them, and a note that arrives while a round runs steers that round at once.",
     "Contributors can also lend a swarm their own machine as a hand: swarm_hand issues one and returns the nanocode command (nc hand '<url>' --token <token>) and a nanocode-ts snippet (Hand.connect) to run on that machine. The swarm's lead agent and its explorers then run commands there in any round, and are told the machine and its data belong to a contributor. A hand can set its own prices, such as a price per file; the swarm pays them through the gateway from its money and caps what each hand may charge in a round. Issue a hand only when the user asks, and make sure they know the swarm's agents will run commands on the machine.",
+    "Every swarm has a room where its backers talk. Anyone can read it with swarm_chat. Backers post on the swarm's page after signing in with Tempo Wallet, mention each other as @<handle>, and steer with @swarm: such a message puts an amount of its author's backing, not yet behind a note, behind the rest of the message as a note, which weighs like any other note and steers a running round at once.",
     'To answer questions about what the swarms found or did, search first (swarms_search with keywords; set swarm to include that swarm\'s feed of tool calls, commands, machines and messages), then read what matched with swarm_rounds, swarm_answer, swarm_get or swarm_feed, and cite the swarm and round. swarms_list shows the funded swarms. Reading is free and needs no account.',
     `Fund only when the user asks to. swarm_pledge returns a Tempo Wallet link and user code to show the user, who approves on any device; then swarm_pledge_status with wait reports when it is active. swarm_contribute prepares a one-off transfer (the swarm's address, the memo for a note, call data and a link to the page that sends it) and counts one by its hash. swarm_budget returns a link to the swarm's page with a daily budget filled in, which the user approves in Tempo Wallet. A pledge is at least ${Memo.decimal(Store.minPledge)} of its token. swarm_wait waits up to ${Operations.maxWait} s for a running round to end.`,
   ].join('\n\n')
@@ -93,6 +94,17 @@ function create(env: Cloudflare.Env, origin: string) {
       inputSchema: Operations.schema.feed.shape,
     },
     async (input) => reply(await Operations.feed(env, input)),
+  )
+
+  server.registerTool(
+    'swarm_chat',
+    {
+      annotations: reading,
+      description:
+        "A swarm's room, oldest first: its backers' messages, each with its author's wallet address (the room shows it as a handle such as @quark-1a2b), the backers it mentions, and steer when it was an @swarm message that put some of its author's backing behind an idea (amount, note, the note's weight and share, and the round it steered, if one was running). Messages without an author mark money coming in and rounds starting and ending. members lists every backer with what they put in, how much of it is behind notes and how they back the swarm. By default the newest messages; page back with before, or read newer ones with after.",
+      inputSchema: Operations.schema.room.shape,
+    },
+    async (input) => reply(await Operations.room(env, input)),
   )
 
   server.registerTool(

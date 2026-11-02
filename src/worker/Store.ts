@@ -1,5 +1,8 @@
-import type { Answer, Budget, Contribution, Currency, Note, Pledge, Summary } from '../shared/Api.ts'
+import type { Answer, Budget, Contribution, Currency, Member, Note, Pledge, Summary, Way } from '../shared/Api.ts'
 import * as Memo from '../shared/Memo.ts'
+import * as Mention from '../shared/Mention.ts'
+
+const ways = ['pledge', 'budget', 'transfer', 'machine'] as const satisfies readonly Way[]
 
 export type Row = {
   answer: string | null
@@ -457,6 +460,8 @@ export async function notes(
       select note_id, note, cast(amount as integer) as weight, contributor from budgets where swarm = ?1 and period = 0 and status != 'pending' and note_id is not null
       union all
       select note_id, note, cast(amount as integer) as weight, contributor from contributions where swarm = ?1 and kind != 'pledge' and note_id is not null
+      union all
+      select note_id, note, cast(amount as integer) as weight, contributor from steers where swarm = ?1
     ) group by note_id order by weight desc limit 50`,
   )
     .bind(swarm)
@@ -469,6 +474,57 @@ export async function notes(
     steered: steered.has(row.id),
     weight: Memo.decimal(BigInt(row.weight)),
   }))
+}
+
+const backing = `select contributor, amount, note_id, way, at from (
+  select lower(contributor) as contributor, cast(amount as integer) as amount, note_id, 'pledge' as way, created_at as at from pledges where swarm = ?1 and status != 'pending'
+  union all
+  select contributor, case when period = 0 then cast(amount as integer) else 0 end, case when period = 0 then note_id end, case when period = 0 then 'pledge' else 'budget' end, created_at from budgets where swarm = ?1 and status != 'pending' and contributor is not null
+  union all
+  select contributor, case when kind = 'pledge' then 0 else cast(amount as integer) end, case when kind != 'pledge' then note_id end, case kind when 'transfer' then 'transfer' when 'pull' then 'budget' else 'pledge' end, created_at from contributions where swarm = ?1
+  union all
+  select lower(contributor), 0, null, 'machine', created_at from hands where swarm = ?1 and contributor is not null
+)`
+
+const steered = 'coalesce((select sum(cast(amount as integer)) from steers where swarm = ?1 and contributor = b.contributor), 0)'
+
+export async function members(env: Cloudflare.Env, swarm: string): Promise<Member[]> {
+  const { results } = await env.DB.prepare(
+    `select b.contributor as address, sum(b.amount) as backed, sum(case when b.note_id is not null then b.amount else 0 end) + ${steered} as steered,
+      group_concat(distinct b.way) as ways, min(b.at) as since
+    from (${backing}) b group by b.contributor order by min(b.at)`,
+  )
+    .bind(swarm)
+    .all<{ address: `0x${string}`; backed: number; since: number; steered: number; ways: string }>()
+  return results.map((row) => {
+    const backed = BigInt(row.backed)
+    const allocated = BigInt(row.steered)
+    return {
+      address: row.address,
+      available: Memo.decimal(backed > allocated ? backed - allocated : 0n),
+      backed: Memo.decimal(backed),
+      handle: Mention.handle(row.address),
+      since: row.since,
+      steered: Memo.decimal(allocated),
+      ways: ways.filter((way) => row.ways.split(',').includes(way)),
+    }
+  })
+}
+
+export async function steer(
+  env: Cloudflare.Env,
+  input: { amount: bigint; contributor: string; id: string; note: string; note_id: string; swarm: string },
+) {
+  const result = await env.DB.prepare(
+    `insert into steers (id, swarm, contributor, note, note_id, amount, created_at)
+    select ?3, ?1, ?2, ?4, ?5, ?6, ?7 where (
+      select coalesce(sum(b.amount), 0) - coalesce(sum(case when b.note_id is not null then b.amount else 0 end), 0) - ${steered}
+      from (${backing}) b where b.contributor = ?2
+    ) >= cast(?6 as integer)`,
+  )
+    .bind(input.swarm, input.contributor.toLowerCase(), input.id, input.note, input.note_id, String(input.amount), Date.now())
+    .run()
+  return result.meta.changes > 0
 }
 
 export async function noteId(note: string) {

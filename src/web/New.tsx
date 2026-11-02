@@ -13,11 +13,17 @@ const stages = ['Choose', 'Equip', 'Launch'] as const
 const working = { create: 'Preparing your swarm…', request: 'Preparing your budget…', approve: 'Approve in Tempo Wallet…', confirm: 'Launching…' } as const
 const titles = ['Pick your first quest.', 'Choose a budget.', 'Ready for discovery?'] as const
 
+function starter() {
+  const asked = new URLSearchParams(location.search).get('q')
+  return asked === null ? undefined : questions[Number(asked)]
+}
+
 export function New(props: { config: Config | undefined }) {
-  const [stage, setStage] = useState(0)
-  const [question, setQuestion] = useState('')
-  const [title, setTitle] = useState('')
-  const [goal, setGoal] = useState('')
+  const [picked] = useState(starter)
+  const [stage, setStage] = useState(picked ? 1 : 0)
+  const [question, setQuestion] = useState<string>(picked?.title ?? '')
+  const [title, setTitle] = useState<string>(picked?.title ?? '')
+  const [goal, setGoal] = useState<string>(picked?.goal ?? '')
   const [amount, setAmount] = useState('2')
   const [note, setNote] = useState('')
   const [token, setToken] = useState<Currency>('mach')
@@ -50,9 +56,10 @@ export function New(props: { config: Config | undefined }) {
   return (
     <div className="page quest-onboarding">
       <nav aria-label="Quest setup" className="quest-steps">
-        {stages.map((label, index) => <button aria-current={stage === index ? 'step' : undefined} className="quest-step" data-reached={index <= stage} disabled={busy || index > stage || (index === 0 && !!state.created)} key={label} onClick={() => setStage(index)} type="button"><span>{index < stage ? '✓' : `0${index + 1}`}</span>{label}</button>)}
+        <Link className="quest-step" data-reached="true" to="/"><span>✓</span>Path</Link>
+        {stages.map((label, index) => <button aria-current={stage === index ? 'step' : undefined} className="quest-step" data-reached={index <= stage} disabled={busy || index > stage || (index === 0 && !!state.created)} key={label} onClick={() => setStage(index)} type="button"><span>{index < stage ? '✓' : `0${index + 2}`}</span>{label}</button>)}
       </nav>
-      <div className="quest-heading"><p className="label">New expedition</p><h1 ref={heading} tabIndex={-1}>{titles[stage]}</h1><p>{stage === 0 ? 'Choose a challenge. Your team takes it from here.' : stage === 1 ? 'A fixed budget. You stay in control.' : 'Your question. Your team. One shared adventure.'}</p></div>
+      <div className="quest-heading"><p className="label">Path A · New swarm</p><h1 ref={heading} tabIndex={-1}>{titles[stage]}</h1><p>{stage === 0 ? 'Choose a challenge. Your team takes it from here.' : stage === 1 ? 'A fixed budget. You stay in control.' : 'Your question. Your team. One shared adventure.'}</p></div>
       <form onSubmit={(event) => { event.preventDefault(); if (stage === 0 && questionReady) { if (!goal) { const next = brief(question); setTitle(next.title); setGoal(next.goal) } setStage(1) } else if (stage === 1 && budgetReady) setStage(2); else if (stage === 2) void submit() }}>
         {stage === 0 && <div className="quest-choose">
           <div className="quest-options">{questions.map((item, index) => <button className="quest-option" key={item.title} onClick={() => { setQuestion(item.title); setTitle(item.title); setGoal(item.goal); setStage(1) }} type="button"><span aria-hidden="true" className={`quest-emblem quest-emblem-${index}`}><i /><i /><i /></span><span className="quest-option-title">{item.label}</span><span className="quest-option-hint">{item.hint}</span><span aria-hidden="true" className="quest-option-arrow">↗</span></button>)}</div>

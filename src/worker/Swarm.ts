@@ -1,11 +1,12 @@
 import { DurableObject } from 'cloudflare:workers'
 import type { Account, Address, Hex } from 'viem'
 import { keccak256, stringToHex } from 'viem'
-import type { Code, Currency, Entry, Hand, Kind, Live, Note, Researcher, Round, Terms, Token } from '../shared/Api.ts'
+import type { Chatter, Code, Currency, Entry, Hand, Kind, Live, Note, Researcher, Round, Said, Steer, Terms, Token } from '../shared/Api.ts'
 import { advance, researchId } from '../shared/Research.ts'
 import { type Buffers, clip, memory, narrate, redact } from '../shared/Trail.ts'
 import * as Answer from '../shared/Answer.ts'
 import * as Memo from '../shared/Memo.ts'
+import * as Mention from '../shared/Mention.ts'
 import * as Chain from './Chain.ts'
 import * as Gateway from './Gateway.ts'
 import * as Hands from './Hands.ts'
@@ -13,6 +14,7 @@ import * as Keys from './Keys.ts'
 import * as Payer from './Payer.ts'
 import * as Seal from './Seal.ts'
 import * as Search from './Search.ts'
+import * as Sessions from './Sessions.ts'
 import * as Store from './Store.ts'
 import * as Vault from './Vault.ts'
 
@@ -55,6 +57,14 @@ export type View = {
   steered: string[]
 }
 
+export type Spoken = {
+  author: Address
+  mentions: Address[]
+  steer: { amount: string; note: string; noteId: string } | null
+  swarm: string
+  text: string
+}
+
 export type Pay = {
   app?: string | undefined
   attempt?: number | undefined
@@ -85,6 +95,7 @@ const schema = [
   'CREATE TABLE IF NOT EXISTS feed (seq INTEGER PRIMARY KEY AUTOINCREMENT, at INTEGER NOT NULL, round INTEGER NOT NULL, kind TEXT NOT NULL, text TEXT NOT NULL, detail TEXT)',
   "CREATE TABLE IF NOT EXISTS rounds (n INTEGER PRIMARY KEY, turn TEXT NOT NULL, started_at INTEGER NOT NULL, ended_at INTEGER, status TEXT NOT NULL, message TEXT, spent_before TEXT NOT NULL, spent TEXT NOT NULL DEFAULT '0')",
   'CREATE TABLE IF NOT EXISTS steered (note TEXT PRIMARY KEY, at INTEGER NOT NULL)',
+  "CREATE TABLE IF NOT EXISTS chat (id INTEGER PRIMARY KEY AUTOINCREMENT, at INTEGER NOT NULL, author TEXT, text TEXT NOT NULL, mentions TEXT NOT NULL DEFAULT '[]', steer TEXT)",
 ]
 
 const columns = [
@@ -142,6 +153,7 @@ export class Swarm extends DurableObject<Cloudflare.Env> {
     for (const [table, column, statement] of columns)
       if (!ctx.storage.sql.exec<{ name: string }>(`PRAGMA table_info(${table})`).toArray().some((row) => row.name === column))
         ctx.storage.sql.exec(statement)
+    ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair('ping', 'pong'))
   }
 
   get kv() {
@@ -155,6 +167,7 @@ export class Swarm extends DurableObject<Cloudflare.Env> {
       `${short(input.contributor)} pledged ${trim(input.amount)} ${Chain.currencies[input.token].symbol}${input.note ? ' with a note' : ''}`,
       input.note,
     )
+    this.announce(`@${Mention.handle(input.contributor)} pledged ${trim(input.amount)} ${Chain.currencies[input.token].symbol}${input.note ? ` behind "${input.note}"` : ''}.`)
     if (input.noteId) await this.steer(input.swarm, input.noteId, `pledged ${trim(input.amount)} ${Chain.currencies[input.token].symbol}`)
     if (!this.kv.get<string>('turn')) await this.ctx.storage.setAlarm(Date.now())
   }
@@ -167,6 +180,7 @@ export class Swarm extends DurableObject<Cloudflare.Env> {
       `${short(input.contributor)} sent ${trim(input.amount)} ${Chain.tokens[input.token].symbol}${input.note ? ' with a note' : ''}`,
       [input.note, input.hash].filter(Boolean).join('\n'),
     )
+    this.announce(`@${Mention.handle(input.contributor)} sent ${trim(input.amount)} ${Chain.tokens[input.token].symbol}${input.note ? ` behind "${input.note}"` : ''}.`)
     if (input.noteId) await this.steer(input.swarm, input.noteId, `sent ${trim(input.amount)} ${Chain.tokens[input.token].symbol}`)
     if (!this.kv.get<string>('turn')) await this.ctx.storage.setAlarm(Date.now())
   }
@@ -178,6 +192,7 @@ export class Swarm extends DurableObject<Cloudflare.Env> {
       `${short(input.contributor)} set a budget of ${trim(input.amount)} ${Chain.currencies[input.token].symbol} ${per(input.period)}${input.note ? ' with a note' : ''}`,
       input.note,
     )
+    this.announce(`@${Mention.handle(input.contributor)} set a daily budget of ${trim(input.amount)} ${Chain.currencies[input.token].symbol}${input.note ? ` behind "${input.note}"` : ''}.`)
     if (!this.kv.get<string>('turn')) await this.ctx.storage.setAlarm(Date.now())
   }
 
@@ -274,6 +289,7 @@ export class Swarm extends DurableObject<Cloudflare.Env> {
   }
 
   override async fetch(request: Request) {
+    if (new URL(request.url).pathname === '/chat') return this.socket(request)
     const id = this.kv.get<string>('id')
     const agent = this.kv.get<string>('agent')
     const turn = this.kv.get<string>('turn')
@@ -406,6 +422,7 @@ export class Swarm extends DurableObject<Cloudflare.Env> {
       `Round ${n} started with ${dollars(money.left)} payable across the contributions, ${parallel === 1 ? 'so the lead works alone' : `room for ${parallel - 1} explorer${parallel === 2 ? '' : 's'} beside the lead`}.`,
       text,
     )
+    this.announce(`Round ${n} started with ${dollars(money.left)} to spend${parallel > 1 ? ` and room for ${parallel - 1} explorer${parallel === 2 ? '' : 's'}` : ''}.`)
     return now + followMs
   }
 
@@ -501,6 +518,7 @@ export class Swarm extends DurableObject<Cloudflare.Env> {
       `Round ${n} ${status}, spending ${dollars(spent > 0n ? spent : 0n)}${commits.length ? ` and pushing ${commits.length} commit${commits.length === 1 ? '' : 's'} to ${repo.name}` : ''}.`,
       status === 'completed' ? (commits.length ? commits.map((commit) => `${commit.sha.slice(0, 7)} ${commit.message.split('\n')[0]}`).join('\n') : null) : message,
     )
+    this.announce(`Round ${n} ${status}, spending ${dollars(spent > 0n ? spent : 0n)}.${status === 'completed' && message ? ` ${Answer.excerpt(Answer.parse(n, redact(message), 0).text, 280)}` : ''}`)
 
     const failures = status === 'completed' ? 0 : (this.kv.get<number>('failures') ?? 0) + 1
     this.kv.put('failures', failures)
@@ -1042,6 +1060,7 @@ export class Swarm extends DurableObject<Cloudflare.Env> {
     await Store.end(this.env, row.id)
     this.kv.put('refundAt', Date.now())
     await Store.update(this.env, row.id, { machines: 0, status: 'done', workers: 0 })
+    this.announce(`Done. ${reason} What the swarm did not spend goes back to its backers.`)
     this.log(
       'status',
       `Done. ${reason} Every channel closes and returns what it did not spend, budgets and pledges stop, and what the swarm's wallet did not spend goes back to its contributors in proportion to what each put in.`,
@@ -1223,19 +1242,19 @@ export class Swarm extends DurableObject<Cloudflare.Env> {
     if (sent.ok) this.log('steer', `Told the lead about ${joined.map((hand) => hand.name).join(', ')}.`)
   }
 
-  async steer(swarm: string, noteId: string, what: string) {
+  async steer(swarm: string, noteId: string, what: string): Promise<Note | undefined> {
     const row = await Store.find(this.env, swarm)
     const agent = this.kv.get<string>('agent')
     const turn = this.kv.get<string>('turn')
-    if (!row || !agent || !turn || !this.kv.get<string>('secret')) return
+    if (!row || !agent || !turn || !this.kv.get<string>('secret')) return undefined
 
     const note = (await this.notes(row)).find((found) => found.id === noteId)
-    if (!note) return
+    if (!note) return undefined
     const sent = await Gateway.prompt(this.env, swarm, agent, {
       prompt: `A contributor just ${what} behind this note, which now has ${dollars(Memo.units(note.weight))} behind it (${percent(note.share)} of everything contributed, ${note.backers} backer${note.backers === 1 ? '' : 's'}): "${note.note}". Steer the swarm toward it in proportion to that weight.`,
       steer: true,
     })
-    if (!sent.ok) return
+    if (!sent.ok) return undefined
 
     this.ctx.storage.sql.exec('INSERT OR REPLACE INTO steered (note, at) VALUES (?, ?)', note.id, Date.now())
     this.log(
@@ -1243,6 +1262,115 @@ export class Swarm extends DurableObject<Cloudflare.Env> {
       `Steered the running round toward "${clip(note.note, 120)}"`,
       `${dollars(Memo.units(note.weight))} behind it, ${percent(note.share)} of everything contributed`,
     )
+    return note
+  }
+
+  messages(query: { after: number; before?: number | undefined; limit: number }): Said[] {
+    const sql = this.ctx.storage.sql
+    const columns = 'SELECT id, at, author, text, mentions, steer FROM chat'
+    const rows =
+      query.before !== undefined
+        ? sql.exec<Record<string, SqlStorageValue>>(`${columns} WHERE id < ? ORDER BY id DESC LIMIT ?`, query.before, query.limit).toArray().reverse()
+        : query.after > 0
+          ? sql.exec<Record<string, SqlStorageValue>>(`${columns} WHERE id > ? ORDER BY id LIMIT ?`, query.after, query.limit).toArray()
+          : sql.exec<Record<string, SqlStorageValue>>(`${columns} ORDER BY id DESC LIMIT ?`, query.limit).toArray().reverse()
+    return rows.map(said)
+  }
+
+  async say(input: Spoken): Promise<Said> {
+    this.kv.put('id', input.swarm)
+    let steer: Steer | null = null
+    if (input.steer) {
+      const spent = Memo.units(input.steer.amount)
+      const sent = await this.steer(input.swarm, input.steer.noteId, `put ${dollars(spent)} of their backing, from the swarm's room,`)
+      const row = sent ? null : await Store.find(this.env, input.swarm)
+      const note = sent ?? (row ? (await this.notes(row)).find((found) => found.id === input.steer?.noteId) : undefined)
+      steer = {
+        amount: input.steer.amount,
+        backers: note?.backers ?? 1,
+        note: input.steer.note,
+        noteId: input.steer.noteId,
+        round: sent ? (this.kv.get<number>('round') ?? null) : null,
+        share: note?.share ?? 0,
+        weight: note?.weight ?? input.steer.amount,
+      }
+    }
+    return this.speak(input.author, input.text, input.mentions, steer)
+  }
+
+  announce(text: string) {
+    this.speak(null, redact(text), [], null)
+  }
+
+  speak(author: Address | null, text: string, mentions: Address[], steer: Steer | null): Said {
+    const at = Date.now()
+    const row = this.ctx.storage.sql
+      .exec<{ id: number }>(
+        'INSERT INTO chat (at, author, text, mentions, steer) VALUES (?, ?, ?, ?, ?) RETURNING id',
+        at,
+        author,
+        text,
+        JSON.stringify(mentions),
+        steer ? JSON.stringify(steer) : null,
+      )
+      .one()
+    const message: Said = { at, author, id: Number(row.id), mentions, steer, text }
+    this.broadcast({ message, type: 'said' })
+    return message
+  }
+
+  socket(request: Request) {
+    if (request.headers.get('upgrade')?.toLowerCase() !== 'websocket') return new Response('Open the room as a WebSocket.', { status: 426 })
+    const [client, server] = Object.values(new WebSocketPair()) as [WebSocket, WebSocket]
+    this.ctx.acceptWebSocket(server)
+    server.serializeAttachment({ address: null })
+    this.presence()
+    return new Response(null, { status: 101, webSocket: client })
+  }
+
+  override async webSocketMessage(socket: WebSocket, data: string | ArrayBuffer) {
+    if (typeof data !== 'string' || data.length > 1000) return
+    let event: { token?: unknown; type?: unknown }
+    try {
+      event = JSON.parse(data) as typeof event
+    } catch {
+      return
+    }
+    if (event.type === 'hello') {
+      const address = typeof event.token === 'string' ? await Sessions.holder(this.env, event.token.slice(0, 200)) : undefined
+      socket.serializeAttachment({ address: address ?? null })
+      this.presence()
+    }
+    if (event.type === 'typing') {
+      const address = attached(socket)
+      if (address) this.broadcast({ address, type: 'typing' }, socket)
+    }
+  }
+
+  override async webSocketClose(socket: WebSocket, code: number) {
+    try {
+      socket.close(code === 1005 || code === 1006 ? 1000 : code, 'Closed')
+    } catch {}
+    this.presence(socket)
+  }
+
+  override async webSocketError(socket: WebSocket) {
+    this.presence(socket)
+  }
+
+  presence(gone?: WebSocket) {
+    const sockets = this.ctx.getWebSockets().filter((socket) => socket !== gone)
+    const online = [...new Set(sockets.flatMap((socket) => attached(socket) ?? []))]
+    this.broadcast({ online, type: 'presence', watching: sockets.length }, gone)
+  }
+
+  broadcast(event: Chatter, except?: WebSocket) {
+    const data = JSON.stringify(event)
+    for (const socket of this.ctx.getWebSockets())
+      if (socket !== except)
+        try {
+          socket.send(data)
+        } catch {}
   }
 
   async notes(row: Store.Row) {
@@ -1554,6 +1682,22 @@ function listed(notes: Note[]) {
         `${index + 1}. "${note.note}" (${dollars(Memo.units(note.weight))}, ${percent(note.share)}, ${note.backers} backer${note.backers === 1 ? '' : 's'})`,
     )
     .join('\n')
+}
+
+function said(row: Record<string, SqlStorageValue>): Said {
+  return {
+    at: Number(row['at']),
+    author: row['author'] === null ? null : (String(row['author']) as Address),
+    id: Number(row['id']),
+    mentions: JSON.parse(String(row['mentions'] ?? '[]')) as Address[],
+    steer: row['steer'] === null ? null : (JSON.parse(String(row['steer'])) as Steer),
+    text: String(row['text']),
+  }
+}
+
+function attached(socket: WebSocket) {
+  const attachment = socket.deserializeAttachment() as { address: Address | null } | null
+  return attachment?.address ?? undefined
 }
 
 function entry(row: Record<string, SqlStorageValue>): Entry {
