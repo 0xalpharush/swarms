@@ -40,7 +40,7 @@ function backers(count: number) {
 
 function document(origin: string, path: string, title: string, description: string, content: string, context: object, status = 200, request?: URL) {
   const url = `${origin}${path}`
-  const image = `${origin}/xframe-card.jpg`
+  const image = `${origin}/xframe-card.jpg?v=2`
   const hosted = request !== undefined && !request.searchParams.has('xframes-content')
   const tags = `<meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover">
