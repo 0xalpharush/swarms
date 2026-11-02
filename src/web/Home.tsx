@@ -16,7 +16,7 @@ function Tile(props: { swarm: Summary }) {
       <Link className="tile-swarm" to={`/s/${swarm.id}`}>
         <span className="tile-top">
           <Status status={swarm.status} />
-          <span>{swarm.status === 'done' ? `${swarm.rounds} rounds` : swarm.rounds ? `Round ${swarm.rounds}` : 'Round 1 next'}</span>
+          <span>{swarm.status === 'running' ? 'Working now' : swarm.status === 'done' ? 'Finished' : swarm.status === 'paused' ? 'Waiting for money' : 'Starts when backed'}</span>
         </span>
         <span className="tile-title">{swarm.title}</span>
         <span className="tile-meta">
@@ -59,7 +59,7 @@ export function Home() {
         <section aria-labelledby="path-new" className="path path-new">
           <p className="path-kicker"><span>A</span>New swarm</p>
           <h2 id="path-new">Ask a new question</h2>
-          <p className="path-copy">Pick a starter or write your own. Set a budget and launch: a lead AI and its explorers start working in the open.</p>
+          <p className="path-copy">Pick a starter or write your own. Set a budget and launch: one AI agent starts working on it in the open, and keeps going while the money lasts.</p>
           <ol className="path-track"><li>Question</li><li>Budget</li><li>Launch</li></ol>
           <ul className="path-starters">
             {questions.map((item, index) => (
@@ -99,7 +99,7 @@ export function Home() {
         </section>
       </div>
       <p className="start-fine">
-        Every swarm works in rounds paid from its backers' money, and gives back what it does not spend. {Api.fixture ? 'These swarms are demo data.' : <Link to="/docs">Use it from code</Link>}
+        Every swarm is one long-running agent, paid from its backers' money, that gives back what it does not spend. {Api.fixture ? 'These swarms are demo data.' : <Link to="/docs">Use it from code</Link>}
       </p>
     </div>
   )

@@ -90,19 +90,14 @@ function Timeline(props: {
   more: boolean
   onMore: () => void
   onPick: (sha: string) => void
-  rounds: ReadonlyMap<string, number>
   selected: string
 }) {
   const now = useNow()
   return (
     <ol className="repo-commits">
-      {props.commits.map((commit, index) => {
-        const round = props.rounds.get(commit.sha)
-        const previous = props.commits[index - 1]
-        const opens = round !== undefined && (previous === undefined || props.rounds.get(previous.sha) !== round)
+      {props.commits.map((commit) => {
         return (
           <li data-fresh={props.fresh.has(commit.sha)} data-on={commit.sha === props.selected} key={commit.sha}>
-            {opens && <p className="repo-round">Round {round}</p>}
             <button onClick={() => props.onPick(commit.sha)} type="button">
               <span className="repo-commit-title">{title(commit)}</span>
               <span className="repo-commit-meta">
@@ -189,12 +184,6 @@ function Browser(props: { base: string; detail: Detail; live: boolean }) {
     }
   }, [props.base, ref])
 
-  const rounds = useMemo(() => {
-    const map = new Map<string, number>()
-    for (const round of props.detail.history) for (const sha of round.commits) map.set(sha, round.n)
-    return map
-  }, [props.detail.history])
-
   const older = async () => {
     if (!log?.cursor) return
     const page = await read<{ commits: Commit[]; cursor: string | null }>(`${props.base}/log?ref=main&limit=50&cursor=${encodeURIComponent(log.cursor)}`).catch(() => undefined)
@@ -208,7 +197,7 @@ function Browser(props: { base: string; detail: Detail; live: boolean }) {
   if (!ref)
     return (
       <p className="empty">
-        No commits yet. {props.live ? 'The swarm is working: each commit appears here as it lands.' : 'Each round pushes what it made, and it shows up here.'}
+        No commits yet. {props.live ? 'The swarm is working: each commit appears here as it lands.' : 'Each commit the agent pushes shows up here.'}
       </p>
     )
 
@@ -246,7 +235,6 @@ function Browser(props: { base: string; detail: Detail; live: boolean }) {
               <code>{ref.slice(0, 7)}</code>
               {commit?.author?.name && <> · {commit.author.name}</>}
               {commit?.date && <> · {new Date(commit.date).toLocaleString()}</>}
-              {rounds.has(ref) && <> · round {rounds.get(ref)}</>}
               {pinned ? (
                 <>
                   {' '}
@@ -286,7 +274,7 @@ function Browser(props: { base: string; detail: Detail; live: boolean }) {
           {log.commits.length}
           {log.cursor ? '+' : ''} commits on main
         </p>
-        <Timeline commits={log.commits} fresh={fresh} more={Boolean(log.cursor)} onMore={() => void older()} onPick={pick} rounds={rounds} selected={ref} />
+        <Timeline commits={log.commits} fresh={fresh} more={Boolean(log.cursor)} onMore={() => void older()} onPick={pick} selected={ref} />
       </aside>
     </div>
   )
@@ -315,7 +303,7 @@ export function Repo(props: { config: Config | undefined; id: string }) {
       ) : !swarm || !props.config ? (
         <p className="empty">Loading…</p>
       ) : !code ? (
-        <p className="empty">This swarm has no repository yet: its lead creates one first thing in its first round that one funder can pay {usd(props.config.repoAt)} at once.</p>
+        <p className="empty">This swarm has no repository yet: its agent creates one first thing once one funder can pay {usd(props.config.repoAt)} at once.</p>
       ) : (
         <Browser base={`${props.config.gateway}/p/${code.owner}/${code.app}/git/${encodeURIComponent(code.name)}`} detail={swarm} live={swarm.status !== 'done'} />
       )}

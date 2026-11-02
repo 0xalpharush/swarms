@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
-import type { Config, Entry, Live, Researcher } from '../shared/Api.ts'
+import type { Config, Entry } from '../shared/Api.ts'
 import * as Api from './api.ts'
 import * as Wallet from './wallet.ts'
 
@@ -63,27 +63,9 @@ export function usePoll<T>(load: () => Promise<T>, ms: number, key: string) {
   return [state, reload] as const
 }
 
-export type Draft = { items: { id: string; text: string }[]; round: number; thinking: string }
+export type Stream = { at: number; input: string; inputItem: string; text: string; textItem: string; thinking: string; thinkingItem: string }
 
-function apply(draft: Draft | undefined, event: Live): Draft | undefined {
-  if (event.type === 'round') return draft?.round === event.round ? draft : { items: [], round: event.round, thinking: '' }
-  if (!draft) return draft
-  if (event.type === 'thinking') return { ...draft, thinking: (draft.thinking + event.delta).slice(-2000) }
-  if (event.type !== 'text' && event.type !== 'message') return draft
-
-  const found = draft.items.find((item) => item.id === event.item)
-  const before = found?.text ?? ''
-  const text =
-    event.type === 'message' ? event.text : event.offset === null ? before + event.delta : before.slice(0, event.offset) + event.delta
-  const items = found
-    ? draft.items.map((item) => (item === found ? { id: item.id, text } : item))
-    : [...draft.items, { id: event.item, text }]
-  return { ...draft, items, thinking: event.type === 'text' ? '' : draft.thinking }
-}
-
-export type Stream = { input: string; inputItem: string; text: string; textItem: string; thinking: string; thinkingItem: string; at: number }
-
-export type Broadcast = { connected: boolean; draft: Draft | undefined; researchers: ReadonlyMap<string, Researcher>; streams: Readonly<Record<string, Stream>> }
+export type Live = { connected: boolean; since: number | undefined; streams: Readonly<Record<string, Stream>> }
 
 const blank: Stream = { at: 0, input: '', inputItem: '', text: '', textItem: '', thinking: '', thinkingItem: '' }
 
@@ -100,14 +82,15 @@ function settle(stream: Stream, entry: Entry): Stream {
   return stream
 }
 
+export const agent = 'agent'
+
 export function speaker(who: string | null) {
-  return who ?? 'lead'
+  return who ?? agent
 }
 
-export function useBroadcast(id: string, active: boolean, onEntry: (entry: Entry) => void): Broadcast {
-  const [draft, setDraft] = useState<Draft>()
+export function useLive(id: string, active: boolean, onEntry: (entry: Entry) => void): Live {
   const [connected, setConnected] = useState(false)
-  const [researchers, setResearchers] = useState<ReadonlyMap<string, Researcher>>(new Map())
+  const [since, setSince] = useState<number>()
   const [streams, setStreams] = useState<Readonly<Record<string, Stream>>>({})
   const handler = useRef(onEntry)
 
@@ -116,9 +99,8 @@ export function useBroadcast(id: string, active: boolean, onEntry: (entry: Entry
   })
 
   useEffect(() => {
-    setDraft(undefined)
-    setResearchers(new Map())
     setStreams({})
+    setSince(undefined)
   }, [id])
 
   useEffect(() => {
@@ -127,13 +109,12 @@ export function useBroadcast(id: string, active: boolean, onEntry: (entry: Entry
     return Api.live(id, (event) => {
       if (event.type === 'end' || event.type === 'idle') {
         setConnected(false)
+        if (event.type === 'end') setStreams({})
         return
       }
       setConnected(true)
-      if (event.type === 'round' || event.type === 'text' || event.type === 'thinking' || event.type === 'message') setDraft((previous) => apply(previous, event))
-      if (event.type === 'text' || event.type === 'thinking') stream('lead', (current) => write(current, event.type, event.item, event.delta, event.offset))
+      if (event.type === 'start') setSince(event.at)
       if (event.type === 'delta') stream(speaker(event.who), (current) => write(current, event.channel, event.item, event.delta, event.offset))
-      if (event.type === 'researcher') setResearchers((previous) => new Map(previous).set(event.researcher.id, event.researcher))
       if (event.type === 'entry') {
         stream(speaker(event.entry.who), (current) => settle(current, event.entry))
         handler.current(event.entry)
@@ -141,7 +122,7 @@ export function useBroadcast(id: string, active: boolean, onEntry: (entry: Entry
     })
   }, [active, id])
 
-  return { connected: active && connected, draft, researchers, streams }
+  return { connected: active && connected, since, streams }
 }
 
 export function useNow(ms = 1000) {

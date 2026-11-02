@@ -54,7 +54,7 @@ app.get('/api/swarms/:id/feed', async (c) =>
     await Operations.feed(c.env, {
       after: c.req.query('after'),
       limit: c.req.query('limit'),
-      round: c.req.query('round'),
+      before: c.req.query('before'),
       swarm: c.req.param('id'),
       who: c.req.query('who'),
     }),

@@ -799,7 +799,6 @@ kbd::after {
 }
 
 .status i,
-.feed-live i,
 .machine-state i,
 .round-status i {
   width: 7px;
@@ -810,7 +809,6 @@ kbd::after {
 }
 
 .status[data-status='running'] i,
-.feed[data-live='true'] .feed-live i,
 .machine-state i,
 .round[data-status='running'] .round-status i {
   border-color: var(--green);
@@ -1238,154 +1236,6 @@ kbd::after {
   color: var(--red);
 }
 
-.feed {
-  position: relative;
-}
-
-.feed-head {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px 18px;
-  padding-bottom: 10px;
-  border-bottom: 1px solid var(--grey-400);
-  font-family: var(--mono);
-  font-size: var(--size-small);
-  letter-spacing: 0.02em;
-  color: var(--grey-600);
-}
-
-.feed-live {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  color: var(--black);
-}
-
-.feed-list {
-  min-height: 120px;
-  max-height: 520px;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  scrollbar-width: thin;
-  scrollbar-color: rgba(0, 0, 0, 0.25) transparent;
-  font-family: var(--mono);
-  font-size: var(--size-small);
-  line-height: 1.5;
-  letter-spacing: 0.01em;
-}
-
-@media (min-width: 1024px) {
-  .feed-list {
-    max-height: 640px;
-  }
-}
-
-.entry {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  gap: 2px 12px;
-  padding: 9px 4px 9px 0;
-  border-bottom: 1px solid var(--grey-200);
-}
-
-.entry time {
-  color: var(--grey-500);
-  font-feature-settings: 'tnum';
-}
-
-.entry-kind {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  color: var(--grey-600);
-}
-
-.entry-kind::before {
-  content: '';
-  width: 6px;
-  height: 6px;
-  background: var(--grey-400);
-}
-
-.entry-body {
-  grid-column: 1 / -1;
-  min-width: 0;
-}
-
-@media (min-width: 600px) {
-  .entry {
-    grid-template-columns: 64px 76px minmax(0, 1fr);
-  }
-
-  .entry-body {
-    grid-column: auto;
-  }
-}
-
-.entry-text {
-  overflow-wrap: anywhere;
-  white-space: pre-wrap;
-}
-
-.entry[data-kind='tool'] .entry-text {
-  color: var(--grey-700);
-}
-
-.entry[data-kind='message'] .entry-kind::before,
-.entry[data-kind='status'] .entry-kind::before,
-.entry[data-kind='machine'] .entry-kind::before {
-  background: var(--grey-800);
-}
-
-.entry[data-kind='message'] .entry-text {
-  font-family: var(--serif);
-  font-size: var(--size-large);
-  line-height: 1.3;
-  letter-spacing: 0;
-}
-
-.entry[data-kind='thinking'] .entry-text {
-  font-family: var(--serif);
-  font-style: italic;
-  font-size: var(--size-body);
-  line-height: 1.3;
-  letter-spacing: 0;
-  color: var(--grey-600);
-}
-
-.entry[data-kind='steer'],
-.entry[data-kind='funds'] {
-  background: var(--green-wash);
-  box-shadow: -8px 0 0 var(--green-wash);
-}
-
-.entry[data-kind='steer'] .entry-kind::before,
-.entry[data-kind='funds'] .entry-kind::before {
-  background: var(--green);
-}
-
-.entry[data-kind='steer'] .entry-kind,
-.entry[data-kind='funds'] .entry-kind {
-  color: var(--black);
-}
-
-.entry[data-kind='machine'] .entry-kind::before {
-  border-radius: 0;
-}
-
-.entry[data-kind='error'] .entry-kind,
-.entry[data-kind='error'] .entry-text {
-  color: var(--red);
-}
-
-.entry[data-kind='error'] .entry-kind::before {
-  background: var(--red);
-}
-
-.entry-fresh {
-  animation: enter 0.9s var(--ease) both;
-}
-
 .entry-toggle {
   margin-top: 4px;
   padding: 0;
@@ -1414,24 +1264,6 @@ kbd::after {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   color: var(--grey-700);
-}
-
-.feed-empty {
-  padding: var(--space-3) 0;
-  color: var(--grey-500);
-}
-
-.feed-cursor {
-  padding: 10px 0;
-}
-
-.feed-cursor span {
-  display: inline-block;
-  width: 7px;
-  height: 14px;
-  background: var(--grey-800);
-  vertical-align: middle;
-  animation: blink 1s steps(2, jump-none) infinite;
 }
 
 .feed-jump {

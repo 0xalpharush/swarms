@@ -25,7 +25,7 @@ export const codes = {
   expired: 'The Tempo Wallet approval expired before anyone approved it.',
   insufficient_balance: "The wallet holds less of the token than the pledge, so the pledge was dropped, or a steer asks for more than its author's backing not yet behind a note.",
   invalid_request: 'The input failed validation; detail says which field.',
-  not_found: 'No swarm, pledge, budget, round or route has this id, or Tempo has no receipt for the transaction yet.',
+  not_found: 'No swarm, pledge, budget or route has this id, or Tempo has no receipt for the transaction yet.',
   not_member: "Only the swarm's backers (a pledge, a transfer, a daily budget or a lent machine) post in its room.",
   unauthorized: 'Sign in with Tempo Wallet at /v1/auth and send the session token as Authorization: Bearer <token>.',
   unavailable: 'The swarm could not be saved.',

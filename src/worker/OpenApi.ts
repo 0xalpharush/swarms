@@ -87,29 +87,25 @@ const schemas = {
   Answer: object(
     {
       at: time,
-      done: { description: 'The lead reports the goal met.', type: 'boolean' },
-      next: nullable({ description: 'What the lead plans for the next round.', type: 'string' }),
-      round: integer,
-      text: { description: 'The report, markdown, without its STATUS line.', type: 'string' },
+      done: { description: 'The agent reports the goal met.', type: 'boolean' },
+      text: { description: 'The update, markdown, without its STATUS line.', type: 'string' },
     },
-    "The report of the swarm's newest completed round.",
+    "The swarm's newest update.",
   ),
   Answered: object({
     answer: nullable(ref('Answer')),
-    running: nullable(ref('Running')),
     status: ref('Status'),
     swarm: string,
     title: string,
+    working: nullable(ref('Working')),
   }),
   Brief: object({
-    base: nullable({ description: 'The head of the repository when the round started; diff the last of commits against it for the round.', type: 'string' }),
-    commits: { description: 'Commits the round pushed to the repository, newest first.', items: string, type: 'array' },
-    endedAt: nullable(time),
-    excerpt: nullable({ description: 'The start of the report as plain text.', type: 'string' }),
-    n: integer,
-    spent: mach,
-    startedAt: time,
-    status: { enum: ['running', 'completed', 'failed', 'cancelled'], type: 'string' },
+    base: nullable({ description: 'The head of the repository when the agent last resumed; diff the last of commits against it.', type: 'string' }),
+    commits: { description: 'Commits pushed since the update before, newest first.', items: string, type: 'array' },
+    done: { description: 'The agent reports the goal met.', type: 'boolean' },
+    spent: { ...mach, description: 'What the swarm spent since the update before.' },
+    at: time,
+    excerpt: { description: 'The start of the update as plain text.', type: 'string' },
   }),
   Budget: object(
     {
@@ -143,8 +139,7 @@ const schemas = {
     gateway: string,
     mach: string,
     minPledge: mach,
-    perWorker: mach,
-    repoAt: { ...usd, description: 'What one of a swarm\'s funding sources must be able to pay at once before its lead creates its $1 code repository: the $1 and one call\'s reservation.' },
+    repoAt: { ...usd, description: 'What one of a swarm\'s funding sources must be able to pay at once before its agent creates its $1 code repository: the $1 and one call\'s reservation.' },
     reserve: mach,
     rpc: string,
     tokens: { items: object({ address, id: currency, pool: { description: 'Whether the swarm can pool it: transfers and budgets take pool tokens, pledges take all.', type: 'boolean' }, symbol: string }), type: 'array' },
@@ -178,30 +173,15 @@ const schemas = {
     detail: nullable(string),
     event: nullable({ description: 'The gateway event it came from, which a live entry shares with the stored one.', type: 'integer' }),
     kind: { enum: [...Operations.kinds], type: 'string' },
-    round: integer,
     seq: { description: 'Its place in the feed, or 0 for an entry from the live stream not stored yet.', type: 'integer' },
     text: string,
-    who: nullable({ description: "The researcher it belongs to (an id from the swarm's researchers), or null for the lead.", type: 'string' }),
+    who: nullable({ description: "The subagent it came from, by the name it was spawned with, or null for the swarm's agent.", type: 'string' }),
   }),
   Found: object({
     hits: { items: ref('Hit'), type: 'array' },
     terms: { description: 'The words searched for.', items: string, type: 'array' },
   }),
   Hand: object({ connected: { type: 'boolean' }, name: string }),
-  Researcher: object({
-    id: string,
-    parent: nullable(string),
-    round: integer,
-    name: string,
-    task: string,
-    state: { enum: ['pending', 'running', 'completed', 'failed', 'interrupted', 'closing', 'closed'], type: 'string' },
-    action: nullable(string),
-    output: nullable(string),
-    updatedAt: time,
-    events: integer,
-    toolsCompleted: integer,
-    lastSequence: integer,
-  }, 'Observed subagent progress, preserved from the runtime event stream.'),
   Issued: object(
     {
       cli: { description: "Run on the machine to lend it: nc hand '<url>' --token <token>.", type: 'string' },
@@ -232,7 +212,6 @@ const schemas = {
     at: nullable(time),
     entry: nullable(object({ kind: { enum: [...Operations.kinds], type: 'string' }, seq: integer })),
     kind: { enum: [...Operations.sources], type: 'string' },
-    round: nullable(integer),
     snippet: { description: 'Matching text with the matches marked «like this».', type: 'string' },
     swarm: object({ id: string, status: ref('Status'), title: string }),
   }),
@@ -252,11 +231,11 @@ const schemas = {
         code: nullable(ref('Code')),
         contributions: { items: ref('Contribution'), type: 'array' },
         hands: { items: ref('Hand'), type: 'array' },
-        history: { items: ref('Brief'), type: 'array' },
         notes: { items: ref('Note'), type: 'array' },
         pledges: { items: ref('Pledge'), type: 'array' },
-        running: nullable(ref('Running')),
-        researchers: { items: ref('Researcher'), type: 'array' },
+        reason: nullable({ description: 'Why the swarm is waiting, when it is.', type: 'string' }),
+        updates: { items: ref('Brief'), type: 'array' },
+        working: nullable(ref('Working')),
       }),
     ],
   },
@@ -300,17 +279,18 @@ const schemas = {
     required: ['authorizeAccessKey', 'pledge'],
     type: 'object',
   },
-  Round: object({
-    base: nullable({ description: 'The head of the repository when the round started; diff the last of commits against it for the round.', type: 'string' }),
-    commits: { description: 'Commits the round pushed to the repository, newest first.', items: string, type: 'array' },
-    endedAt: nullable(time),
-    message: nullable({ description: 'The full report, markdown.', type: 'string' }),
-    n: integer,
-    spent: mach,
-    startedAt: time,
-    status: { enum: ['running', 'completed', 'failed', 'cancelled'], type: 'string' },
-  }),
-  Running: object({ n: integer, startedAt: time }),
+  Update: object(
+    {
+      at: { ...time, description: 'When the agent posted it.' },
+      base: nullable({ description: 'The head of the repository when the agent last resumed; diff the last of commits against it.', type: 'string' }),
+      commits: { description: 'Commits pushed since the update before, newest first.', items: string, type: 'array' },
+      done: { description: 'The agent reports the goal met.', type: 'boolean' },
+      spent: { ...mach, description: 'What the swarm spent since the update before.' },
+      text: { description: 'The update, markdown, without its STATUS line.', type: 'string' },
+    },
+    'What the agent reported when it paused to reply; the swarm then told it to keep going.',
+  ),
+  Working: object({ since: { ...time, description: 'When the agent last started or resumed working without a stop.' } }),
   Status: { enum: [...Operations.statuses], type: 'string' },
   Summary: object({
     answer: nullable(ref('Answer')),
@@ -320,17 +300,14 @@ const schemas = {
     goal: string,
     id: string,
     machines: integer,
-    parallel: { description: 'Agents a round may run at once, the lead included.', type: 'integer' },
     pool: { ...usd, description: "What the swarm's wallet holds to spend." },
     raised: { ...mach, description: 'Everything pledged, sent and pulled, stablecoins at par.' },
     remaining: mach,
-    rounds: integer,
     spent: mach,
     status: ref('Status'),
     title: string,
     updatedAt: time,
     wallet: nullable({ ...address, description: "The swarm's own wallet, which takes transfers and budget pulls." }),
-    workers: { description: 'Explorers at work in the running round.', type: 'integer' },
   }),
   Room: object({
     me: nullable({ ...ref('Me'), description: 'The signed-in caller, when the request carries a session token.' }),
@@ -357,7 +334,7 @@ const schemas = {
   Said: object(
     {
       at: time,
-      author: nullable({ ...address, description: 'The backer who wrote it; null for the swarm\'s own messages about money and rounds.' }),
+      author: nullable({ ...address, description: 'The backer who wrote it; null for the swarm\'s own messages about money, its agent starting and stopping, and its updates.' }),
       id: integer,
       mentions: { description: 'Backers the message mentions with @<handle>.', items: address, type: 'array' },
       steer: nullable(ref('Steer')),
@@ -370,8 +347,8 @@ const schemas = {
       amount: { ...usd, description: "What the author put behind the idea from their backing." },
       backers: integer,
       note: { description: 'The idea: the message without @swarm.', type: 'string' },
+      live: { description: 'It reached the working agent at once; otherwise the agent reads it when it resumes.', type: 'boolean' },
       noteId: string,
-      round: nullable({ description: 'The running round it steered at once; null when it waits for the next round.', type: 'integer' }),
       share: { description: 'The note\'s weight as a share of everything raised.', type: 'number' },
       weight: { ...usd, description: 'Everything behind the note now.' },
     },
@@ -379,11 +356,11 @@ const schemas = {
   ),
   Waited: object({
     changed: { type: 'boolean' },
-    reason: { enum: ['ended', 'idle', 'timeout'], type: 'string' },
-    round: nullable(ref('Round')),
-    running: nullable(ref('Running')),
+    reason: { enum: ['updated', 'idle', 'timeout'], type: 'string' },
     swarm: ref('Summary'),
+    update: nullable(ref('Update')),
     waited: { description: 'Milliseconds waited.', type: 'integer' },
+    working: nullable(ref('Working')),
   }),
 }
 
@@ -427,7 +404,7 @@ export function document(origin: string) {
       '/v1/search': {
         get: {
           description:
-            "Full-text search over every swarm's title and goal, its round reports and its notes, best first. Hits match any of the words. With swarm set, also searches that swarm's feed.",
+            "Full-text search over every swarm's title and goal, its agent's updates and its notes, best first. Hits match any of the words. With swarm set, also searches that swarm's feed.",
           operationId: 'search',
           parameters: [
             parameter('q', 'query', string, 'Keywords.'),
@@ -459,7 +436,7 @@ export function document(origin: string) {
         get: {
           operationId: 'getSwarm',
           parameters: [swarm],
-          responses: { ...ok(ref('Overview'), 'The swarm with its notes, pledges, machines and rounds.'), ...failures(404) },
+          responses: { ...ok(ref('Overview'), 'The swarm with its notes, pledges, machines and updates.'), ...failures(404) },
           summary: 'Get a swarm',
         },
       },
@@ -467,17 +444,19 @@ export function document(origin: string) {
         get: {
           operationId: 'getAnswer',
           parameters: [swarm],
-          responses: { ...ok(ref('Answered'), 'The latest answer and the running round.'), ...failures(404) },
+          responses: { ...ok(ref('Answered'), 'The latest answer and whether the agent is working.'), ...failures(404) },
           summary: 'Latest answer',
         },
       },
       '/v1/swarms/{id}/feed': {
         get: {
-          description: 'The activity log, oldest first, 200 entries a page at most.',
+          description: "The swarm's transcript, oldest first, 200 entries a page at most.",
           operationId: 'getFeed',
           parameters: [
             swarm,
             parameter('after', 'query', { default: 0, minimum: 0, type: 'integer' }, 'Entries after this seq.'),
+            parameter('before', 'query', { minimum: 1, type: 'integer' }, 'The newest entries before this seq instead.'),
+            parameter('who', 'query', string, "Only one speaker: agent, or a subagent's name."),
             parameter('kind', 'query', { enum: [...Operations.kinds], type: 'string' }, 'Only entries of this kind.'),
             parameter('limit', 'query', { default: 200, maximum: 200, minimum: 1, type: 'integer' }, 'Entries at most.'),
           ],
@@ -488,7 +467,7 @@ export function document(origin: string) {
       '/v1/swarms/{id}/live': {
         get: {
           description:
-            "Server-sent events of the running round: {type: round}, then the lead's text and thinking deltas ({type, item, delta, offset}) and whole messages ({type: message, item, text}), every researcher's deltas ({type: delta, who, channel: text|thinking|input, item, delta, offset}), each feed entry as it happens ({type: entry, entry}, seq 0 until stored), each researcher's progress ({type: researcher, researcher}), and {type: end} when the round ends. {type: idle} when nothing runs.",
+            "Server-sent events while the agent works: {type: start, at}, then text, thinking and tool-input deltas of the agent and its subagents ({type: delta, who, channel: text|thinking|input, item, delta, offset}; who is null for the agent), each transcript entry as it happens ({type: entry, entry}, seq 0 until stored), and {type: end} when the agent pauses to post an update; reconnect, as it usually keeps going. {type: idle} when it is not working.",
           operationId: 'live',
           parameters: [swarm],
           responses: {
@@ -568,7 +547,7 @@ export function document(origin: string) {
           summary: 'Read the room',
         },
         post: {
-          description: `Posts to the room as the signed-in backer: send Authorization: Bearer <token> from /v1/auth. @<handle> mentions a backer. A message with @swarm steers the swarm: steer is how much of the author's backing not yet behind a note goes behind the rest of the message as a note, which weighs like any other note and steers a running round at once.`,
+          description: `Posts to the room as the signed-in backer: send Authorization: Bearer <token> from /v1/auth. @<handle> mentions a backer. A message with @swarm steers the swarm: steer is how much of the author's backing not yet behind a note goes behind the rest of the message as a note, which weighs like any other note and reaches the agent at once when it is working.`,
           operationId: 'postChat',
           parameters: [swarm],
           requestBody: { content: { 'application/json': { schema: input(Operations.schema.say.omit({ swarm: true })) } }, required: true },
@@ -617,7 +596,7 @@ export function document(origin: string) {
         },
         post: {
           description:
-            "Issues a hand for a contributor's own machine: a unique name under the swarm's gateway app, with the nanocode CLI command and a nanocode-ts snippet that attach it. The swarm's lead agent and explorers use connected hands in every round, and are told they belong to contributors. With a session token from /v1/auth, the caller joins the swarm's room as a backer.",
+            "Issues a hand for a contributor's own machine: a unique name under the swarm's gateway app, with the nanocode CLI command and a nanocode-ts snippet that attach it. The swarm's agent and its subagents use connected hands, and are told they belong to contributors. With a session token from /v1/auth, the caller joins the swarm's room as a backer.",
           operationId: 'issueHand',
           parameters: [swarm],
           requestBody: { content: { 'application/json': { schema: input(Operations.schema.hand.omit({ swarm: true })) } } },
@@ -682,20 +661,13 @@ export function document(origin: string) {
           summary: 'Approve a pledge',
         },
       },
-      '/v1/swarms/{id}/rounds': {
+      '/v1/swarms/{id}/updates': {
         get: {
-          operationId: 'listRounds',
-          parameters: [swarm],
-          responses: { ...ok(object({ rounds: { items: ref('Round'), type: 'array' } }), 'Every round with its full report.'), ...failures(404) },
-          summary: 'Rounds',
-        },
-      },
-      '/v1/swarms/{id}/rounds/{round}': {
-        get: {
-          operationId: 'getRound',
-          parameters: [swarm, parameter('round', 'path', { minimum: 1, type: 'integer' }, 'The round number.')],
-          responses: { ...ok(ref('Round'), 'The round with its full report.'), ...failures(400, 404) },
-          summary: 'One round',
+          description: "The agent's updates in full, oldest first: what it reported each time it paused to reply.",
+          operationId: 'listUpdates',
+          parameters: [swarm, parameter('limit', 'query', { default: 50, maximum: 200, minimum: 1, type: 'integer' }, 'The newest this many.')],
+          responses: { ...ok(object({ updates: { items: ref('Update'), type: 'array' }, working: nullable(ref('Working')) }), 'The updates.'), ...failures(400, 404) },
+          summary: 'Updates',
         },
       },
       '/v1/swarms/{id}/search': {
@@ -713,15 +685,15 @@ export function document(origin: string) {
       },
       '/v1/swarms/{id}/wait': {
         get: {
-          description: `Long poll: answers once a round newer than after ended, at once when nothing runs, or after timeout seconds (at most ${Operations.maxWait}).`,
+          description: `Long poll: answers once the agent posts an update newer than after, at once when it is not working, or after timeout seconds (at most ${Operations.maxWait}).`,
           operationId: 'wait',
           parameters: [
             swarm,
-            parameter('after', 'query', { minimum: 0, type: 'integer' }, 'A round number; defaults to the newest ended round.'),
+            parameter('after', 'query', { minimum: 0, type: 'integer' }, "An update's at (Unix ms); defaults to the newest update."),
             parameter('timeout', 'query', { default: 45, maximum: Operations.maxWait, minimum: 0, type: 'integer' }, 'Seconds.'),
           ],
-          responses: { ...ok(ref('Waited'), 'The round that ended, or why none did.'), ...failures(400, 404) },
-          summary: 'Wait for the next round',
+          responses: { ...ok(ref('Waited'), 'The new update, or why none came.'), ...failures(400, 404) },
+          summary: 'Wait for the next update',
         },
       },
     },

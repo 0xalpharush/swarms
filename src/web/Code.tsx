@@ -1,7 +1,7 @@
 import { File, PatchDiff } from '@pierre/diffs/react'
 import { FileTree, useFileTree } from '@pierre/trees/react'
 import { useEffect, useMemo, useState } from 'react'
-import type { Code as Repo, Round } from '../shared/Api.ts'
+import type { Code as Repo, Update } from '../shared/Api.ts'
 import { ago, usd } from './format.ts'
 import { message } from './hooks.ts'
 import { Link } from './router.tsx'
@@ -106,9 +106,9 @@ function Changes(props: { base: string; from: string | null; to: string }) {
   )
 }
 
-function Diffs(props: { base: string; commits: readonly Commit[]; round: Round }) {
-  const shas = props.round.commits
-  if (props.round.base || shas.length === 1) return <Changes base={props.base} from={props.round.base} to={shas[0] ?? ''} />
+function Diffs(props: { base: string; commits: readonly Commit[]; update: Update }) {
+  const shas = props.update.commits
+  if (props.update.base || shas.length === 1) return <Changes base={props.base} from={props.update.base} to={shas[0] ?? ''} />
   return (
     <>
       {shas.map((sha) => (
@@ -123,9 +123,9 @@ function Diffs(props: { base: string; commits: readonly Commit[]; round: Round }
   )
 }
 
-export function Code(props: { gateway: string; repo: Repo; rounds: readonly Round[]; swarm: string }) {
+export function Code(props: { gateway: string; repo: Repo; swarm: string; updates: readonly Update[] }) {
   const base = `${props.gateway}/p/${props.repo.owner}/${props.repo.app}/git/${encodeURIComponent(props.repo.name)}`
-  const version = props.rounds.map((round) => `${round.n}${round.status}`).join(',')
+  const version = String(props.updates.at(-1)?.at ?? 0)
   const [state, setState] = useState<{ commits?: Commit[]; error?: string; files?: string[] }>({})
   const [path, setPath] = useState<string>()
   const [open, setOpen] = useState<number>()
@@ -144,7 +144,7 @@ export function Code(props: { gateway: string; repo: Repo; rounds: readonly Roun
     }
   }, [base, version])
 
-  const pushed = [...props.rounds].filter((round) => round.commits.length).sort((a, b) => b.n - a.n)
+  const pushed = [...props.updates].filter((update) => update.commits.length).reverse()
   const commits = state.commits
   const head = commits?.[0]
 
@@ -167,16 +167,16 @@ export function Code(props: { gateway: string; repo: Repo; rounds: readonly Roun
         <div className="code-file">{path ? <Viewer base={base} path={path} sha={head.sha} /> : <p className="empty">Pick a file to read it at {head.sha.slice(0, 7)}.</p>}</div>
       </div>
       <ol className="commits">
-        {pushed.map((round) => (
-          <li className="commit" data-open={open === round.n} key={round.n}>
-            <button className="commit-head" onClick={() => setOpen(open === round.n ? undefined : round.n)} type="button">
-              <span className="commit-sha">Round {round.n}</span>
+        {pushed.map((update) => (
+          <li className="commit" data-open={open === update.at} key={update.at}>
+            <button className="commit-head" onClick={() => setOpen(open === update.at ? undefined : update.at)} type="button">
+              <span className="commit-sha">{ago(update.at)}</span>
               <span className="commit-message">
-                {round.commits.length === 1 ? commits.find((commit) => commit.sha === round.commits[0])?.message.split('\n')[0] ?? '1 commit' : `${round.commits.length} commits`}
+                {update.commits.length === 1 ? commits.find((commit) => commit.sha === update.commits[0])?.message.split('\n')[0] ?? '1 commit' : `${update.commits.length} commits`}
               </span>
-              <span className="commit-ago">{usd(round.spent)}</span>
+              <span className="commit-ago">{usd(update.spent)}</span>
             </button>
-            {open === round.n && <Diffs base={base} commits={commits} round={round} />}
+            {open === update.at && <Diffs base={base} commits={commits} update={update} />}
           </li>
         ))}
       </ol>

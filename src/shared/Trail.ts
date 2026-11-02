@@ -29,8 +29,8 @@ export function call(payload: Record<string, unknown>): Step | undefined {
 
   if (name === 'exec') return { detail: clip(raw, 4000), kind: 'tool', text: `Ran a script: ${clip(raw.split('\n')[0] ?? '', 120)}` }
   if (name === 'spawn_agent')
-    return { detail: clip(String(input['task'] ?? ''), 2000), kind: 'tool', text: `Spawned an explorer: ${clip(String(input['role'] ?? 'worker'), 80)}` }
-  if (name === 'wait_agent') return { detail: null, kind: 'tool', text: 'Waiting on explorers' }
+    return { detail: clip(String(input['task'] ?? ''), 2000), kind: 'tool', text: `Spawned a subagent: ${clip(String(input['role'] ?? 'worker'), 80)}` }
+  if (name === 'wait_agent') return { detail: null, kind: 'tool', text: 'Waiting on subagents' }
   if (name === 'compute_create')
     return {
       detail: raw,
@@ -93,6 +93,47 @@ export function narrate(buffers: Buffers, who: string | null, type: string | und
   const found = step(type, payload)
   if (found) steps.push(found)
   return steps
+}
+
+export type Crew = { ended: Record<string, string>; names: Record<string, string> }
+
+export function crew(): Crew {
+  return { ended: {}, names: {} }
+}
+
+type Subagent = { agent?: Record<string, unknown>; event?: { payload?: Record<string, unknown>; type?: string }; id?: unknown; status?: Record<string, unknown>; type?: string }
+
+function label(value: unknown) {
+  return typeof value === 'string' || typeof value === 'number' ? String(value) : undefined
+}
+
+export function subagent(buffers: Buffers, crew: Crew, scope: string, update: unknown): { steps: Step[]; who: string } | undefined {
+  if (typeof update !== 'object' || update === null) return undefined
+  const row = update as Subagent
+  const id = label(row.type === 'added' ? row.agent?.['id'] : row.id)
+  if (id === undefined) return undefined
+  const key = `${scope}:${id}`
+  if (row.type === 'added') {
+    const role = clip(String(row.agent?.['role'] ?? '').trim() || `subagent ${id}`, 60)
+    const taken = Object.entries(crew.names).some(([other, name]) => other !== key && name === role)
+    const who = taken ? `${role} #${id}` : role
+    crew.names[key] = who
+    return { steps: [{ detail: clip(String(row.agent?.['task'] ?? ''), 2000) || null, kind: 'status', text: `Started a subagent: ${who}` }], who }
+  }
+  const who = crew.names[key] ?? `subagent ${id}`
+  if (row.type === 'event') return { steps: narrate(buffers, who, row.event?.type, row.event?.payload ?? {}), who }
+  if (row.type === 'status' || row.type === 'completion') {
+    const state = String(row.status?.['state'] ?? '')
+    if (!['completed', 'failed', 'interrupted', 'closed'].includes(state) || crew.ended[key] === state || (row.type === 'status' && state === 'completed')) return { steps: [], who }
+    crew.ended[key] = state
+    if (state === 'completed') {
+      const result = output(row.status?.['output']).trim()
+      return { steps: [{ detail: result ? clip(result, 20_000) : null, kind: 'output', text: `${who} finished` }], who }
+    }
+    if (state === 'failed') return { steps: [{ detail: clip(output(row.status?.['error']), 2000) || null, kind: 'error', text: `${who} failed` }], who }
+    if (state === 'interrupted' || state === 'closed') return { steps: [{ detail: null, kind: 'status', text: `${who} stopped` }], who }
+  }
+  return { steps: [], who }
 }
 
 export function memory(): Buffers {

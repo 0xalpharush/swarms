@@ -49,9 +49,9 @@ export function swarm(id: string) {
   return fixture ? Fixtures.swarm(id) : request<Detail>(path(id))
 }
 
-export function feed(id: string, after: number, filter: { round?: number; who?: string } = {}) {
+export function feed(id: string, after: number, filter: { before?: number; who?: string } = {}) {
   const query = new URLSearchParams({ after: String(after) })
-  if (filter.round !== undefined) query.set('round', String(filter.round))
+  if (filter.before !== undefined) query.set('before', String(filter.before))
   if (filter.who !== undefined) query.set('who', filter.who)
   return fixture ? Fixtures.feed(id, after, filter) : request<{ entries: Entry[]; next: number }>(`${path(id)}/feed?${query}`)
 }

@@ -1,6 +1,23 @@
-import type { Hit, Round, Status } from '../shared/Api.ts'
+import type { Hit, Status } from '../shared/Api.ts'
 
-type Row = { at: number | null; kind: Hit['kind']; ref: string; snippet: string; status: Status; swarm: string; title: string }
+export type Turn = {
+  base: string | null
+  commits: string[]
+  endedAt: number | null
+  message: string | null
+  n: number
+  spent: string
+  startedAt: number
+  status: string
+}
+
+type Stored = 'swarm' | 'report' | 'note'
+
+type Row = { at: number | null; kind: Stored; ref: string; snippet: string; status: Status; swarm: string; title: string }
+
+function stored(kind: Hit['kind']): Stored | undefined {
+  return kind === 'update' ? 'report' : kind === 'feed' ? undefined : kind
+}
 
 const stop = new Set(
   'a about after all an and any are as at be been by can could did do does for from get got had has have how i if in into is it its me my no not of on or our should so than that the their them then there these they this those to us was we were what when where which who whom why will with would you your'.split(
@@ -18,7 +35,8 @@ export async function query(
   env: Cloudflare.Env,
   input: { kind: Hit['kind'] | undefined; limit: number; swarm: string | undefined; terms: string[] },
 ): Promise<Hit[]> {
-  const filters = [...(input.swarm ? ['search.swarm = ?'] : []), ...(input.kind ? ['search.kind = ?'] : [])]
+  const kind = input.kind && stored(input.kind)
+  const filters = [...(input.swarm ? ['search.swarm = ?'] : []), ...(kind ? ['search.kind = ?'] : [])]
   const { results } = await env.DB.prepare(
     `select search.swarm as swarm, search.kind as kind, search.ref as ref,
       snippet(search, 4, '«', '»', '…', 40) as snippet, s.title as title, s.status as status, r.ended_at as at
@@ -33,15 +51,14 @@ export async function query(
     .bind(
       input.terms.map((term) => `"${term}"`).join(' OR '),
       ...(input.swarm ? [input.swarm] : []),
-      ...(input.kind ? [input.kind] : []),
+      ...(kind ? [kind] : []),
       input.limit,
     )
     .all<Row>()
   return results.map((row) => ({
     at: row.at,
     entry: null,
-    kind: row.kind,
-    round: row.kind === 'report' ? Number(row.ref) : null,
+    kind: row.kind === 'report' ? 'update' : row.kind,
     snippet: row.snippet,
     swarm: { id: row.swarm, status: row.status, title: row.title },
   }))
@@ -60,20 +77,20 @@ export async function note(env: Cloudflare.Env, swarm: string, id: string, note:
   ])
 }
 
-export async function report(env: Cloudflare.Env, swarm: string, round: Round) {
-  if (round.endedAt !== null) await env.DB.batch(statements(env, swarm, round))
+export async function report(env: Cloudflare.Env, swarm: string, turn: Turn) {
+  if (turn.endedAt !== null) await env.DB.batch(statements(env, swarm, turn))
 }
 
-export async function sync(env: Cloudflare.Env, swarm: string, rounds: readonly Round[]) {
-  const ended = rounds.filter((round) => round.endedAt !== null)
+export async function sync(env: Cloudflare.Env, swarm: string, turns: readonly Turn[]) {
+  const ended = turns.filter((turn) => turn.endedAt !== null)
   if (!ended.length) return
 
   const { results } = await env.DB.prepare('select round, ended_at from reports where swarm = ?')
     .bind(swarm)
     .all<{ ended_at: number; round: number }>()
   const known = new Map(results.map((row) => [row.round, row.ended_at]))
-  const missing = ended.filter((round) => known.get(round.n) !== round.endedAt)
-  if (missing.length) await env.DB.batch(missing.flatMap((round) => statements(env, swarm, round)))
+  const missing = ended.filter((turn) => known.get(turn.n) !== turn.endedAt)
+  if (missing.length) await env.DB.batch(missing.flatMap((turn) => statements(env, swarm, turn)))
 }
 
 export async function lagging(env: Cloudflare.Env) {
@@ -83,20 +100,14 @@ export async function lagging(env: Cloudflare.Env) {
   return results.map((row) => row.id)
 }
 
-function statements(env: Cloudflare.Env, swarm: string, round: Round) {
+function statements(env: Cloudflare.Env, swarm: string, turn: Turn) {
   return [
     env.DB.prepare(
       'insert into reports (swarm, round, status, message, started_at, ended_at, spent) values (?, ?, ?, ?, ?, ?, ?) on conflict (swarm, round) do update set status = excluded.status, message = excluded.message, started_at = excluded.started_at, ended_at = excluded.ended_at, spent = excluded.spent',
-    ).bind(swarm, round.n, round.status, round.message, round.startedAt, round.endedAt, round.spent),
-    env.DB.prepare("delete from search where swarm = ? and kind = 'report' and ref = ?").bind(swarm, String(round.n)),
-    ...(round.message
-      ? [
-          env.DB.prepare("insert into search (swarm, kind, ref, title, body) values (?, 'report', ?, '', ?)").bind(
-            swarm,
-            String(round.n),
-            round.message,
-          ),
-        ]
+    ).bind(swarm, turn.n, turn.status, turn.message, turn.startedAt, turn.endedAt, turn.spent),
+    env.DB.prepare("delete from search where swarm = ? and kind = 'report' and ref = ?").bind(swarm, String(turn.n)),
+    ...(turn.message && turn.status === 'completed'
+      ? [env.DB.prepare("insert into search (swarm, kind, ref, title, body) values (?, 'report', ?, '', ?)").bind(swarm, String(turn.n), turn.message)]
       : []),
   ]
 }

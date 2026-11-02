@@ -53,7 +53,7 @@ function document(
   <header><a href="${attribute(origin)}" target="_blank" rel="noreferrer">SWARMS</a><span>LIVE RESEARCH FRAME</span></header>
   <div class="world" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>
   ${content}
-  <footer><span><b></b> Tempo mainnet</span><a href="${attribute(origin)}" target="_blank" rel="noreferrer">Open Swarm World ↗</a></footer>
+  <footer><span><b></b> Tempo mainnet</span><a href="${attribute(origin)}" target="_blank" rel="noreferrer">Open Swarms ↗</a></footer>
 </div>
 <script>window.__SWARM_FRAME__=${script(context)};</script>
 <script>${client}</script>
@@ -86,7 +86,7 @@ function approval() {
     <div class="success-mark">✓</div>
     <p class="eyebrow">QUEST FUNDED</p>
     <h2 id="success-title">The swarm is moving</h2>
-    <p>Follow every round and every researcher from Swarm World.</p>
+    <p>Watch its agent work live, and steer it with the other backers.</p>
     <div class="success-actions"><a class="launch" id="expedition" target="_blank" rel="noreferrer">Enter expedition ↗</a><a class="secondary" id="share" target="_blank" rel="noreferrer">Share on X</a></div>
   </section>`
 }
@@ -123,39 +123,35 @@ export function start(origin: string) {
   )
 }
 
+const states = { done: 'DONE', funding: 'FUNDING', paused: 'WAITING FOR MONEY', running: 'WORKING' } as const
+
 export function swarm(origin: string, value: Overview) {
-  const running = value.status === 'running' ? value.running : null
-  const title = running ? `Live: ${value.title}` : `Fund ${value.title}`
-  const description = running
-    ? `Watch this research swarm work, live from the timeline: round ${running.n}, every explorer's thoughts and commands as they happen.`
-    : `Join this research swarm from the timeline. Round ${Math.max(1, value.rounds)} · ${value.workers} researchers.`
-  const crew = running
-    ? value.researchers
-        .filter((member) => member.round === running.n)
-        .map((member) => ({ action: member.action, id: member.id, name: member.name, state: member.state }))
-    : []
-  const latest = value.history.findLast((round) => round.excerpt)?.excerpt ?? null
-  const body = running
-    ? `<div class="mission-top"><p class="eyebrow"><span class="onair"><i></i>LIVE</span> ROUND ${running.n} · <span id="elapsed">0m 00s</span></p><span id="working">${crew.length} EXPLORER${crew.length === 1 ? '' : 'S'}</span></div>
+  const working = value.status === 'running' ? value.working : null
+  const title = working ? `Live: ${value.title}` : `Fund ${value.title}`
+  const description = working
+    ? "Watch this research swarm's agent work, live from the timeline: its thoughts and commands as they happen."
+    : `Join this research swarm from the timeline: ${value.contributors} backer${value.contributors === 1 ? '' : 's'}, ${value.raised} raised.`
+  const latest = value.updates.at(-1)?.excerpt ?? null
+  const body = working
+    ? `<div class="mission-top"><p class="eyebrow"><span class="onair"><i></i>LIVE</span> WORKING · <span id="elapsed">0m 00s</span></p></div>
       <h1 class="single">${attribute(value.title)}</h1>
-      <div class="live" aria-live="polite"><p class="live-who"><b id="live-who">Lead researcher</b> <span id="live-kind">is working</span></p><p class="live-text" id="live-text">Tuning in…</p></div>
-      <div class="crew" id="crew" role="group" aria-label="Directions"></div>`
-    : `<div class="mission-top"><p class="eyebrow">${attribute(value.status.toUpperCase())} · ROUND ${Math.max(1, value.rounds)}</p><span>${value.workers} RESEARCHERS</span></div>
+      <div class="live" aria-live="polite"><p class="live-who"><b id="live-who">The agent</b> <span id="live-kind">is working</span></p><p class="live-text" id="live-text">${attribute(latest ?? 'Tuning in…')}</p></div>`
+    : `<div class="mission-top"><p class="eyebrow">${states[value.status]}</p><span>${value.contributors} BACKER${value.contributors === 1 ? '' : 'S'}</span></div>
       <h1>${attribute(value.title)}</h1>
       <p class="lede clamp">${attribute(latest ?? value.goal)}</p>
-      <div class="mission-stats"><span><strong>${attribute(value.raised)}</strong> raised</span><span><strong>${attribute(value.remaining)}</strong> fuel left</span><span><strong>${value.rounds}</strong> rounds</span></div>`
+      <div class="mission-stats"><span><strong>${attribute(value.raised)}</strong> raised</span><span><strong>${attribute(value.remaining)}</strong> fuel left</span><span><strong>${value.updates.length}</strong> update${value.updates.length === 1 ? '' : 's'}</span></div>`
   const content = `<main>
     <section class="panel mission" id="setup">
       ${body}
       ${amounts('Back this quest')}
-      <p class="status" id="status">${running ? '<a href="' + attribute(`${origin}/s/${encodeURIComponent(value.id)}`) + '" id="watch" target="_blank" rel="noreferrer">Watch the whole broadcast ↗</a> · ' : ''}Your pledge is capped. Unused MACH returns to your wallet.</p>
+      <p class="status" id="status">${working ? '<a href="' + attribute(`${origin}/s/${encodeURIComponent(value.id)}`) + '" target="_blank" rel="noreferrer">Watch the whole transcript ↗</a> · ' : ''}Your pledge is capped. Unused MACH returns to your wallet.</p>
     </section>
     ${approval()}
   </main>`
   return new Response(
     document(origin, `/x/s/${encodeURIComponent(value.id)}`, title, description, content, {
       kind: 'swarm',
-      live: running ? { crew, round: running.n, startedAt: running.startedAt } : null,
+      live: working ? { since: working.since } : null,
       swarm: { id: value.id, title: value.title },
       url: `${origin}/x/s/${encodeURIComponent(value.id)}`,
     }),
@@ -207,42 +203,25 @@ if(frame.kind==='start'){
   action.disabled=true;
 }
 if(frame.live){
-  const who=document.getElementById('live-who'),kind=document.getElementById('live-kind'),box=document.getElementById('live-text'),crew=document.getElementById('crew'),elapsed=document.getElementById('elapsed'),working=document.getElementById('working'),watch=document.getElementById('watch');
-  const members=new Map(frame.live.crew.map(member=>[member.id,member]));
-  const streams=new Map();
-  let pinned=null,speaking='lead';
-  const name=id=>id==='lead'?'Lead researcher':(members.get(id)||{}).name||'Explorer';
-  const paint=()=>{
-    const id=pinned||speaking,stream=streams.get(id)||{};
-    who.textContent=name(id);kind.textContent=stream.kind||'is working';
-    box.textContent=(stream.text||'').slice(-240)||(members.get(id)||{}).action||'Tuning in…';
-    const busy=[...members.values()].filter(member=>member.state==='running'||member.state==='pending').length;
-    working.textContent=busy+' OF '+members.size+' EXPLORERS AT WORK';
-    if(watch)watch.href=new URL(frame.url).origin+'/s/'+encodeURIComponent(frame.swarm.id)+(id==='lead'?'':'?who='+encodeURIComponent(id));
-    crew.replaceChildren(...[['lead',{name:'Lead',state:'running'}],...members].map(([id,member])=>{
-      const button=document.createElement('button');button.type='button';button.className='member'+(id===(pinned||speaking)?' on':'')+(id===pinned?' pinned':'');button.dataset.state=member.state;
-      const dot=document.createElement('i');button.append(dot,id==='lead'?'Lead':member.name);
-      button.addEventListener('click',()=>{pinned=pinned===id?null:id;paint()});return button;
-    }));
-  };
-  const write=(id,label,delta,item,offset)=>{
-    const stream=streams.get(id)||{},base=stream.item===item?stream.text||'':'';
-    streams.set(id,{item,kind:label,text:(offset===null||offset===undefined?base+delta:base.slice(0,offset)+delta).slice(-2000)});speaking=id;paint();
+  const who=document.getElementById('live-who'),kind=document.getElementById('live-kind'),box=document.getElementById('live-text'),elapsed=document.getElementById('elapsed');
+  let stream={item:'',kind:'is working',text:'',who:null};
+  const paint=()=>{who.textContent=stream.who||'The agent';kind.textContent=stream.kind;if(stream.text)box.textContent=stream.text.slice(-240)};
+  const write=(name,label,delta,item,offset)=>{
+    const base=stream.item===item&&stream.who===name?stream.text:'';
+    stream={item,kind:label,text:(offset===null||offset===undefined?base+delta:base.slice(0,offset)+delta).slice(-2000),who:name};paint();
   };
   const open=()=>{
     const source=new EventSource('/v1/swarms/'+encodeURIComponent(frame.swarm.id)+'/live');
     source.onmessage=message=>{
       const event=JSON.parse(message.data);
-      if(event.type==='thinking')write('lead','is thinking',event.delta,event.item,null);
-      else if(event.type==='text')write('lead','is writing',event.delta,event.item,event.offset);
-      else if(event.type==='delta')write(event.who||'lead',event.channel==='thinking'?'is thinking':event.channel==='input'?'is writing code':'is writing',event.delta,event.item,event.offset);
-      else if(event.type==='researcher'){members.set(event.researcher.id,event.researcher);paint()}
-      else if(event.type==='entry'&&event.entry.kind!=='thinking'){const id=event.entry.who||'lead';streams.set(id,{item:'entry:'+event.entry.event,kind:event.entry.kind==='output'?'got back':event.entry.kind==='message'?'said':'did',text:event.entry.kind==='output'?event.entry.detail||event.entry.text:event.entry.text});speaking=id;paint()}
+      if(event.type==='start')frame.live.since=event.at;
+      else if(event.type==='delta')write(event.who,event.channel==='thinking'?'is thinking':event.channel==='input'?'is writing code':'is writing',event.delta,event.item,event.offset);
+      else if(event.type==='entry'&&event.entry.kind!=='thinking'){stream={item:'entry:'+event.entry.event,kind:event.entry.kind==='output'?'got back':event.entry.kind==='message'?'said':'did',text:event.entry.kind==='output'?event.entry.detail||event.entry.text:event.entry.text,who:event.entry.who};paint()}
       else if(event.type==='end'||event.type==='idle'){source.close();setTimeout(open,event.type==='end'?1500:5000)}
     };
     source.onerror=()=>{source.close();setTimeout(open,4000)};
   };
-  const tick=()=>{const seconds=Math.max(0,Math.floor((Date.now()-frame.live.startedAt)/1000));elapsed.textContent=Math.floor(seconds/60)+'m '+String(seconds%60).padStart(2,'0')+'s'};
+  const tick=()=>{const seconds=Math.max(0,Math.floor((Date.now()-frame.live.since)/1000)),hours=Math.floor(seconds/3600);elapsed.textContent=(hours?hours+'h ':'')+Math.floor(seconds%3600/60)+'m '+String(seconds%60).padStart(2,'0')+'s'};
   open();paint();tick();setInterval(tick,1000);
 }
 async function send(path,options){

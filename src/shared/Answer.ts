@@ -2,15 +2,12 @@ import type { Answer } from './Api.ts'
 
 const status = /^[*_>\s]*STATUS:\s*(done|continue)\b[\s:\u2014\u2013-]*(.*?)[*_\s]*$/i
 
-export function parse(round: number, message: string, at: number): Answer {
+export function parse(message: string, at: number): Answer {
   const lines = message.trimEnd().split('\n')
   const found = status.exec(lines.at(-1) ?? '')
-  const verdict = found?.[1]?.toLowerCase()
   return {
     at,
-    done: verdict === 'done',
-    next: verdict === 'continue' ? found?.[2]?.trim() || null : null,
-    round,
+    done: found?.[1]?.toLowerCase() === 'done',
     text: (found ? lines.slice(0, -1) : lines).join('\n').trim(),
   }
 }

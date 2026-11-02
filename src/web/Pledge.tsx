@@ -14,7 +14,7 @@ export function disclosure(token: Currency) {
   const symbol = symbols[token]
   return token === 'mach'
     ? `Tempo Wallet will ask you to approve a spending key that this app holds, capped at your pledge, for 7 days. It can only open, top up and close payment channels with the gateway, so the swarm pays its requests from your wallet as it works, and what its channel did not spend goes back when the swarm finishes.`
-    : `Tempo Wallet will ask you to approve a spending key that this app holds, capped at your pledge, for 7 days. It can only move ${symbol} to this swarm's wallet, which the swarm does as its rounds need money, so what it never needs stays in your wallet; what the swarm's wallet does not spend goes back to its contributors in proportion when the swarm finishes.`
+    : `Tempo Wallet will ask you to approve a spending key that this app holds, capped at your pledge, for 7 days. It can only move ${symbol} to this swarm's wallet, which the swarm does as its agent needs money, so what it never needs stays in your wallet; what the swarm's wallet does not spend goes back to its contributors in proportion when the swarm finishes.`
 }
 
 export function valid(amount: string, config: Config | undefined, least = config?.minPledge) {

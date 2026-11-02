@@ -12,7 +12,7 @@ export function Machines(props: { hands: readonly Hand[]; live: boolean }) {
   )
 
   if (tiles.length === 0)
-    return <p className="empty">{props.live ? 'No machines attached right now. Explorers start Modal machines when the work needs one, and they show up here.' : 'No machines attached.'}</p>
+    return <p className="empty">{props.live ? 'No machines attached right now. The agent starts Modal machines when the work needs one, and they show up here.' : 'No machines attached.'}</p>
 
   return (
     <ul className="machines">

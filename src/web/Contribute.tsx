@@ -49,9 +49,9 @@ type State = { done?: { hash?: string; text: string }; error?: string; short?: b
 function told(mode: Mode, amount: string, token: Currency, config: Config | undefined, noted: boolean) {
   const symbol = symbols[token]
   if (mode === 'send')
-    return `Sends ${amount || '…'} ${symbol} from your wallet to this swarm's wallet in one transaction${noted ? ', with a memo that commits to your note' : ''}. The swarm spends it on its rounds, and when it is done it returns what it did not spend to everyone who sent or was pulled, in proportion. MACH only reaches merchants, so it cannot be sent to a swarm: pledge MACH instead.`
+    return `Sends ${amount || '…'} ${symbol} from your wallet to this swarm's wallet in one transaction${noted ? ', with a memo that commits to your note' : ''}. The swarm's agent spends it as it works, and when it is done it returns what it did not spend to everyone who sent or was pulled, in proportion. MACH only reaches merchants, so it cannot be sent to a swarm: pledge MACH instead.`
   if (mode === 'budget')
-    return `Tempo Wallet approves a key that can move at most ${amount || '…'} ${symbol} a day from your wallet, only to this swarm's wallet, for ${config?.budget.days ?? 30} days. Its transfer fees come out of the same daily amount. The swarm pulls only what its rounds need, rotating across everyone's budgets, and you can revoke the key in Tempo Wallet at any time.`
+    return `Tempo Wallet approves a key that can move at most ${amount || '…'} ${symbol} a day from your wallet, only to this swarm's wallet, for ${config?.budget.days ?? 30} days. Its transfer fees come out of the same daily amount. The swarm pulls only what its agent needs, rotating across everyone's budgets, and you can revoke the key in Tempo Wallet at any time.`
   return disclosure(token)
 }
 
@@ -109,7 +109,7 @@ export function Box(props: { config: Config | undefined; note: string; noteRef: 
         const approved = await Wallet.authorize(config, requested.authorizeAccessKey)
         setState({ step: 'keep' })
         await Api.allow(props.swarm.id, requested.budget, approved.keyAuthorization)
-        setState({ done: { text: `Approved up to ${mach(value)} ${symbol} a day. The swarm pulls from it when its rounds need money.` } })
+        setState({ done: { text: `Approved up to ${mach(value)} ${symbol} a day. The swarm pulls from it when its agent needs money.` } })
       } else {
         const pledged = await pledge(config, props.swarm.id, amount, props.note, token, (step) => setState({ step }))
         setState({ done: { text: `Pledged ${mach(pledged.pledge.amount)} ${symbol}. The swarm spends it as it works; what it does not spend goes back to you.` } })
@@ -121,7 +121,7 @@ export function Box(props: { config: Config | undefined; note: string; noteRef: 
     }
   }
 
-  const heading = props.swarm.status === 'paused' ? 'Fund the next round' : props.swarm.status === 'funding' ? 'Fund the first round' : props.swarm.status === 'done' ? 'Done' : 'Add money'
+  const heading = props.swarm.status === 'paused' ? 'Keep it going' : props.swarm.status === 'funding' ? 'Get it started' : props.swarm.status === 'done' ? 'Done' : 'Add money'
   const action = mode === 'send' ? `Send ${valid(amount, props.config, least) ? mach(decimal(units(amount))) : ''} ${symbol}` : mode === 'budget' ? `Approve ${valid(amount, props.config, least) ? mach(decimal(units(amount))) : ''} ${symbol} a day` : `Pledge ${valid(amount, props.config, least) ? mach(decimal(units(amount))) : ''} ${symbol}`
 
   return (

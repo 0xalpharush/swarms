@@ -45,7 +45,7 @@ export function Connect(props: { swarm: Summary }) {
     <div className="pledge connect" id="connect">
       <h3 className="label">Connect your machine</h3>
       <p className="fine">
-        Lend this swarm your computer and what is on it as a nanocode hand. Its lead agent and explorers run commands and read and write files there, and are told the machine and its data are yours and to ask before anything destructive. Your hand can set its own prices, such as a price per file; the swarm pays them through the gateway from its money, and caps what each hand may charge in a round at a fifth of what the round may spend. Stop the command to take it back.
+        Lend this swarm your computer and what is on it as a nanocode hand. Its agent runs commands and reads and writes files there, and is told the machine and its data are yours and to ask before anything destructive. Your hand can set its own prices, such as a price per file; the swarm pays them through the gateway from its money, and caps what each hand may charge at a fifth of what is left to spend. Stop the command to take it back.
       </p>
       {!done && (
         <p className="fine">

@@ -56,12 +56,7 @@ app.get('/v1/swarms/:id', async (c) => Problem.respond(await Operations.get(c.en
 
 app.get('/v1/swarms/:id/answer', async (c) => Problem.respond(await Operations.answer(c.env, { swarm: c.req.param('id') })))
 
-app.get('/v1/swarms/:id/rounds', async (c) => Problem.respond(await Operations.rounds(c.env, { swarm: c.req.param('id') })))
-
-app.get('/v1/swarms/:id/rounds/:round', async (c) => {
-  const result = await Operations.rounds(c.env, { round: c.req.param('round'), swarm: c.req.param('id') })
-  return result.ok ? c.json(result.value.rounds[0]) : Problem.json(result)
-})
+app.get('/v1/swarms/:id/updates', async (c) => Problem.respond(await Operations.updates(c.env, { ...c.req.query(), swarm: c.req.param('id') })))
 
 app.get('/v1/swarms/:id/feed', async (c) =>
   Problem.respond(await Operations.feed(c.env, { ...c.req.query(), swarm: c.req.param('id') })),

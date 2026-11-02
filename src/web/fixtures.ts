@@ -1,13 +1,13 @@
 import * as Answer from '../shared/Answer.ts'
-import type { Account, Artifact, Budget, BudgetRequested, Budgeted, Chatter, Config, Contributed, Contribution, Currency, Detail, Entry, Form, Kind, Live as LiveEvent, Me, Member, Note, Pledge, Pledged, Posted, Requested, Researcher, Room, Round, Said, Status, Summary, Token, Way } from '../shared/Api.ts'
+import type { Account, Artifact, Budget, BudgetRequested, Budgeted, Chatter, Config, Contributed, Contribution, Currency, Detail, Entry, Form, Kind, Live as LiveEvent, Me, Member, Note, Pledge, Pledged, Posted, Requested, Room, Said, Status, Summary, Token, Update, Way } from '../shared/Api.ts'
 import { decimal, maxNote, units } from '../shared/Memo.ts'
 import * as Mention from '../shared/Mention.ts'
 
-type Line = readonly [Kind, string, (string | null)?]
+type Line = readonly [Kind, string, (string | null)?, string?]
 
 type Backing = { amount: string; contributor: `0x${string}`; note: string }
 
-type Live = Omit<Detail, 'answer' | 'reason' | 'researchers'> & { chat: Said[]; cursor: number; flicker: readonly string[]; next: number; script: readonly Line[]; steered: Set<string>; steers: Backing[] }
+type Live = Omit<Detail, 'answer' | 'reason' | 'working'> & { chat: Said[]; cursor: number; flicker: readonly string[]; next: number; script: readonly Line[]; since: number | null; steered: Set<string>; steers: Backing[] }
 
 const minute = 60_000
 
@@ -56,18 +56,18 @@ function build(input: {
   flicker?: readonly string[]
   goal: string
   hands?: readonly string[]
-  history: readonly Round[]
   id: string
   lines: readonly Line[]
   budgets?: readonly (readonly [number, string, Token, string, string, Budget['status'], number, string | null])[]
   gifts?: readonly (readonly [number, string, Token, number, string | null, Contribution['kind']])[]
   pledges: readonly (readonly [number, string, number, string | null, Currency?])[]
   script?: readonly Line[]
+  since?: number
   spent: string
   status: Status
   steered?: readonly string[]
   title: string
-  workers: number
+  updates: readonly (readonly [number, string, string])[]
 }): Live {
   const pledges = input.pledges.map(([person, amount, minutes, note, token], index): Pledge => ({
     amount,
@@ -104,15 +104,14 @@ function build(input: {
     status,
     token,
   }))
-  const feed = input.lines.map(([kind, text, detail], index): Entry => ({
+  const feed = input.lines.map(([kind, text, detail, who], index): Entry => ({
     at: at(input.lines.length - index) + (index % 3) * 11_000,
     detail: detail ?? null,
     event: null,
     kind,
-    round: Math.max(1, input.history.length),
     seq: index + 1,
     text,
-    who: null,
+    who: who ?? null,
   }))
   return settle({
     budgets,
@@ -127,26 +126,24 @@ function build(input: {
     flicker: input.flicker ?? [],
     goal: input.goal,
     hands: (input.hands ?? []).map((name) => ({ connected: true, name })),
-    history: [...input.history],
     id: input.id,
     machines: 0,
     next: started + 1200,
     notes: [],
-    parallel: 1,
     pledges,
     pool: '0',
     raised: '0',
     remaining: '0',
-    rounds: input.history.length,
     wallet: input.budgets || input.gifts ? wallet : null,
     script: input.script ?? [],
+    since: input.status === 'running' ? at(input.since ?? 30) : null,
     spent: input.spent,
     status: input.status,
     steered: new Set(input.steered ?? []),
     steers: [],
     title: input.title,
     updatedAt: feed.at(-1)?.at ?? at(input.age),
-    workers: input.workers,
+    updates: input.updates.map(([minutes, text, spent]): Update => ({ at: at(minutes), base: null, commits: [], done: /STATUS:\s*done/i.test(text), spent, text: Answer.parse(text, at(minutes)).text })),
   })
 }
 
@@ -162,7 +159,6 @@ function settle(swarm: Live) {
   }
   swarm.raised = decimal(raised)
   swarm.remaining = decimal(raised > units(swarm.spent) ? raised - units(swarm.spent) : 0n)
-  swarm.parallel = Math.min(4, 1 + Number(units(swarm.remaining) / 100_000n))
   swarm.contributors = new Set([...swarm.pledges.map((pledge) => pledge.contributor), ...swarm.contributions.map((gift) => gift.contributor), ...swarm.budgets.flatMap((budget) => (budget.contributor ? [budget.contributor] : []))]).size
   swarm.daily = decimal(swarm.budgets.filter((budget) => budget.status === 'active' || budget.status === 'waiting').reduce((sum, budget) => sum + units(budget.amount), 0n))
   swarm.pool = decimal(given > units(swarm.spent) / 2n ? given - units(swarm.spent) / 2n : 0n)
@@ -187,7 +183,7 @@ function settle(swarm: Live) {
 
 function push(swarm: Live, kind: Kind, text: string, detail: string | null, when: number) {
   const seq = (swarm.feed.at(-1)?.seq ?? 0) + 1
-  swarm.feed.push({ at: when, detail, event: null, kind, round: Math.max(1, swarm.rounds), seq, text, who: null })
+  swarm.feed.push({ at: when, detail, event: null, kind, seq, text, who: null })
   swarm.updatedAt = when
 }
 
@@ -217,30 +213,31 @@ function tick(swarm: Live) {
 }
 
 const benchmark: readonly Line[] = [
-  ['tool', 'Spawned an explorer: rust-subset', 'Write 50 small Rust tasks with hidden tests (parsing, lifetimes, async). Run every model in the shortlist against them with the same harness and record solve rate, latency and MACH per task.'],
-  ['thinking', 'Cost per solved task carries the most weight among the notes, so every explorer reports MACH spent next to its solve count. Qwen3-Coder is slow; give it its own machine so it does not hold the others back.'],
+  ['tool', 'Spawned a subagent: rust-subset', 'Write 50 small Rust tasks with hidden tests (parsing, lifetimes, async). Run every model in the shortlist against them with the same harness and record solve rate, latency and MACH per task.'],
+  ['status', 'Started a subagent: rust-subset', 'Write 50 small Rust tasks with hidden tests and run every shortlisted model against them.', 'rust-subset'],
+  ['thinking', 'Cost per solved task carries the most weight among the notes, so every run reports MACH spent next to its solve count. Qwen3-Coder is slow; give it its own machine so it does not hold the others back.'],
   ['machine', 'Starting machine sb-c41d9e07 (python:3.12-slim)', '{"attach":"sb-c41d9e07","image":"python:3.12-slim","cpu":2,"memory":4096}'],
   ['tool', '$ git clone --depth 1 https://github.com/princeton-nlp/SWE-bench && pip install -q -e SWE-bench on sb-c41d9e07', "Cloning into 'SWE-bench'...\nSuccessfully installed swebench-3.0.4"],
-  ['tool', '$ python -m swebench.harness.run_evaluation --dataset_name princeton-nlp/SWE-bench_Lite --max_workers 4 --run_id glm-5.3 on sb-3f9a2c1d', 'Running 75 instances...\n31 resolved, 44 unresolved\nTotal cost: 0.0612 MACH'],
-  ['message', 'Explorer swe-lite-a finished its slice: GLM-5.3 resolved 31 of 75 SWE-bench Lite tasks (41%) at 0.0020 MACH per resolved task, median 94 s per task.'],
-  ['tool', 'Waiting on explorers'],
+  ['tool', '$ python -m swebench.harness.run_evaluation --dataset_name princeton-nlp/SWE-bench_Lite --max_workers 4 --run_id glm-5.3 on sb-3f9a2c1d', 'Running 75 instances...\n31 resolved, 44 unresolved\nTotal cost: 0.0612 MACH', 'swe-lite'],
+  ['message', 'GLM-5.3 resolved 31 of 75 SWE-bench Lite tasks (41%) at 0.0020 MACH per resolved task, median 94 s per task.', null, 'swe-lite'],
+  ['tool', 'Waiting on subagents'],
   ['funds', '0x1d9c…0a41 pledged 0.25 MACH behind "Report cost per solved task, not per token".'],
-  ['steer', 'Steering: "Report cost per solved task, not per token" now has 1.45 MACH behind it (34.1% of everything raised, 3 backers).'],
-  ['tool', '$ cargo test --release -q 2>&1 | tail -3 on sb-77ab01e2', 'test result: ok. 37 passed; 13 failed; 0 ignored\nkimi-k2.7: 37/50'],
-  ['error', 'compute_create failed', '{"code":"unavailable","detail":"Modal has no capacity for a T4 in us-east right now."}'],
-  ['thinking', 'No T4 in us-east. The Rust subset is CPU-bound anyway; retry on a 4-CPU machine in the same region instead of moving to eu-west and paying the broad-region rate.'],
-  ['machine', 'Starting machine sb-d2f81a33 (rust:1.90-slim)', '{"attach":"sb-d2f81a33","image":"rust:1.90-slim","cpu":4}'],
+  ['steer', 'Steered the agent toward "Report cost per solved task, not per token"', '1.45 MACH behind it, 34.1% of everything contributed'],
+  ['tool', '$ cargo test --release -q 2>&1 | tail -3 on sb-77ab01e2', 'test result: ok. 37 passed; 13 failed; 0 ignored\nkimi-k2.7: 37/50', 'rust-subset'],
+  ['error', 'compute_create failed', '{"code":"unavailable","detail":"Modal has no capacity for a T4 in us-east right now."}', 'rust-subset'],
+  ['thinking', 'No T4 in us-east. The Rust subset is CPU-bound anyway; retry on a 4-CPU machine in the same region instead of moving to eu-west and paying the broad-region rate.', null, 'rust-subset'],
+  ['machine', 'Starting machine sb-d2f81a33 (rust:1.90-slim)', '{"attach":"sb-d2f81a33","image":"rust:1.90-slim","cpu":4}', 'rust-subset'],
   ['tool', 'Ran a script: const rows = await Promise.all(models.map((model) => score(model)))', 'const rows = await Promise.all(models.map((model) => score(model)))\nconsole.table(rows)'],
-  ['message', 'Explorer rust-subset: Kimi K2.7 passes 37 of 50 Rust tasks, DeepSeek V4.1 Flash 33, GLM-5.3 35. DeepSeek is the cheapest per pass at 0.0004 MACH.'],
-  ['tool', 'Called kv_set', '{"app":"swarm","key":"results/round-3/rust-subset","value":{"kimi-k2.7":37,"deepseek-v4.1-flash":33,"glm-5.3":35}}'],
+  ['output', 'rust-subset finished', 'Kimi K2.7 passes 37 of 50 Rust tasks, DeepSeek V4.1 Flash 33, GLM-5.3 35. DeepSeek is the cheapest per pass at 0.0004 MACH.', 'rust-subset'],
+  ['tool', 'Called kv_set', '{"app":"swarm","key":"results/rust-subset","value":{"kimi-k2.7":37,"deepseek-v4.1-flash":33,"glm-5.3":35}}'],
 ]
 
 const parser: readonly Line[] = [
   ['tool', '$ ./bench --parser sonic-rs --threads 8 --input /data/logs-64g.ndjson on sb-91e0aa4f', 'sonic-rs: 64.0 GiB in 41.2 s (1.55 GiB/s)'],
-  ['tool', '$ ./bench --parser simd-json --threads 8 --input /data/logs-64g.ndjson on sb-5c2b7d10', 'simd-json: 64.0 GiB in 46.9 s (1.36 GiB/s)'],
+  ['tool', '$ ./bench --parser simd-json --threads 8 --input /data/logs-64g.ndjson on sb-5c2b7d10', 'simd-json: 64.0 GiB in 46.9 s (1.36 GiB/s)', 'simd'],
   ['thinking', 'Both are memory-bound past 8 threads. The interesting axis is now cost: a 16-CPU machine at twice the rate only buys 30% more throughput.'],
   ['message', 'sonic-rs leads on 8 CPUs at 1.55 GiB/s. Next: the same run on 16 CPUs to see where scaling flattens.'],
-  ['tool', 'Waiting on explorers'],
+  ['tool', 'Waiting on subagents'],
   ['tool', '$ nproc on sb-91e0aa4f', '8'],
 ]
 
@@ -257,24 +254,9 @@ const fixtures: Live[] = [
     flicker: ['sb-d2f81a33'],
     goal: 'Run a fair, reproducible coding benchmark across every tool-calling model on the Tempo gateway. Use SWE-bench Lite and a 50-task Rust subset written for this run. Report solve rate, median latency and cost per solved task in MACH, with the exact prompts and harness settings so anyone can rerun it.',
     hands: ['sb-3f9a2c1d', 'sb-77ab01e2', 'sb-c41d9e07'],
-    history: [
-      {
-        base: null, commits: [], endedAt: at(150),
-        message: 'Round 1: harness and shortlist.\n\nThe gateway lists 31 text models; 19 call tools and qualify. I built the harness on two python:3.12-slim machines and ran a 20-task smoke test on each model.\n\nShortlist for full runs: GLM-5.3, Kimi K2.7, DeepSeek V4.1 Flash, Qwen3-Coder, gpt-oss-120b, Llama 4 Scout.\nDropped: 13 models that solved fewer than 2 of 20.\n\nSpent 0.41 MACH, most of it on the smoke test.',
-        n: 1,
-        spent: '0.412800',
-        startedAt: at(185),
-        status: 'completed',
-      },
-      {
-        base: null, commits: [], endedAt: at(48),
-        message: 'Round 2: SWE-bench Lite.\n\nFour explorers, each on its own machine, ran 75 tasks per model.\n\nKimi K2.7       118/300  39%  0.0031 MACH per solved task\nGLM-5.3         124/300  41%  0.0020\nDeepSeek V4.1   109/300  36%  0.0006\ngpt-oss-120b     92/300  31%  0.0011\n\nQwen3-Coder timed out on 40 tasks; it gets a dedicated machine next round, as the top note asks.',
-        n: 2,
-        spent: '0.981200',
-        startedAt: at(146),
-        status: 'completed',
-      },
-      { base: null, commits: [], endedAt: null, message: null, n: 3, spent: '0.479412', startedAt: at(46), status: 'running' },
+    updates: [
+      [150, 'Harness and shortlist.\n\nThe gateway lists 31 text models; 19 call tools and qualify. I built the harness on two python:3.12-slim machines and ran a 20-task smoke test on each model.\n\nShortlist for full runs: GLM-5.3, Kimi K2.7, DeepSeek V4.1 Flash, Qwen3-Coder, gpt-oss-120b, Llama 4 Scout.\nDropped: 13 models that solved fewer than 2 of 20.\n\nSpent 0.41 MACH, most of it on the smoke test.', '0.412800'],
+      [48, 'SWE-bench Lite.\n\nFour subagents, each on its own machine, ran 75 tasks per model.\n\n| Model | Solved | Rate | MACH per solved task |\n| --- | --- | --- | --- |\n| GLM-5.3 | 124/300 | 41% | 0.0020 |\n| Kimi K2.7 | 118/300 | 39% | 0.0031 |\n| DeepSeek V4.1 | 109/300 | 36% | 0.0006 |\n| gpt-oss-120b | 92/300 | 31% | 0.0011 |\n\nQwen3-Coder timed out on 40 tasks; it gets a dedicated machine next, as the top note asks.', '0.981200'],
     ],
     budgets: [
       [2, '1.000000', 'usdce', '2.400000', '0.360000', 'active', 160, 'Report cost per solved task, not per token'],
@@ -290,8 +272,8 @@ const fixtures: Live[] = [
     ],
     id: 'bench-coders',
     lines: [
-      ['status', 'Round 3 started with 2.68 MACH left and room for 4 parallel explorers.'],
-      ['steer', 'Steering: "Include Qwen3-Coder and Kimi K2.7 even if they are slow" has 1.55 MACH behind it (36.5% of everything raised, 3 backers).'],
+      ['status', 'Told the agent to keep going, with $2.68 left.'],
+      ['steer', 'Steered the agent toward "Include Qwen3-Coder and Kimi K2.7 even if they are slow"', '1.55 MACH behind it, 36.5% of everything contributed'],
       ...benchmark,
     ],
     pledges: [
@@ -308,62 +290,59 @@ const fixtures: Live[] = [
       [0, '1.000000', 100, null],
     ],
     script: benchmark,
+    since: 186,
     spent: '1.873412',
     status: 'running',
     steered: ['Include Qwen3-Coder and Kimi K2.7 even if they are slow', 'Report cost per solved task, not per token', 'Publish the harness as a repo anyone can fork'],
     title: 'Benchmark every open-weight coding model',
-    workers: 4,
   }),
   build({
     age: 70,
     goal: 'Find the fastest and the cheapest way to parse a terabyte of newline-delimited JSON logs on rented machines. Compare serde_json, simd-json and sonic-rs across machine sizes and report GiB/s and MACH per TiB.',
     hands: ['sb-91e0aa4f', 'sb-5c2b7d10'],
-    history: [
-      { base: null, commits: [], endedAt: at(31), message: 'Round 1: generated 64 GiB of synthetic access logs and a harness that streams them through each parser.\nsonic-rs 1.55 GiB/s, simd-json 1.36 GiB/s, serde_json 0.41 GiB/s on 8 CPUs.', n: 1, spent: '0.180000', startedAt: at(66), status: 'completed' },
-      { base: null, commits: [], endedAt: null, message: null, n: 2, spent: '0.052100', startedAt: at(29), status: 'running' },
-    ],
+    updates: [[31, 'Generated 64 GiB of synthetic access logs and a harness that streams them through each parser.\nsonic-rs 1.55 GiB/s, simd-json 1.36 GiB/s, serde_json 0.41 GiB/s on 8 CPUs.', '0.180000']],
     budgets: [[4, '0.250000', 'pathusd', '0.180000', '0.070000', 'active', 40, 'Measure cost per GiB, not just throughput']],
     gifts: [[4, '0.180000', 'pathusd', 38, 'Measure cost per GiB, not just throughput', 'pull']],
     id: 'json-terabyte',
-    lines: [['status', 'Round 2 started with 0.62 MACH left and room for 4 parallel explorers.'], ...parser],
+    lines: [['status', 'Started working with $0.62 to spend.'], ...parser],
     pledges: [
       [3, '0.500000', 68, 'Measure cost per GiB, not just throughput'],
       [5, '0.250000', 30, null],
       [6, '0.100000', 12, 'Include serde_json as the baseline'],
     ],
     script: parser,
+    since: 66,
     spent: '0.232100',
     status: 'running',
     steered: ['Measure cost per GiB, not just throughput'],
     title: 'Parse a terabyte of JSON for under a dollar',
-    workers: 2,
   }),
   build({
     age: 30,
     goal: 'Translate The Rust Programming Language into Greek, chapter by chapter, with a shared glossary so terms stay consistent. Publish each chapter to the bucket as it is finished.',
     hands: ['sb-0e4ab219'],
-    history: [{ base: null, commits: [], endedAt: null, message: null, n: 1, spent: '0.120000', startedAt: at(28), status: 'running' }],
+    updates: [],
     id: 'rust-book-el',
-    lines: [['status', 'Round 1 started with 0.60 MACH left and room for 4 parallel explorers.'], ...translation],
+    lines: [['status', 'Started working with $0.60 to spend.'], ...translation],
     pledges: [[2, '0.600000', 29, 'Keep code blocks in English']],
     script: translation,
+    since: 28,
     spent: '0.120000',
     status: 'running',
     steered: ['Keep code blocks in English'],
     title: 'The Rust Book, in Greek',
-    workers: 1,
   }),
   build({
     age: 400,
     goal: "Write a field guide to Tempo's stablecoin DEX for developers: how orders, flips and swaps work, what they cost, and runnable examples for each.",
-    history: [
-      { base: null, commits: [], endedAt: at(330), message: 'Round 1: read the DEX precompile docs and traced 40 swaps on mainnet. Drafted the chapters on orders and flips.', n: 1, spent: '0.402000', startedAt: at(388), status: 'completed' },
-      { base: null, commits: [], endedAt: at(260), message: 'Round 2: wrote runnable viem examples for place, flip and swap, and a fee table from real transactions.\nThe guide is in the bucket at field-guide/dex.md.', n: 2, spent: '0.394210', startedAt: at(328), status: 'completed' },
+    updates: [
+      [330, 'Read the DEX precompile docs and traced 40 swaps on mainnet. Drafted the chapters on orders and flips.', '0.402000'],
+      [260, 'Wrote runnable viem examples for place, flip and swap, and a fee table from real transactions.\nThe guide is in the bucket at field-guide/dex.md.', '0.394210'],
     ],
     id: 'dex-guide',
     lines: [
-      ['message', 'Round 2 report saved to field-guide/dex.md (11 pages).'],
-      ['status', 'Paused with 0.003790 MACH left, below the 0.01 MACH reserve. A pledge resumes it.'],
+      ['message', 'Saved the guide to field-guide/dex.md (11 pages).'],
+      ['status', 'Waiting for money: $0.0038 is payable now, less than one model call holds. New money keeps it going.'],
     ],
     pledges: [
       [4, '0.500000', 390, 'Explain fees with real transactions'],
@@ -372,40 +351,31 @@ const fixtures: Live[] = [
     spent: '0.796210',
     status: 'paused',
     title: "A field guide to Tempo's stablecoin DEX",
-    workers: 0,
   }),
   build({
     age: 4,
     goal: 'Reproduce the nanoGPT speedrun on a single T4 and see how close a 15-minute budget gets to the 3.28 validation loss record.',
-    history: [],
+    updates: [],
     id: 'speedrun-t4',
-    lines: [['status', 'Created. The first pledge starts round 1.']],
+    lines: [['status', 'Created. The first pledge starts its agent.']],
     pledges: [],
     spent: '0',
     status: 'funding',
     title: 'The nanoGPT speedrun on one T4',
-    workers: 0,
   }),
   build({
     age: 1440,
     goal: "Map the MEV in Tempo's first million blocks: which strategies exist, how much they extract, and who pays for it.",
-    history: [
-      { base: null, commits: [], endedAt: at(1380), message: 'Round 1: indexed 1,000,000 blocks into the bucket (14 GiB of receipts).', n: 1, spent: '0.512000', startedAt: at(1428), status: 'completed' },
-      { base: null, commits: [], endedAt: at(1290), message: 'Round 2: classified 48,113 candidate bundles; 61% DEX arbitrage, 23% liquidations, 16% sandwiches.', n: 2, spent: '0.630000', startedAt: at(1378), status: 'completed' },
-      { base: null, commits: [], endedAt: at(1210), message: 'Round 3 failed: the classifier ran out of memory on a 2 GiB machine. Retrying on 8 GiB.', n: 3, spent: '0.401120', startedAt: at(1288), status: 'failed' },
-      {
-        base: null, commits: [], endedAt: at(1100),
-        message: "Final report.\n\n1. Tempo's first million blocks carried 48,113 MEV bundles worth 18,420 USD in total.\n2. Arbitrage between the stablecoin DEX and outside venues is 61% of it and mostly harmless: it keeps pegs tight.\n3. Sandwiches are 16% of bundles but 38% of value, concentrated in 4 searchers.\n4. Payment lanes left no room for sandwiches on transfers; every sandwich hit a DEX swap with slippage above 0.5%.\n\nData, notebooks and the classifier are in the bucket under mev/.",
-        n: 4,
-        spent: '0.405000',
-        startedAt: at(1208),
-        status: 'completed',
-      },
+    updates: [
+      [1380, 'Indexed 1,000,000 blocks into the bucket (14 GiB of receipts).', '0.512000'],
+      [1290, 'Classified 48,113 candidate bundles; 61% DEX arbitrage, 23% liquidations, 16% sandwiches.', '0.630000'],
+      [1100, "Final report.\n\n1. Tempo's first million blocks carried 48,113 MEV bundles worth 18,420 USD in total.\n2. Arbitrage between the stablecoin DEX and outside venues is 61% of it and mostly harmless: it keeps pegs tight.\n3. Sandwiches are 16% of bundles but 38% of value, concentrated in 4 searchers.\n4. Payment lanes left no room for sandwiches on transfers; every sandwich hit a DEX swap with slippage above 0.5%.\n\nData, notebooks and the classifier are in the bucket under mev/.\nSTATUS: done", '0.806120'],
     ],
     id: 'mev-map',
     lines: [
+      ['error', 'The agent stopped with an error after spending $0.40.', 'The classifier ran out of memory on a 2 GiB machine.'],
       ['message', 'Final report written. Everything the goal asked for is answered.'],
-      ['status', 'Done. The goal is met. Unspent money returns to each pledge when the gateway closes its channel.'],
+      ['status', 'Done. The agent reports the goal is met. Every channel closes and returns what it did not spend.'],
     ],
     pledges: [
       [5, '1.000000', 1430, 'Separate sandwiches from arbitrage'],
@@ -416,7 +386,6 @@ const fixtures: Live[] = [
     status: 'done',
     steered: ['Separate sandwiches from arbitrage'],
     title: "Map the MEV in Tempo's first million blocks",
-    workers: 0,
   }),
 ]
 
@@ -432,54 +401,53 @@ function find(key: string) {
 }
 
 function summary(swarm: Live): Summary {
-  const answered = swarm.history.findLast((round) => round.status === 'completed' && round.message)
+  const latest = swarm.updates.at(-1)
   return {
-    answer: answered?.message ? Answer.parse(answered.n, answered.message, answered.endedAt ?? swarm.updatedAt) : null,
+    answer: latest ? { at: latest.at, done: latest.done, text: latest.text } : null,
     contributors: swarm.contributors,
     createdAt: swarm.createdAt,
     daily: swarm.daily,
     goal: swarm.goal,
     id: swarm.id,
     machines: swarm.machines,
-    parallel: swarm.parallel,
     pool: swarm.pool,
     raised: swarm.raised,
     remaining: swarm.remaining,
-    rounds: swarm.rounds,
     spent: swarm.spent,
     status: swarm.status,
     title: swarm.title,
     updatedAt: swarm.updatedAt,
     wallet: swarm.wallet,
-    workers: swarm.workers,
   }
 }
 
 function detail(swarm: Live): Detail {
-  return { ...summary(swarm), budgets: swarm.budgets, code: swarm.code, contributions: swarm.contributions, feed: swarm.feed.slice(-200), hands: swarm.hands, history: swarm.history, notes: swarm.notes, pledges: swarm.pledges, reason: swarm.status === 'paused' ? 'Paused: the money is used up. A contribution, budget or pledge starts the next round.' : null, researchers: demoTeam(swarm) }
-}
-
-function demoTeam(swarm: Live): Researcher[] {
-  const names = swarm.id === 'bench-coders' ? ['swe-lite-a', 'rust-subset', 'cost-analysis'] : ['baseline', 'experiment', 'review']
-  return swarm.history.flatMap((round) => names.slice(0, Math.max(0, (round.status === 'running' ? swarm.workers : swarm.parallel) - 1)).map((name, index): Researcher => {
-    const completed = round.status === 'completed' || (swarm.id === 'bench-coders' && index === 0)
-    const state = completed ? 'completed' : round.status === 'failed' ? 'failed' : round.status === 'cancelled' ? 'interrupted' : 'running'
-    return { id: `demo:${round.n}:${index}`, parent: null, round: round.n, name, task: index === 0 ? 'Establish the baseline and report reproducible measurements.' : index === 1 ? 'Test the strongest alternative under matching conditions.' : 'Compare costs and check the evidence.', state, action: completed ? 'Measurements delivered to the lead' : index === 1 ? 'Running the next experiment' : 'Comparing results with the baseline', output: completed ? 'Baseline measurements collected. Commands, conditions and results are included in the round report.' : null, updatedAt: completed ? round.endedAt ?? round.startedAt : Date.now() - 3000, events: 8 + index, toolsCompleted: completed ? 6 : 2 + index, lastSequence: 1 }
-  }))
+  return {
+    ...summary(swarm),
+    budgets: swarm.budgets,
+    code: swarm.code,
+    contributions: swarm.contributions,
+    feed: swarm.feed.slice(-200),
+    hands: swarm.hands,
+    notes: swarm.notes,
+    pledges: swarm.pledges,
+    reason: swarm.status === 'paused' ? 'Waiting for money: a contribution, budget or pledge keeps it going.' : null,
+    updates: swarm.updates,
+    working: swarm.since === null ? null : { since: swarm.since },
+  }
 }
 
 export function config(): Promise<Config> {
   return delay({
     auth: '/v1/auth',
-    budget: { days: 30, max: '100.000000', min: '0.250000', period: 86_400 },
+    budget: { days: 30, max: '100.000000', min: '2.000000', period: 86_400 },
     chainId: 4217,
     explorer: 'https://explore.tempo.xyz',
     gateway: 'https://gateway.tempo-dev.workers.dev',
     mach: '0x20c000000000000000000000f37de3740adec032',
-    minPledge: '0.100000',
-    perWorker: '0.100000',
-    repoAt: '1.500000',
-    reserve: '0.010000',
+    minPledge: '2.000000',
+    repoAt: '1.040000',
+    reserve: '0.050000',
     rpc: 'https://rpc.tempo.xyz',
     tokens: [
       { address: '0x20c000000000000000000000f37de3740ADec032', id: 'mach', pool: false, symbol: 'MACH' },
@@ -499,18 +467,19 @@ export async function swarm(key: string) {
   return delay(detail(await find(key)))
 }
 
-export async function feed(key: string, after: number, filter: { round?: number; who?: string } = {}) {
+export async function feed(key: string, after: number, filter: { before?: number; who?: string } = {}) {
   const entries = (await find(key)).feed.filter(
-    (entry) => entry.seq > after && (filter.round === undefined || entry.round === filter.round) && (filter.who === undefined || (entry.who ?? 'lead') === filter.who),
+    (entry) => entry.seq > after && (filter.before === undefined || entry.seq < filter.before) && (filter.who === undefined || (entry.who ?? 'agent') === filter.who),
   )
-  return delay({ entries: entries.slice(0, 200), next: entries.slice(0, 200).at(-1)?.seq ?? after })
+  const page = filter.before === undefined ? entries.slice(0, 200) : entries.slice(-200)
+  return delay({ entries: page, next: page.at(-1)?.seq ?? after })
 }
 
 const musings = [
   'The cheapest way to settle this is a matched run: same inputs, same machine size, one variable changed at a time.',
   'The last result looks too good. Before trusting it, rerun with a cold cache and three seeds.',
-  'Two explorers disagree by 12%. The difference is the input size, not the method; normalise per gigabyte before comparing.',
-  'This direction is not paying off. Write down what was tried so the lead can steer the next round elsewhere.',
+  'Two runs disagree by 12%. The difference is the input size, not the method; normalise per gigabyte before comparing.',
+  'This direction is not paying off. Write down what was tried and try the next idea from the notes.',
   'A smaller machine is enough here. The workload is memory bound, so more cores only add cost.',
 ]
 
@@ -530,7 +499,7 @@ export function live(key: string, listener: (event: LiveEvent) => void) {
     timer = setTimeout(() => alive && run(), ms)
   }
   const say = (swarm: Live, who: string | null, kind: Kind, text: string, detail: string | null) => {
-    const entry: Entry = { at: Date.now(), detail, event: ++event, kind, round: Math.max(1, swarm.rounds), seq: 0, text, who }
+    const entry: Entry = { at: Date.now(), detail, event: ++event, kind, seq: 0, text, who }
     listener({ entry, type: 'entry' })
     swarm.feed.push({ ...entry, seq: (swarm.feed.at(-1)?.seq ?? 0) + 1 })
   }
@@ -541,9 +510,8 @@ export function live(key: string, listener: (event: LiveEvent) => void) {
       listener({ type: 'idle' })
       return later(4000, () => void next())
     }
-    const team = demoTeam(swarm).filter((member) => member.round === swarm.rounds && member.state === 'running')
-    const member = team.length ? team[turn % (team.length + 1)] : undefined
-    const who = member?.id ?? null
+    const crew = [...new Set(swarm.feed.flatMap((entry) => (entry.who ? [entry.who] : [])))]
+    const who = crew.length ? ([null, ...crew][turn % (crew.length + 1)] ?? null) : null
     const thought = musings[turn % musings.length] ?? ''
     turn++
     let shown = 0
@@ -551,14 +519,13 @@ export function live(key: string, listener: (event: LiveEvent) => void) {
       const delta = thought.slice(shown, shown + 3 + (shown % 5))
       shown += delta.length
       if (delta) {
-        listener(who === null ? { delta, item: `reasoning:${turn}`, offset: null, type: 'thinking' } : { channel: 'thinking', delta, item: `reasoning:${turn}`, offset: null, type: 'delta', who })
+        listener({ channel: 'thinking', delta, item: `reasoning:${turn}`, offset: null, type: 'delta', who })
         return later(45, think)
       }
       say(swarm, who, 'thinking', thought, null)
       const [text, detail, output] = doings[turn % doings.length] ?? doings[0]!
       later(500, () => {
         say(swarm, who, 'tool', text, detail)
-        if (member) listener({ researcher: { ...member, action: text, events: member.events + turn, lastSequence: event, toolsCompleted: member.toolsCompleted + Math.floor(turn / 2), updatedAt: Date.now() }, type: 'researcher' })
         later(1400, () => {
           say(swarm, who, 'output', text.startsWith('Ran') ? 'Script output' : 'Command output', output)
           later(900, () => void next())
@@ -568,7 +535,7 @@ export function live(key: string, listener: (event: LiveEvent) => void) {
     think()
   }
   void find(key).then((swarm) => {
-    if (alive && swarm.status === 'running') listener({ round: Math.max(1, swarm.rounds), type: 'round' })
+    if (alive && swarm.status === 'running') listener({ at: swarm.since ?? Date.now(), type: 'start' })
     void next()
   })
   return () => {
@@ -579,7 +546,7 @@ export function live(key: string, listener: (event: LiveEvent) => void) {
 
 export function create(input: { goal: string; title: string }) {
   const key = id(`${input.title}:${Date.now()}`)
-  const swarm = build({ age: 0, goal: input.goal, history: [], id: key, lines: [['status', 'Created. The first pledge starts round 1.']], pledges: [], spent: '0', status: 'funding', title: input.title, workers: 0 })
+  const swarm = build({ age: 0, goal: input.goal, id: key, lines: [['status', 'Created. The first pledge starts its agent.']], pledges: [], spent: '0', status: 'funding', title: input.title, updates: [] })
   fixtures.unshift(swarm)
   return delay(summary(swarm), 400)
 }
@@ -601,25 +568,16 @@ export async function confirm(key: string, pledge: string): Promise<Pledged> {
   swarm.pledges.push(pledged)
   if (request.note) swarm.steered.add(request.note)
   push(swarm, 'funds', `${visitor.slice(0, 6)}…${visitor.slice(-4)} pledged ${request.amount} MACH${request.note ? ` behind "${request.note}"` : ''}.`, null, Date.now())
-  if (swarm.status === 'funding' || swarm.status === 'paused') {
-    swarm.status = 'running'
-    swarm.rounds++
-    swarm.workers = 1
-    swarm.history.push({ base: null, commits: [], endedAt: null, message: null, n: swarm.rounds, spent: '0', startedAt: Date.now(), status: 'running' })
-    push(swarm, 'status', `Round ${swarm.rounds} started.`, null, Date.now())
-    if (swarm.script.length === 0) swarm.script = translation
-  }
+  begin(swarm)
   settle(swarm)
   return delay({ pledge: pledged, status: 'active', swarm: summary(swarm) }, 600)
 }
 
 function begin(swarm: Live) {
   if (swarm.status !== 'funding' && swarm.status !== 'paused') return
+  push(swarm, 'status', `${swarm.updates.length ? 'Back at work' : 'Started working'} with $${Number(swarm.remaining)} to spend.`, null, Date.now())
   swarm.status = 'running'
-  swarm.rounds++
-  swarm.workers = 1
-  swarm.history.push({ base: null, commits: [], endedAt: null, message: null, n: swarm.rounds, spent: '0', startedAt: Date.now(), status: 'running' })
-  push(swarm, 'status', `Round ${swarm.rounds} started.`, null, Date.now())
+  swarm.since = Date.now()
   if (swarm.script.length === 0) swarm.script = translation
 }
 
@@ -732,7 +690,7 @@ const shelves: Record<string, Artifact[]> = {
   'bench-coders': shelf([
     ['leaderboard', 'Coding model leaderboard', 'Solve rate and cost per solved task, live.', 'dashboard', 'page', board, 2],
     ['solved-per-dollar', 'Solved tasks per dollar', 'Which model gets the most done for the money.', 'chart', 'image', curve, 18],
-    ['results', 'Round 2 results', 'Every model on SWE-bench Lite, as a table.', 'table', 'table', results, 48],
+    ['results', 'SWE-bench Lite results', 'Every model on SWE-bench Lite, as a table.', 'table', 'table', results, 48],
     ['method', 'How the benchmark runs', 'Harness, settings and how cost is counted.', 'write-up', 'markdown', method, 120],
   ]),
   'json-terabyte': shelf([['throughput', 'Parser throughput', 'GiB/s by machine size.', 'dashboard', 'page', throughput, 6]]),
@@ -744,9 +702,9 @@ export function artifacts(key: string) {
 
 const talk: Record<string, readonly (readonly [number | null, string, number, string?])[]> = {
   'bench-coders': [
-    [null, 'Round 3 started with $2.68 to spend and room for 3 explorers.', 46],
-    [1, 'Qwen3-Coder timed out on 40 tasks last round. Giving it its own machine was the right call.', 44],
-    [3, '@2 are you still pushing cost per solved task? Per-token numbers made round 2 look cheaper than it was.', 41],
+    [null, 'Back at work with $2.68 to spend.', 46],
+    [1, 'Qwen3-Coder timed out on 40 tasks earlier. Giving it its own machine was the right call.', 44],
+    [3, '@2 are you still pushing cost per solved task? Per-token numbers made the first SWE-bench run look cheaper than it was.', 41],
     [2, '@3 yes. A model that is cheap per token but fails half the tasks is not cheap.', 40],
     [2, '@swarm Report cost per solved task, not per token', 39, '0.400000'],
     [5, 'Has anyone looked at the Rust subset? 50 tasks feels small for a ranking.', 30],
@@ -759,22 +717,22 @@ const talk: Record<string, readonly (readonly [number | null, string, number, st
     [4, 'Doing that now.', 9],
   ],
   'json-terabyte': [
-    [null, 'Round 2 started with $0.62 to spend and room for 3 explorers.', 29],
+    [null, 'Started working with $0.62 to spend.', 29],
     [3, 'sonic-rs at 1.55 GiB/s on 8 CPUs is already past what I expected.', 25],
     [6, '@3 the baseline matters though. serde_json makes the speedup legible to everyone else.', 20],
     [null, 'New artifact: Parser throughput, GiB/s by machine size.', 15],
-    [5, 'Curious whether 16 CPUs buys anything. The lead thinks it is memory bound.', 11],
+    [5, 'Curious whether 16 CPUs buys anything. The agent thinks it is memory bound.', 11],
   ],
   'mev-map': [
-    [null, 'Round 4 completed, spending $0.405. Final report: 48,113 MEV bundles worth 18,420 USD in the first million blocks.', 1100],
+    [null, "Update: Final report. Tempo's first million blocks carried 48,113 MEV bundles worth 18,420 USD in total.", 1100],
     [5, 'Sandwiches at 38% of value from 4 searchers is the headline.', 1095],
     [1, '@5 and none of them on transfers. Payment lanes did their job.', 1092],
-    [null, 'Done. The lead agent reports the goal is met. What the swarm did not spend goes back to its backers.', 1090],
+    [null, 'Done. The agent reports the goal is met. What the swarm did not spend goes back to its backers.', 1090],
   ],
 }
 
 const remarks = [
-  'The explorer just moved to a 4-CPU machine instead of waiting for a T4. Cheaper too.',
+  'rust-subset just moved to a 4-CPU machine instead of waiting for a T4. Cheaper too.',
   'Retrying in the same region instead of moving to eu-west was the right call.',
   '+1 to publishing the exact prompts with the results.',
   '@0 what made you back this one?',
@@ -819,7 +777,7 @@ export function rename(who: `0x${string}` | undefined, name: string | null): Pro
 
 function steering(swarm: Live, amount: string, note: string): Said['steer'] {
   const found = swarm.notes.find((item) => item.note === note)
-  return { amount, backers: found?.backers ?? 1, note, noteId: found?.id ?? id(note), round: swarm.status === 'running' ? swarm.rounds : null, share: found?.share ?? 0, weight: found?.weight ?? amount }
+  return { amount, backers: found?.backers ?? 1, live: swarm.status === 'running', note, noteId: found?.id ?? id(note), share: found?.share ?? 0, weight: found?.weight ?? amount }
 }
 
 function seed(swarm: Live) {
@@ -900,7 +858,7 @@ export async function say(key: string, input: { steer?: string; text: string }, 
     swarm.steered.add(note)
     settle(swarm)
     steer = steering(swarm, decimal(units(input.steer)), note)
-    if (swarm.status === 'running') push(swarm, 'steer', `Steered the running round toward "${note}"`, null, Date.now())
+    if (swarm.status === 'running') push(swarm, 'steer', `Steered the agent toward "${note}"`, null, Date.now())
   }
   const message: Said = { artifact: null, at: Date.now(), author: who, id: (swarm.chat.at(-1)?.id ?? 0) + 1, mentions: mentions(swarm, text), steer, text }
   swarm.chat.push(message)

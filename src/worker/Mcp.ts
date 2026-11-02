@@ -8,13 +8,13 @@ import * as Store from './Store.ts'
 
 function instructions(origin: string) {
   return [
-    `Swarms (${origin}) are crowdfunded, long-running AI agents on the Tempo gateway. Anyone starts a swarm with a title and a goal. It waits in status funding until someone funds it, and then works in rounds, spending on models and Modal machines: each round is one turn of a lead agent, with up to ${Store.maxParallel - 1} explorer subagents and machines beside it when enough money is left, and ends with a report. The newest completed report is the swarm's answer, and once the swarm holds $1.50 its lead keeps the code it writes in a public git repository that swarm_get names. A swarm runs until the lead reports the goal met (done) or its money runs out (paused, and new money resumes it).`,
-    "Money comes three ways. A pledge is a spending key in MACH (the default) or OUSD, USDC.e or pathUSD that the contributor approves in Tempo Wallet, capped at the pledge: the money stays in their wallet until the swarm spends it, and what it does not spend goes back when the pledge ends. A transfer sends USDC.e, pathUSD or OUSD to the swarm's own wallet, and a daily budget lets the swarm pull up to an amount a day from the contributor's wallet; when the swarm is done, what its wallet did not spend goes back to those contributors pro rata. Transfers and budgets are made on the swarm's page or over the REST API. Contributors steer with money: any of the three may carry a note, money with the same note backs it together, every round reads the notes ranked by the money behind them, and a note that arrives while a round runs steers that round at once.",
-    "Contributors can also lend a swarm their own machine as a hand: swarm_hand issues one and returns the nanocode command (nc hand '<url>' --token <token>) and a nanocode-ts snippet (Hand.connect) to run on that machine. The swarm's lead agent and its explorers then run commands there in any round, and are told the machine and its data belong to a contributor. A hand can set its own prices, such as a price per file; the swarm pays them through the gateway from its money and caps what each hand may charge in a round. Issue a hand only when the user asks, and make sure they know the swarm's agents will run commands on the machine.",
+    `Swarms (${origin}) are crowdfunded, long-running AI agents on the Tempo gateway. Anyone starts a swarm with a title and a goal. It waits in status funding until someone funds it, and then one nanocode agent works on it in a single continuous thread, spending on models, Modal machines and any subagents it spawns. Whenever it pauses to reply, it posts an update; the newest update is the swarm's answer, and the swarm then tells it to keep going. It keeps the code it writes in a public git repository that swarm_get names. A swarm runs until its agent reports the goal met (done), or waits whenever its money runs out (paused, and new money resumes it).`,
+    "Money comes three ways. A pledge is a spending key in MACH (the default) or OUSD, USDC.e or pathUSD that the contributor approves in Tempo Wallet, capped at the pledge: the money stays in their wallet until the swarm spends it, and what it does not spend goes back when the pledge ends. A transfer sends USDC.e, pathUSD or OUSD to the swarm's own wallet, and a daily budget lets the swarm pull up to an amount a day from the contributor's wallet; when the swarm is done, what its wallet did not spend goes back to those contributors pro rata. Transfers and budgets are made on the swarm's page or over the REST API. Contributors steer with money: any of the three may carry a note, money with the same note backs it together, the agent reads the notes ranked by the money behind them whenever it keeps going, and a note that arrives while it works reaches it at once.",
+    "Contributors can also lend a swarm their own machine as a hand: swarm_hand issues one and returns the nanocode command (nc hand '<url>' --token <token>) and a nanocode-ts snippet (Hand.connect) to run on that machine. The swarm's agent then runs commands there, and is told the machine and its data belong to a contributor. A hand can set its own prices, such as a price per file; the swarm pays them through the gateway from its money and caps what each hand may charge. Issue a hand only when the user asks, and make sure they know the swarm's agents will run commands on the machine.",
     "Swarms publish artifacts as they work, such as a live dashboard of their results, a chart or a write-up; swarm_artifacts lists them with a url to fetch.",
-    "Every swarm has a room where its backers talk. Anyone can read it with swarm_chat. Backers post on the swarm's page after signing in with Tempo Wallet, mention each other by username (or, without one, a name made from their address such as @quark-1a2b), and steer with @swarm: such a message puts an amount of its author's backing, not yet behind a note, behind the rest of the message as a note, which weighs like any other note and steers a running round at once.",
-    'To answer questions about what the swarms found or did, search first (swarms_search with keywords; set swarm to include that swarm\'s feed of tool calls, commands, machines and messages), then read what matched with swarm_rounds, swarm_answer, swarm_get or swarm_feed, and cite the swarm and round. swarms_list shows the funded swarms. Reading is free and needs no account.',
-    `Fund only when the user asks to. swarm_pledge returns a Tempo Wallet link and user code to show the user, who approves on any device; then swarm_pledge_status with wait reports when it is active. swarm_contribute prepares a one-off transfer (the swarm's address, the memo for a note, call data and a link to the page that sends it) and counts one by its hash. swarm_budget returns a link to the swarm's page with a daily budget filled in, which the user approves in Tempo Wallet. A pledge is at least ${Memo.decimal(Store.minPledge)} of its token. swarm_wait waits up to ${Operations.maxWait} s for a running round to end.`,
+    "Every swarm has a room where its backers talk. Anyone can read it with swarm_chat. Backers post on the swarm's page after signing in with Tempo Wallet, mention each other by username (or, without one, a name made from their address such as @quark-1a2b), and steer with @swarm: such a message puts an amount of its author's backing, not yet behind a note, behind the rest of the message as a note, which weighs like any other note and reaches the agent at once if it is working.",
+    'To answer questions about what the swarms found or did, search first (swarms_search with keywords; set swarm to include that swarm\'s feed of tool calls, commands, machines and messages), then read what matched with swarm_updates, swarm_answer, swarm_get or swarm_feed, and cite the swarm and when. swarms_list shows the funded swarms. Reading is free and needs no account.',
+    `Fund only when the user asks to. swarm_pledge returns a Tempo Wallet link and user code to show the user, who approves on any device; then swarm_pledge_status with wait reports when it is active. swarm_contribute prepares a one-off transfer (the swarm's address, the memo for a note, call data and a link to the page that sends it) and counts one by its hash. swarm_budget returns a link to the swarm's page with a daily budget filled in, which the user approves in Tempo Wallet. A pledge is at least ${Memo.decimal(Store.minPledge)} of its token. swarm_wait waits up to ${Operations.maxWait} s for the agent's next update.`,
   ].join('\n\n')
 }
 
@@ -47,7 +47,7 @@ function create(env: Cloudflare.Env, origin: string) {
     {
       annotations: reading,
       description:
-        'List the funded swarms, most recently active first (at most 100), each with its title, goal, status, money raised, spent and remaining, daily budgets, its wallet, rounds, machines, explorers, backers and latest answer. status filters: funding (funded, no round started yet), running, paused (out of money; new money resumes it) or done.',
+        'List the funded swarms, most recently active first (at most 100), each with its title, goal, status, money raised, spent and remaining, daily budgets, its wallet, machines, backers and latest answer. status filters: funding (funded, its agent has not started yet), running (its agent is working), paused (out of money; new money resumes it) or done.',
       inputSchema: Operations.schema.list.shape,
     },
     async (input) => reply(await Operations.list(env, input)),
@@ -58,7 +58,7 @@ function create(env: Cloudflare.Env, origin: string) {
     {
       annotations: reading,
       description:
-        "One swarm: its goal, status and money, its latest answer, every round (status, MACH spent and a short excerpt of its report; read the full reports with swarm_rounds), the running round, the steering notes ranked by the money behind them and their share of everything raised, its pledges, transfers and budget pulls, daily budgets and the machines attached now.",
+        "One swarm: its goal, status and money, its latest answer, every update (time, what it cost and a short excerpt; read them in full with swarm_updates), whether its agent is working and since when, the steering notes ranked by the money behind them and their share of everything raised, its pledges, transfers and budget pulls, daily budgets and the machines attached now.",
       inputSchema: Operations.schema.swarm.shape,
     },
     async (input) => reply(await Operations.get(env, input)),
@@ -69,21 +69,21 @@ function create(env: Cloudflare.Env, origin: string) {
     {
       annotations: reading,
       description:
-        "A swarm's latest answer: the full report of its newest completed round (markdown, without its STATUS line), with done (the lead reports the goal met) and next (what the lead planned for the next round), and the round running now, if any.",
+        "A swarm's latest answer: its agent's newest update in full (markdown), with done (the agent reports the goal met), and whether the agent is working now.",
       inputSchema: Operations.schema.swarm.shape,
     },
     async (input) => reply(await Operations.answer(env, input)),
   )
 
   server.registerTool(
-    'swarm_rounds',
+    'swarm_updates',
     {
       annotations: reading,
       description:
-        "A swarm's rounds with their full reports (message, markdown, ending in a STATUS line), status, start and end times in ms and MACH spent. Pass round to read one.",
-      inputSchema: Operations.schema.round.shape,
+        "A swarm's updates, oldest first: each time its agent paused to reply, what it reported (markdown), when (ms), what it spent since the update before and the commits it pushed. limit keeps the newest.",
+      inputSchema: Operations.schema.updates.shape,
     },
-    async (input) => reply(await Operations.rounds(env, input)),
+    async (input) => reply(await Operations.updates(env, input)),
   )
 
   server.registerTool(
@@ -91,7 +91,7 @@ function create(env: Cloudflare.Env, origin: string) {
     {
       annotations: reading,
       description:
-        "A swarm's activity log, oldest first: rounds starting and ending (status), the lead's messages and reasoning summaries (message, thinking), tool calls, scripts, shell commands and explorers (tool), Modal machines (machine), money coming in and going back (funds), steering (steer) and failures (error), each with seq, time, round, text and an optional detail. Page with after set to the previous page's next.",
+        "A swarm's transcript, oldest first: its agent's messages and reasoning summaries (message, thinking), tool calls, scripts, shell commands and subagents (tool), outputs (output), Modal machines (machine), money coming in and going back (funds), steering (steer), the swarm starting, pausing and posting updates (status) and failures (error), each with seq, time, text, an optional detail and who (null for the agent, else the subagent's name). Page forward with after set to the previous page's next, or back with before.",
       inputSchema: Operations.schema.feed.shape,
     },
     async (input) => reply(await Operations.feed(env, input)),
@@ -113,7 +113,7 @@ function create(env: Cloudflare.Env, origin: string) {
     {
       annotations: reading,
       description:
-        "A swarm's room, oldest first: its backers' messages, each with its author's wallet address (the room shows it as a handle such as @quark-1a2b), the backers it mentions, and steer when it was an @swarm message that put some of its author's backing behind an idea (amount, note, the note's weight and share, and the round it steered, if one was running). Messages without an author mark money coming in and rounds starting and ending. members lists every backer with what they put in, how much of it is behind notes and how they back the swarm. By default the newest messages; page back with before, or read newer ones with after.",
+        "A swarm's room, oldest first: its backers' messages, each with its author's wallet address (the room shows it as a handle such as @quark-1a2b), the backers it mentions, and steer when it was an @swarm message that put some of its author's backing behind an idea (amount, note, the note's weight and share, and live when it reached the working agent at once). Messages without an author mark money coming in, the agent starting and stopping, and its updates. members lists every backer with what they put in, how much of it is behind notes and how they back the swarm. By default the newest messages; page back with before, or read newer ones with after.",
       inputSchema: Operations.schema.room.shape,
     },
     async (input) => reply(await Operations.room(env, input)),
@@ -124,7 +124,7 @@ function create(env: Cloudflare.Env, origin: string) {
     {
       annotations: reading,
       description:
-        "Full-text search over what the swarms did: every swarm's title and goal, every round report and the steering notes, ranked best first with the matches marked «like this» in a snippet. With swarm set it searches only that swarm and also its feed (tool calls, shell commands, machines, messages and errors). Send keywords rather than a question; hits match any of them. Read a report hit with swarm_rounds (its round), and a feed hit with swarm_feed (after = its entry.seq - 1).",
+        "Full-text search over what the swarms did: every swarm's title and goal, its agent's updates and the steering notes, ranked best first with the matches marked «like this» in a snippet. With swarm set it searches only that swarm and also its feed (tool calls, shell commands, machines, messages and errors). Send keywords rather than a question; hits match any of them. Read an update hit with swarm_updates (by its at), and a feed hit with swarm_feed (after = its entry.seq - 1).",
       inputSchema: Operations.schema.search.shape,
     },
     async (input) => reply(await Operations.search(env, input)),
@@ -196,7 +196,7 @@ function create(env: Cloudflare.Env, origin: string) {
     {
       annotations: { destructiveHint: false, idempotentHint: false, openWorldHint: true, readOnlyHint: false },
       description:
-        "Issue a hand so the user can lend their own machine to a swarm. Returns a unique hand name, the CLI command to run on that machine (cli: nc hand '<url>' --token <token>; command installs nanocode first) and a nanocode-ts library snippet (library, after npm) that attaches with Hand.connect. Once it runs, the swarm's lead agent and explorers can run commands and read and write files there in rounds paid from the swarm's wallet (transfers and daily budgets), and are told it belongs to a contributor and to ask before anything destructive. The token is shown once: anyone holding it can attach a machine under that name. Stopping the command detaches the machine. Call it only when the user asks, and tell them what the swarm's agents will be able to do on it.",
+        "Issue a hand so the user can lend their own machine to a swarm. Returns a unique hand name, the CLI command to run on that machine (cli: nc hand '<url>' --token <token>; command installs nanocode first) and a nanocode-ts library snippet (library, after npm) that attaches with Hand.connect. Once it runs, the swarm's agent and its subagents can run commands and read and write files there, paid from the swarm's money, and are told it belongs to a contributor and to ask before anything destructive. The token is shown once: anyone holding it can attach a machine under that name. Stopping the command detaches the machine. Call it only when the user asks, and tell them what the swarm's agents will be able to do on it.",
       inputSchema: Operations.schema.hand.shape,
     },
     async (input) => reply(await Operations.hand(env, input)),
@@ -216,7 +216,7 @@ function create(env: Cloudflare.Env, origin: string) {
     'swarm_wait',
     {
       annotations: reading,
-      description: `Wait up to timeout seconds (at most ${Operations.maxWait}) for a swarm's running round to end, then return that round with its full report and the swarm, whose answer is the new report when the round completed. It returns at once when a round newer than after already ended (changed: true, reason ended), or when nothing runs and the swarm is funding, paused or done (reason idle); otherwise reason timeout. Call it again to keep waiting; the swarm itself has no time limit.`,
+      description: `Wait up to timeout seconds (at most ${Operations.maxWait}) for a swarm's agent to post its next update, then return that update and the swarm. It returns at once when an update newer than after was already posted (changed: true, reason updated), or when the agent is not working and the swarm is funding, paused or done (reason idle); otherwise reason timeout. Call it again to keep waiting; the swarm itself has no time limit.`,
       inputSchema: Operations.schema.wait.shape,
     },
     async (input, extra) => reply(await Operations.wait(env, input, extra.signal)),

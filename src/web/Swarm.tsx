@@ -1,26 +1,23 @@
 import { lazy, type ReactNode, Suspense, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import * as Answer from '../shared/Answer.ts'
 import * as Memo from '../shared/Memo.ts'
-import type { Config, Detail, Entry, Note, Round } from '../shared/Api.ts'
+import type { Config, Detail, Entry, Note, Update } from '../shared/Api.ts'
 import { merge } from '../shared/Trail.ts'
 import * as Api from './api.ts'
-import { Broadcast } from './Broadcast.tsx'
-import { Feed } from './Feed.tsx'
 import { Budgets, Contributions, Pledges } from './Backing.tsx'
 import { Connect } from './Connect.tsx'
 import { Artifacts } from './Artifacts.tsx'
 import { Box } from './Contribute.tsx'
 import { ago, duration, mach, percent, short, usd } from './format.ts'
-import { type Draft, useBroadcast, useMedia, useNow, usePoll } from './hooks.ts'
+import { agent, type Live, useLive, useMedia, useNow, usePoll } from './hooks.ts'
 import { Machines } from './Machines.tsx'
 import { Markdown } from './Markdown.tsx'
 import { Room } from './Room.tsx'
 import { Link } from './router.tsx'
+import { Transcript } from './Transcript.tsx'
 import { Bar, Status } from './Visual.tsx'
 
 const Code = lazy(() => import('./Code.tsx').then((module) => ({ default: module.Code })))
-
-const rounds = { cancelled: 'Cancelled', completed: 'Completed', failed: 'Failed', running: 'Running' } as const satisfies Record<Round['status'], string>
 
 const tabs = ['transcript', 'room', 'artifacts', 'answer', 'fund', 'code', 'machines', 'brief'] as const
 
@@ -74,8 +71,7 @@ export function Swarm(props: { config: Config | undefined; id: string }) {
   const last = useRef(0)
   const box = useRef<HTMLDivElement>(null)
   const loaded = detail.data !== undefined
-  const stream = useBroadcast(props.id, detail.data?.status === 'running', (entry) => setEntries((previous) => merge(previous, [entry])))
-  const draft = stream.draft
+  const stream = useLive(props.id, running, (entry) => setEntries((previous) => merge(previous, [entry])))
 
   useEffect(() => {
     setEntries([])
@@ -151,7 +147,7 @@ export function Swarm(props: { config: Config | undefined; id: string }) {
   const room = <Room config={props.config} onArtifact={open} onBack={back} onSteered={reload} onUnread={setUnread} swarm={swarm} visible={wide || shown === 'room'} />
   const count = shelf.data?.artifacts.length ?? 0
   const labels: Record<Tab, ReactNode> = {
-    answer: swarm.answer ? `Answer · R${swarm.answer.round}` : 'Answer',
+    answer: swarm.updates.length ? `Updates · ${swarm.updates.length}` : 'Updates',
     artifacts: count ? `Artifacts · ${count}` : 'Artifacts',
     brief: 'Brief',
     code: swarm.code ? `Code · ${swarm.code.name}` : 'Code',
@@ -160,7 +156,7 @@ export function Swarm(props: { config: Config | undefined; id: string }) {
     room: unread ? <>Room<span className="tab-count">{unread}</span></> : 'Room',
     transcript: live ? <><i className="tab-live" />Transcript</> : 'Transcript',
   }
-  const short: Record<(typeof docked)[number], string> = { answer: 'Answer', artifacts: 'Artifacts', room: 'Room', transcript: 'Live' }
+  const short: Record<(typeof docked)[number], string> = { answer: 'Updates', artifacts: 'Artifacts', room: 'Room', transcript: 'Live' }
 
   return (
     <article className="page swarm room-page" data-status={swarm.status}>
@@ -178,7 +174,7 @@ export function Swarm(props: { config: Config | undefined; id: string }) {
         </dl>
         {swarm.status !== 'done' && <button className="btn btn-high swarm-back" onClick={() => back(note)} type="button">Back it</button>}
       </header>
-      {swarm.status !== 'running' && <p className="banner">{swarm.status === 'done' ? 'Done. The answer is what the swarm found; the transcript replays every round.' : swarm.reason ?? (swarm.status === 'paused' ? 'Paused: the money is used up. A contribution, budget or pledge starts the next round.' : 'No money behind it yet. The first contribution starts round 1.')}</p>}
+      {swarm.status !== 'running' && <p className="banner">{swarm.status === 'done' ? 'Done. The latest update is what the swarm found; the transcript keeps everything it did.' : swarm.reason ?? (swarm.status === 'paused' ? 'Waiting for money: a contribution, budget or pledge keeps it going.' : 'No money behind it yet. The first contribution starts its agent.')}</p>}
       <div className="room-layout">
         <section className="room-main">
           {!phone && (
@@ -191,8 +187,8 @@ export function Swarm(props: { config: Config | undefined; id: string }) {
             </nav>
           )}
           <div className="room-panel" data-tab={shown} hidden={shown !== 'transcript'} id="panel-transcript" role="tabpanel">
-            <Broadcast
-              empty={swarm.status !== 'done' && <button className="btn btn-high" onClick={() => back(note)} type="button">Back it to start round 1</button>}
+            <Transcript
+              empty={swarm.status !== 'done' && <button className="btn btn-high" onClick={() => back(note)} type="button">Back it to start the agent</button>}
               entries={entries}
               live={stream}
               onEntries={(next) => setEntries((previous) => merge(previous, next))}
@@ -210,13 +206,15 @@ export function Swarm(props: { config: Config | undefined; id: string }) {
               {shown === 'answer' && (
                 <>
                   <section className="quest-findings">
-                    <h2 className="answer-head">{swarm.status === 'done' ? 'Answer' : 'Latest answer'}</h2>
-                    <Latest draft={draft} swarm={swarm} />
+                    <h2 className="answer-head">{swarm.status === 'done' ? 'What it found' : 'Latest update'}</h2>
+                    <Latest live={stream} swarm={swarm} />
                   </section>
-                  <section className="panel-section">
-                    <h2 className="panel-head">Every round</h2>
-                    <History draft={draft} history={swarm.history} />
-                  </section>
+                  {swarm.updates.length > 1 && (
+                    <section className="panel-section">
+                      <h2 className="panel-head">Earlier updates</h2>
+                      <Updates updates={swarm.updates.slice(0, -1)} />
+                    </section>
+                  )}
                 </>
               )}
               {shown === 'fund' && (
@@ -250,8 +248,8 @@ export function Swarm(props: { config: Config | undefined; id: string }) {
                     <p className="brief-goal">{swarm.goal}</p>
                   </section>
                   <section className="panel-section">
-                    <h2 className="panel-head">Activity log</h2>
-                    <Feed entries={entries} live={live} names={new Map(swarm.researchers.map((item) => [item.id, item.name]))} />
+                    <h2 className="panel-head">How it works</h2>
+                    <p className="brief-how">One agent works on this in a single thread for as long as its money lasts, and spawns subagents when it wants help. Backers steer it with @swarm in the room or with a note on their money; the agent posts an update when it has something to report and keeps going until it says the goal is met.</p>
                   </section>
                 </>
               )}
@@ -295,17 +293,12 @@ export function Swarm(props: { config: Config | undefined; id: string }) {
 
 function Meta(props: { swarm: Detail }) {
   const now = useNow()
-  const running = props.swarm.history.findLast((round) => round.status === 'running')
+  const working = props.swarm.working
+  const latest = props.swarm.updates.at(-1)
   return (
     <p className="meta">
       <Status status={props.swarm.status} />
-      {running ? (
-        <span>
-          Round {running.n} · {duration(now - running.startedAt)}
-        </span>
-      ) : (
-        props.swarm.rounds > 0 && <span>{props.swarm.rounds === 1 ? '1 round' : `${props.swarm.rounds} rounds`}</span>
-      )}
+      {working ? <span>Working for {duration(now - working.since)}</span> : latest && <span>Updated {ago(latest.at, now)}</span>}
       <span>Started {ago(props.swarm.createdAt, now)}</span>
     </p>
   )
@@ -316,12 +309,12 @@ function Repository(props: { config: Config | undefined; swarm: Detail }) {
   if (!code || !props.config)
     return (
       <p className="empty">
-        The swarm's lead creates its public repository first thing in its first round that one funder can pay {usd(props.config?.repoAt ?? '1.04')} at once: the repository costs $1 of its money, once, and every commit then shows up here as it lands. It holds {usd(props.swarm.remaining)} now.
+        The swarm's agent creates its public repository first thing once one funder can pay {usd(props.config?.repoAt ?? '1.04')} at once: the repository costs $1 of its money, once, and every commit then shows up here as it lands. It holds {usd(props.swarm.remaining)} now.
       </p>
     )
   return (
     <Suspense fallback={<p className="empty">Loading the code…</p>}>
-      <Code gateway={props.config.gateway} repo={code} rounds={props.swarm.history} swarm={props.swarm.id} />
+      <Code gateway={props.config.gateway} repo={code} swarm={props.swarm.id} updates={props.swarm.updates} />
     </Suspense>
   )
 }
@@ -333,7 +326,6 @@ function returned(swarm: Detail) {
 
 function Ledger(props: { config: Config | undefined; swarm: Detail }) {
   const swarm = props.swarm
-  const slots = Math.max(swarm.parallel, swarm.workers, 1)
   return (
     <div className="ledger">
       <p className="label">{swarm.status === 'done' ? 'Spent' : 'Left to spend'}</p>
@@ -341,16 +333,6 @@ function Ledger(props: { config: Config | undefined; swarm: Detail }) {
         {mach(swarm.status === 'done' ? swarm.spent : swarm.remaining)} <span>USD</span>
       </p>
       <Bar swarm={swarm} />
-      <div className="slots" data-live={swarm.status === 'running'}>
-        <span className="slots-row" aria-hidden>
-          {Array.from({ length: slots }, (_, index) => (
-            <i className={index < swarm.workers ? 'slot slot-on' : 'slot'} key={index} style={{ animationDelay: `${index * -0.35}s` }} />
-          ))}
-        </span>
-        <span>
-          {swarm.status === 'running' ? `${swarm.workers} of ${swarm.parallel} explorers at work` : `Room for ${swarm.parallel} explorer${swarm.parallel === 1 ? '' : 's'}`}
-        </span>
-      </div>
       <dl className="figures">
         <div>
           <dt>Machines</dt>
@@ -361,8 +343,8 @@ function Ledger(props: { config: Config | undefined; swarm: Detail }) {
           <dd>{swarm.contributors}</dd>
         </div>
         <div>
-          <dt>Rounds</dt>
-          <dd>{swarm.rounds}</dd>
+          <dt>Updates</dt>
+          <dd>{swarm.updates.length}</dd>
         </div>
       </dl>
       {swarm.wallet && (
@@ -380,7 +362,7 @@ function Ledger(props: { config: Config | undefined; swarm: Detail }) {
       )}
       {props.config && (
         <p className="fine">
-          Stablecoins count one to one. Each explorer beyond the first needs {usd(props.config.perWorker)} left to spend, and the swarm pauses below {usd(props.config.reserve)}.
+          Stablecoins count one to one. The agent waits whenever less than {usd(props.config.reserve)} is payable, and carries on when money comes in.
         </p>
       )}
     </div>
@@ -418,80 +400,62 @@ function Notes(props: { done: boolean; notes: readonly Note[]; onBack: (note: st
 }
 
 const waiting = {
-  done: 'The swarm ended without a report.',
-  funding: 'No answer yet. The first transfer, budget or pledge starts round 1, and its report lands here.',
-  paused: 'No answer yet. The swarm is paused until more money comes in.',
+  done: 'The swarm ended without an update.',
+  funding: 'No update yet. The first transfer, budget or pledge starts its agent, and what it reports lands here.',
+  paused: 'No update yet. The agent is waiting for more money.',
   running: '',
 } as const
 
-function writing(draft: Draft | undefined, round: Round | undefined) {
-  if (!draft || !round || draft.round !== round.n) return undefined
-  const text = draft.items.at(-1)?.text
-  return { text: text ? Answer.parse(round.n, text, 0).text : '', thinking: draft.thinking }
-}
-
-function Latest(props: { draft: Draft | undefined; swarm: Detail }) {
+function Latest(props: { live: Live; swarm: Detail }) {
   const now = useNow()
   const answer = props.swarm.answer
-  const running = props.swarm.history.findLast((round) => round.status === 'running')
-  const live = writing(props.draft, running)
+  const working = props.swarm.working
+  const stream = props.live.streams[agent]
+  const text = stream?.text ? Answer.parse(stream.text, 0).text : ''
   return (
     <div className="answer">
-      {running && (
+      {working && (
         <div className="answer-live">
           <p className="answer-meta">
             <i className="answer-dot" />
-            Round {running.n} is writing{answer ? ' the next answer' : ' the first answer'} · {duration(now - running.startedAt)}
+            {text ? 'Writing its next update' : 'Working'} · for {duration(now - working.since)}
           </p>
-          {live?.text ? (
-            <Markdown streaming text={live.text} />
+          {text ? (
+            <Markdown streaming text={text} />
           ) : (
-            <p className="answer-thinking">{live?.thinking ? `Thinking: …${live.thinking.slice(-280)}` : 'The lead is working. Its words stream in here as it writes them.'}</p>
+            <p className="answer-thinking">{stream?.thinking ? `Thinking: …${stream.thinking.slice(-280)}` : 'Its next update streams in here as it writes it.'}</p>
           )}
         </div>
       )}
       {answer ? (
         <div className="answer-final">
           <p className="answer-meta">
-            <span>Round {answer.round}</span>
             <span>{ago(answer.at, now)}</span>
-            {answer.done ? <span className="tag tag-on">Reported complete</span> : answer.next && <span>Next: {answer.next}</span>}
+            {answer.done && <span className="tag tag-on">Reported complete</span>}
           </p>
           <Markdown text={answer.text} />
         </div>
       ) : (
-        !running && <p className="empty">{waiting[props.swarm.status]}</p>
+        !working && <p className="empty">{waiting[props.swarm.status]}</p>
       )}
     </div>
   )
 }
 
-function History(props: { draft: Draft | undefined; history: readonly Round[] }) {
-  const now = useNow()
-  if (props.history.length === 0) return <p className="empty">No rounds yet. Each round ends with a report, and it shows up here.</p>
-  const ordered = [...props.history].sort((a, b) => b.n - a.n)
-  const latest = ordered.find((round) => round.message)?.n
+function Updates(props: { updates: readonly Update[] }) {
+  const now = useNow(30_000)
   return (
     <ol className="rounds">
-      {ordered.map((round) => (
-        <li className="round" data-status={round.status} key={round.n}>
-          <details open={round.status === 'running' || round.n === latest}>
+      {[...props.updates].reverse().map((update) => (
+        <li className="round" data-status="completed" key={update.at}>
+          <details>
             <summary>
-              <span className="round-n">Round {round.n}</span>
-              <span className="round-status">
-                <i />
-                {rounds[round.status]}
-              </span>
-              <span>{duration((round.endedAt ?? now) - round.startedAt)}</span>
-              <span>{usd(round.spent)}</span>
+              <span className="round-n">{ago(update.at, now)}</span>
+              <span className="round-excerpt">{Answer.excerpt(update.text, 90)}</span>
+              <span>{usd(update.spent)}</span>
             </summary>
-            {round.message ? (
-              <Markdown text={round.message} />
-            ) : round.status === 'running' && writing(props.draft, round)?.text ? (
-              <Markdown streaming text={writing(props.draft, round)?.text ?? ''} />
-            ) : (
-              <p className="empty">{round.status === 'running' ? 'Working. The report streams in here as the lead writes it.' : 'No report.'}</p>
-            )}
+            <Markdown text={update.text} />
+            {update.commits.length > 0 && <p className="fine">Pushed {update.commits.length} commit{update.commits.length === 1 ? '' : 's'}.</p>}
           </details>
         </li>
       ))}

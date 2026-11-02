@@ -322,7 +322,7 @@ export function Room(props: {
     if (Mention.steers(body)) {
       if (done) return setProblem({ text: 'This swarm is done, so @swarm no longer steers it.' })
       if (idea.length < 3) return setProblem({ text: 'Say what the swarm should do after @swarm.' })
-      if (idea.length > maxNote) return setProblem({ text: `Keep the idea to ${maxNote} characters; it becomes a note the lead reads every round.` })
+      if (idea.length > maxNote) return setProblem({ text: `Keep the idea to ${maxNote} characters; it becomes a note the agent keeps reading.` })
       setProblem(undefined)
       setSteer(available >= 500_000n ? '0.5' : available > 0n ? plain(mine.available) : '')
       return
@@ -513,7 +513,7 @@ export function Room(props: {
                 {item.steer && (
                   <p className="said-steer">
                     <b>Steer</b> {usd(item.steer.amount)} behind it · {usd(item.steer.weight)} in all, {percent(item.steer.share)} of the money ·{' '}
-                    {item.steer.round ? `sent to round ${item.steer.round}` : 'read at the next round'}
+                    {item.steer.live ? 'reached the agent at once' : 'read when it resumes'}
                   </p>
                 )}
               </div>
@@ -555,7 +555,7 @@ export function Room(props: {
                   <input aria-label="Amount to steer with" className="steer-input" inputMode="decimal" onChange={(event) => setSteer(event.target.value.replace(',', '.'))} value={steer} />
                 </div>
                 <p className="fine">
-                  {usd(mine.available)} of the {usd(mine.backed)} you put in is not behind a note yet. This moves weight, not money: the lead weighs every note by the money behind it{props.swarm.status === 'running' ? ', and hears this one now' : ' at the next round'}.
+                  {usd(mine.available)} of the {usd(mine.backed)} you put in is not behind a note yet. This moves weight, not money: the agent weighs every note by the money behind it{props.swarm.status === 'running' ? ', and hears this one now' : ' when it resumes'}.
                 </p>
               </>
             ) : (

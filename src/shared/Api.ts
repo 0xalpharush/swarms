@@ -4,7 +4,7 @@ export type Token = 'ousd' | 'pathusd' | 'usdce'
 
 export type Currency = 'mach' | Token
 
-export type Answer = { at: number; done: boolean; next: string | null; round: number; text: string }
+export type Answer = { at: number; done: boolean; text: string }
 
 export type Summary = {
   answer: Answer | null
@@ -14,17 +14,14 @@ export type Summary = {
   goal: string
   id: string
   machines: number
-  parallel: number
   pool: string
   raised: string
   remaining: string
-  rounds: number
   spent: string
   status: Status
   title: string
   updatedAt: number
   wallet: `0x${string}` | null
-  workers: number
 }
 
 export type Pledge = {
@@ -74,16 +71,9 @@ export type Note = {
   weight: string
 }
 
-export type Round = {
-  base: string | null
-  commits: string[]
-  endedAt: number | null
-  message: string | null
-  n: number
-  spent: string
-  startedAt: number
-  status: 'running' | 'completed' | 'failed' | 'cancelled'
-}
+export type Update = { at: number; base: string | null; commits: string[]; done: boolean; spent: string; text: string }
+
+export type Working = { since: number }
 
 export type Kind = 'tool' | 'output' | 'message' | 'thinking' | 'steer' | 'funds' | 'status' | 'machine' | 'error'
 
@@ -92,7 +82,6 @@ export type Entry = {
   detail: string | null
   event: number | null
   kind: Kind
-  round: number
   seq: number
   text: string
   who: string | null
@@ -101,21 +90,6 @@ export type Entry = {
 export type Hand = { connected: boolean; name: string }
 
 export type Code = { app: string; name: string; owner: string }
-
-export type Researcher = {
-  id: string
-  parent: string | null
-  round: number
-  name: string
-  task: string
-  state: 'pending' | 'running' | 'completed' | 'failed' | 'interrupted' | 'closing' | 'closed'
-  action: string | null
-  output: string | null
-  updatedAt: number
-  events: number
-  toolsCompleted: number
-  lastSequence: number
-}
 
 export type Prepared = {
   amount: string | null
@@ -160,25 +134,22 @@ export type Issued = {
 }
 
 export type Live =
-  | { round: number; type: 'round' }
-  | { delta: string; item: string; offset: number | null; type: 'text' | 'thinking' }
-  | { item: string; text: string; type: 'message' }
+  | { at: number; type: 'start' }
   | { channel: 'input' | 'text' | 'thinking'; delta: string; item: string; offset: number | null; type: 'delta'; who: string | null }
   | { entry: Entry; type: 'entry' }
-  | { researcher: Researcher; type: 'researcher' }
   | { type: 'end' | 'idle' }
 
 export type Detail = Summary & {
-  code: Code | null
-  reason: string | null
-  researchers: Researcher[]
   budgets: Budget[]
+  code: Code | null
   contributions: Contribution[]
   feed: Entry[]
   hands: Hand[]
-  history: Round[]
   notes: Note[]
   pledges: Pledge[]
+  reason: string | null
+  updates: Update[]
+  working: Working | null
 }
 
 export type Config = {
@@ -189,7 +160,6 @@ export type Config = {
   gateway: string
   mach: `0x${string}`
   minPledge: string
-  perWorker: string
   repoAt: string
   reserve: string
   rpc: string
@@ -210,32 +180,28 @@ export type Pledged = { pledge: Pledge; status: Pledge['status']; swarm: Summary
 
 export type Pending = { amount: string; device: Device | null; note: string | null; pledge: string; status: 'pending' }
 
-export type Running = { n: number; startedAt: number }
-
-export type Brief = Omit<Round, 'message'> & { excerpt: string | null }
+export type Brief = Omit<Update, 'text'> & { excerpt: string }
 
 export type Overview = Summary & {
-  code: Code | null
-  reason: string | null
-  researchers: Researcher[]
   budgets: Budget[]
+  code: Code | null
   contributions: Contribution[]
   hands: Hand[]
-  history: Brief[]
   notes: Note[]
   pledges: Pledge[]
-  running: Running | null
+  reason: string | null
+  updates: Brief[]
+  working: Working | null
 }
 
-export type Answered = { answer: Answer | null; running: Running | null; status: Status; swarm: string; title: string }
+export type Answered = { answer: Answer | null; status: Status; swarm: string; title: string; working: Working | null }
 
 export type Page = { entries: Entry[]; next: number }
 
 export type Hit = {
   at: number | null
   entry: Pick<Entry, 'kind' | 'seq'> | null
-  kind: 'swarm' | 'report' | 'note' | 'feed'
-  round: number | null
+  kind: 'swarm' | 'update' | 'note' | 'feed'
   snippet: string
   swarm: { id: string; status: Status; title: string }
 }
@@ -244,11 +210,11 @@ export type Found = { hits: Hit[]; terms: string[] }
 
 export type Waited = {
   changed: boolean
-  reason: 'ended' | 'idle' | 'timeout'
-  round: Round | null
-  running: Running | null
+  reason: 'updated' | 'idle' | 'timeout'
   swarm: Summary
+  update: Update | null
   waited: number
+  working: Working | null
 }
 
 export type BudgetRequested = { authorizeAccessKey: unknown; budget: string }
@@ -275,7 +241,7 @@ export type Me = Member & { member: boolean }
 
 export type Account = { address: `0x${string}`; handle: string; name: string | null }
 
-export type Steer = { amount: string; backers: number; note: string; noteId: string; round: number | null; share: number; weight: string }
+export type Steer = { amount: string; backers: number; live: boolean; note: string; noteId: string; share: number; weight: string }
 
 export type Form = 'page' | 'image' | 'markdown' | 'table' | 'json' | 'text'
 

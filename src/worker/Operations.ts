@@ -30,8 +30,9 @@ import type {
   Prepared,
   Requested,
   Room,
-  Round,
-  Running,
+  Update,
+  Working,
+
   Status,
   Summary,
   Waited,
@@ -57,7 +58,7 @@ export const statuses = ['funding', 'running', 'paused', 'done'] as const satisf
 
 export const kinds = ['tool', 'output', 'message', 'thinking', 'steer', 'funds', 'status', 'machine', 'error'] as const satisfies readonly Kind[]
 
-export const sources = ['swarm', 'report', 'note', 'feed'] as const satisfies readonly Hit['kind'][]
+export const sources = ['swarm', 'update', 'note', 'feed'] as const satisfies readonly Hit['kind'][]
 
 export const maxWait = 55
 
@@ -144,7 +145,7 @@ export const schema = {
       .trim()
       .min(10)
       .max(2000)
-      .describe('What the swarm should find out or build, what done looks like and what each round should report.'),
+      .describe('What the swarm should find out or build, what done looks like and what its updates should report.'),
     title: z.string().trim().min(3).max(80).describe('A short name for the swarm.'),
   }),
   hand: z.object({
@@ -160,14 +161,14 @@ export const schema = {
   feed: z.object({
     after: z.coerce.number().int().min(0).default(0).describe('Return entries after this seq; pass the previous page\'s next.'),
     kind: z.enum(kinds).optional().describe('Only entries of this kind.'),
+    before: z.coerce.number().int().min(1).optional().describe('Return the newest entries before this seq instead, to read further back.'),
     limit: z.coerce.number().int().min(1).max(200).default(200).describe('At most this many entries.'),
-    round: z.coerce.number().int().min(0).optional().describe('Only entries of this round.'),
     swarm: id,
     who: z
       .string()
       .max(160)
       .optional()
-      .describe('Only entries of this researcher: lead for the lead agent, or a researcher id from the swarm\'s researchers.'),
+      .describe("Only entries of one speaker: agent for the swarm's agent, or a subagent's name as entries carry it in who."),
   }),
   list: z.object({ status: z.enum(statuses).optional().describe('Only swarms with this status.') }),
   pledge: z.object({
@@ -207,8 +208,8 @@ export const schema = {
     limit: z.coerce.number().int().min(1).max(200).default(100).describe('At most this many messages.'),
     swarm: id,
   }),
-  round: z.object({
-    round: z.coerce.number().int().min(1).optional().describe('Only this round.'),
+  updates: z.object({
+    limit: z.coerce.number().int().min(1).max(200).default(50).describe('At most this many of the newest updates.'),
     swarm: id,
   }),
   say: z.object({
@@ -240,7 +241,7 @@ export const schema = {
       .int()
       .min(0)
       .optional()
-      .describe('Return once a round newer than this one has ended. Defaults to the newest ended round, so it waits for the next.'),
+      .describe("Return once an update newer than this time (Unix ms, an update's at) is posted. Defaults to the newest update, so it waits for the next."),
     swarm: id,
     timeout: seconds(45, `Seconds to wait at most, up to ${maxWait}.`),
   }),
@@ -283,11 +284,6 @@ function logged(task: Promise<unknown>) {
   return task.catch((error: unknown) => console.error('Indexing for search failed', error))
 }
 
-function running(rounds: readonly Round[]): Running | null {
-  const found = rounds.findLast((round) => round.status === 'running')
-  return found ? { n: found.n, startedAt: found.startedAt } : null
-}
-
 async function provisioned(env: Cloudflare.Env, row: Store.Row) {
   if (row.wallet) return { ...row, wallet: row.wallet }
   await Store.provision(env, row.id, await Vault.create(env.SWARMS_SECRET))
@@ -302,9 +298,9 @@ async function load(env: Cloudflare.Env, id: string) {
   const row = await provisioned(env, found)
 
   const view = await stub(env, id).view()
-  const answered = view.rounds.findLast((round) => round.status === 'completed' && round.message)
-  if (!row.answer && answered?.message) {
-    row.answer = JSON.stringify(Answer.parse(answered.n, answered.message, answered.endedAt ?? Date.now()))
+  const latest = view.updates.at(-1)
+  if (!row.answer && latest) {
+    row.answer = JSON.stringify({ at: latest.at, done: latest.done, text: latest.text })
     await Store.update(env, id, { answer: row.answer })
   }
   return { row, view }
@@ -324,7 +320,6 @@ export function config(env: Cloudflare.Env): Config {
     gateway: env.GATEWAY_URL,
     mach: Chain.mach,
     minPledge: Memo.decimal(Store.minPledge),
-    perWorker: Memo.decimal(Store.perWorker),
     repoAt: Memo.decimal(Store.repoAt),
     reserve: Memo.decimal(Store.reserve),
     rpc: env.TEMPO_RPC,
@@ -368,20 +363,20 @@ export async function detail(env: Cloudflare.Env, input: Input<'swarm'>): Promis
     Store.notes(env, row.id, BigInt(row.raised), new Set(view.steered)),
     Store.budgets(env, row.id),
     Store.contributions(env, row.id),
-    logged(Search.sync(env, row.id, view.rounds)),
+    logged(Search.sync(env, row.id, view.turns)),
   ])
   return Problem.ok({
-    ...Store.summary(row, view.left === null ? undefined : Memo.units(view.left)),
+    ...Store.summary(row),
     budgets,
     code: view.code,
     contributions,
     feed: view.feed,
-    reason: view.reason,
-    researchers: view.researchers,
     hands: view.hands,
-    history: view.rounds,
     notes,
     pledges,
+    reason: view.reason,
+    updates: view.updates,
+    working: view.working,
   })
 }
 
@@ -398,29 +393,19 @@ export async function get(env: Cloudflare.Env, input: Input<'swarm'>): Promise<P
     Store.notes(env, row.id, BigInt(row.raised), new Set(view.steered)),
     Store.budgets(env, row.id),
     Store.contributions(env, row.id),
-    logged(Search.sync(env, row.id, view.rounds)),
+    logged(Search.sync(env, row.id, view.turns)),
   ])
   return Problem.ok({
-    ...Store.summary(row, view.left === null ? undefined : Memo.units(view.left)),
+    ...Store.summary(row),
     budgets,
     code: view.code,
     contributions,
     hands: view.hands,
-    history: view.rounds.map((round) => ({
-      base: round.base,
-      commits: round.commits,
-      endedAt: round.endedAt,
-      excerpt: round.message ? Answer.excerpt(Answer.parse(round.n, round.message, 0).text) : null,
-      n: round.n,
-      spent: round.spent,
-      startedAt: round.startedAt,
-      status: round.status,
-    })),
     notes,
     pledges,
     reason: view.reason,
-    researchers: view.researchers,
-    running: running(view.rounds),
+    updates: view.updates.map(({ text, ...update }) => ({ ...update, excerpt: Answer.excerpt(text) })),
+    working: view.working,
   })
 }
 
@@ -433,25 +418,22 @@ export async function answer(env: Cloudflare.Env, input: Input<'swarm'>): Promis
   const summary = Store.summary(loaded.row)
   return Problem.ok({
     answer: summary.answer,
-    running: running(loaded.view.rounds),
     status: summary.status,
     swarm: summary.id,
     title: summary.title,
+    working: loaded.view.working,
   })
 }
 
-export async function rounds(env: Cloudflare.Env, input: Input<'round'>): Promise<Problem.Result<{ rounds: Round[] }>> {
-  const parsed = parse(schema.round, input)
+export async function updates(env: Cloudflare.Env, input: Input<'updates'>): Promise<Problem.Result<{ updates: Update[]; working: Working | null }>> {
+  const parsed = parse(schema.updates, input)
   if (!parsed.ok) return parsed
   const swarm = parsed.value.swarm
   if (!(await Store.exists(env, swarm))) return missing()
 
-  const all = await stub(env, swarm).rounds()
-  await logged(Search.sync(env, swarm, all))
-  const wanted = parsed.value.round
-  if (wanted === undefined) return Problem.ok({ rounds: all })
-  const found = all.find((round) => round.n === wanted)
-  return found ? Problem.ok({ rounds: [found] }) : Problem.fail(404, 'not_found', `This swarm has no round ${wanted}.`)
+  const pulse = await stub(env, swarm).pulse()
+  await logged(Search.sync(env, swarm, pulse.turns))
+  return Problem.ok({ updates: pulse.updates.slice(-parsed.value.limit), working: pulse.working })
 }
 
 export async function feed(env: Cloudflare.Env, input: Input<'feed'>): Promise<Problem.Result<Page>> {
@@ -460,7 +442,7 @@ export async function feed(env: Cloudflare.Env, input: Input<'feed'>): Promise<P
   const query = parsed.value
   if (!(await Store.exists(env, query.swarm))) return missing()
 
-  const entries = await stub(env, query.swarm).feed(query.after, { kind: query.kind, limit: query.limit, round: query.round, who: query.who })
+  const entries = await stub(env, query.swarm).feed(query.after, { before: query.before, kind: query.kind, limit: query.limit, who: query.who })
   return Problem.ok({ entries, next: entries.at(-1)?.seq ?? query.after })
 }
 
@@ -482,7 +464,7 @@ export async function search(env: Cloudflare.Env, input: Input<'search'>): Promi
   if (row === null) return missing()
 
   const stale = row ? [row.id] : await Search.lagging(env)
-  await Promise.all(stale.map(async (swarm) => logged(Search.sync(env, swarm, await stub(env, swarm).rounds()))))
+  await Promise.all(stale.map(async (swarm) => logged(Search.sync(env, swarm, await stub(env, swarm).turns()))))
   const [indexed, entries] = await Promise.all([
     query.kind === 'feed' ? [] : Search.query(env, { kind: query.kind, limit: query.limit, swarm: row?.id, terms }),
     row && (query.kind === undefined || query.kind === 'feed') ? feedHits(env, row, terms, query.limit) : [],
@@ -497,7 +479,6 @@ async function feedHits(env: Cloudflare.Env, row: Store.Row, terms: string[], li
       at: entry.at,
       entry: { kind: entry.kind, seq: entry.seq },
       kind: 'feed',
-      round: entry.round,
       snippet: excerpt(entry, terms),
       swarm: { id: row.id, status: row.status, title: row.title },
     }),
@@ -510,35 +491,33 @@ export async function wait(env: Cloudflare.Env, input: Input<'wait'>, signal?: A
   const swarm = parsed.value.swarm
   const started = Date.now()
   const deadline = started + parsed.value.timeout * 1000
-  const first = await stub(env, swarm).rounds()
-  const since = parsed.value.after ?? first.findLast((round) => round.endedAt !== null)?.n ?? 0
+  let pulse = await stub(env, swarm).pulse()
+  const since = parsed.value.after ?? pulse.updates.at(-1)?.at ?? 0
 
-  let all = first
   for (;;) {
     const row = await Store.find(env, swarm)
     if (!row) return missing()
-    const ended = all.findLast((round) => round.endedAt !== null && round.n > since) ?? null
-    const current = running(all)
-    const reason = ended
-      ? 'ended'
-      : !current && row.status !== 'running'
+    const posted = pulse.updates.findLast((update) => update.at > since) ?? null
+    const reason = posted
+      ? 'updated'
+      : !pulse.working && row.status !== 'running'
         ? 'idle'
         : Date.now() >= deadline || signal?.aborted
           ? 'timeout'
           : undefined
     if (reason) {
-      if (ended) await logged(Search.sync(env, swarm, all))
+      if (posted) await logged(Search.sync(env, swarm, pulse.turns))
       return Problem.ok({
-        changed: ended !== null,
+        changed: posted !== null,
         reason,
-        round: ended,
-        running: current,
         swarm: Store.summary(row),
+        update: posted,
         waited: Date.now() - started,
+        working: pulse.working,
       })
     }
     await sleep(Math.min(2000, deadline - Date.now()), signal)
-    all = await stub(env, swarm).rounds()
+    pulse = await stub(env, swarm).pulse()
   }
 }
 

@@ -13,23 +13,21 @@ const overview: Overview = {
   daily: '0.000000',
   goal: 'Test <script> without placing markup in the player page.',
   hands: [],
-  history: [],
   id: 'abc123',
   machines: 0,
   notes: [],
-  parallel: 2,
   pledges: [],
   pool: '0.000000',
   raised: '1.250000',
+  reason: null,
   remaining: '0.750000',
-  rounds: 2,
-  running: null,
   spent: '0.500000',
   status: 'running',
   title: 'Safer <signatures>',
   updatedAt: 2,
+  updates: [],
   wallet: null,
-  workers: 3,
+  working: null,
 }
 
 test('start frame publishes an X player card and device pledge flow', async () => {
@@ -55,28 +53,21 @@ test('swarm frame escapes research text and points the player at its own route',
   assert.match(html, /Back this quest/)
 })
 
-test('a running swarm frame streams the live round and lists its explorers', async () => {
-  const running: Overview = {
-    ...overview,
-    history: [{ base: null, commits: [], endedAt: null, excerpt: null, n: 3, spent: '0', startedAt: 10, status: 'running' }],
-    researchers: [
-      { action: 'Using exec_command', events: 2, id: 's:1', lastSequence: 2, name: 'zstd <tuner>', output: null, parent: null, round: 3, state: 'running', task: '', toolsCompleted: 1, updatedAt: 1 },
-      { action: null, events: 1, id: 's:0', lastSequence: 1, name: 'old', output: null, parent: null, round: 2, state: 'completed', task: '', toolsCompleted: 0, updatedAt: 1 },
-    ],
-    running: { n: 3, startedAt: 10 },
-  }
-  const html = await XFrames.swarm('https://swarms.example', running).text()
+test('a working swarm frame streams the agent live from when it started', async () => {
+  const working: Overview = { ...overview, updates: [{ at: 9, base: null, commits: [], done: false, excerpt: 'zstd <wins>', spent: '0.1' }], working: { since: 10 } }
+  const html = await XFrames.swarm('https://swarms.example', working).text()
 
   assert.match(html, /<title>Live: Safer &lt;signatures&gt;<\/title>/)
   assert.match(html, /\/live'\)/)
-  assert.match(html, /href="https:\/\/swarms\.example\/s\/abc123" id="watch"/)
-  assert.match(html, /"crew":\[\{"action":"Using exec_command","id":"s:1","name":"zstd \\u003ctuner>","state":"running"\}\]/)
-  assert.doesNotMatch(html, /"name":"old"/)
+  assert.match(html, /href="https:\/\/swarms\.example\/s\/abc123"/)
+  assert.match(html, /"live":\{"since":10\}/)
+  assert.match(html, /zstd &lt;wins&gt;/)
+  assert.doesNotMatch(html, /\b[Rr]ound \d|ROUND|[Ee]xplorer|[Rr]esearcher/)
   assert.match(html, /Back this quest/)
 })
 
-test('a swarm frame without a running round shows the latest finding', async () => {
-  const html = await XFrames.swarm('https://swarms.example', { ...overview, history: [{ base: null, commits: [], endedAt: 9, excerpt: 'zstd wins on cost', n: 2, spent: '0.1', startedAt: 1, status: 'completed' }], status: 'paused' }).text()
+test('a swarm frame that is not working shows the latest update', async () => {
+  const html = await XFrames.swarm('https://swarms.example', { ...overview, status: 'paused', updates: [{ at: 9, base: null, commits: [], done: false, excerpt: 'zstd wins on cost', spent: '0.1' }] }).text()
 
   assert.match(html, /<title>Fund Safer/)
   assert.match(html, /zstd wins on cost/)

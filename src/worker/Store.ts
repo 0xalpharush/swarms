@@ -24,7 +24,6 @@ export type Row = {
   title: string
   updated_at: number
   wallet: `0x${string}` | null
-  workers: number
 }
 
 export type Backing = {
@@ -82,7 +81,7 @@ export type Allowance = {
 }
 
 export type Fields = Partial<
-  Pick<Row, 'answer' | 'machines' | 'pool_left' | 'pool_spent' | 'repo' | 'rounds' | 'status' | 'workers'>
+  Pick<Row, 'answer' | 'machines' | 'pool_left' | 'pool_spent' | 'repo' | 'rounds' | 'status'>
 >
 
 export type Changes = Partial<
@@ -92,15 +91,13 @@ export type Changes = Partial<
   >
 >
 
-export const perWorker = 100_000n
-
 export const reserve = 50_000n
+
+export const headroom = 100_000n
 
 export const minPledge = 2_000_000n
 
-export const maxParallel = 4
-
-export const stock = reserve + perWorker * BigInt(maxParallel - 1)
+export const stock = reserve + headroom * 3n
 
 export const repoCost = 1_000_000n
 
@@ -108,7 +105,7 @@ export const perCall = 40_000n
 
 export const repoAt = repoCost + perCall
 
-export const launch = repoAt + reserve + perWorker
+export const launch = repoAt + reserve + headroom
 
 export const budget = { days: 30, max: 100_000_000n, min: minPledge, period: 86_400 } as const
 
@@ -128,30 +125,29 @@ const totals = `select s.*,
   coalesce((select sum(cast(amount as integer) * 86400 / period) from budgets where swarm = s.id and status = 'active' and period > 0), 0) as daily
   from swarms s`
 
-export function parallel(remaining: bigint) {
-  return Math.min(maxParallel, Math.max(1, 1 + Number((remaining - reserve) / perWorker)))
+function answer(text: string | null): Answer | null {
+  if (!text) return null
+  const parsed = JSON.parse(text) as Answer
+  return { at: parsed.at, done: parsed.done, text: parsed.text }
 }
 
-export function summary(row: Row, current?: bigint): Summary {
+export function summary(row: Row): Summary {
   return {
-    answer: row.answer ? (JSON.parse(row.answer) as Answer) : null,
+    answer: answer(row.answer),
     contributors: row.contributors,
     createdAt: row.created_at,
     daily: Memo.decimal(BigInt(row.daily)),
     goal: row.goal,
     id: row.id,
     machines: row.machines,
-    parallel: parallel(current ?? BigInt(row.remaining)),
     pool: Memo.decimal(BigInt(row.pool_left)),
     raised: Memo.decimal(BigInt(row.raised)),
     remaining: Memo.decimal(BigInt(row.remaining)),
-    rounds: row.rounds,
     spent: Memo.decimal(BigInt(row.spent)),
     status: row.status,
     title: row.title,
     updatedAt: row.updated_at,
     wallet: row.wallet,
-    workers: row.workers,
   }
 }
 
