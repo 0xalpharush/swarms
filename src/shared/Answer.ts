@@ -12,8 +12,17 @@ export function parse(message: string, at: number): Answer {
   }
 }
 
+const numbered = /^(\s*(?:#{1,6}\s+)?[*_]*)\s*(?:round|turn|update)\s+\d+\s*(?:update|report|results?|summary)?\s*(?:[\u2014\u2013:-]\s*)?/i
+
+export function unround(text: string) {
+  const [first = '', ...rest] = text.split('\n')
+  const stripped = first.replace(numbered, '$1')
+  if (stripped === first) return text
+  return [/^[\s#*_]*$/.test(stripped) ? '' : stripped, ...rest].join('\n').replace(/^\n+/, '')
+}
+
 export function excerpt(text: string, length = 220) {
-  const plain = text
+  const plain = unround(text)
     .split('\n')
     .filter((line) => !/^\s*(\||[-:| ]{3,}$|#{1,6}\s*$)/.test(line))
     .map((line) => line.replace(/^\s*(#{1,6}|>|[-*+]|\d+\.)\s+/, '').replace(/[*_`]/g, '').trim())

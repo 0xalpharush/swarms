@@ -184,7 +184,7 @@ export type Pending = { amount: string; device: Device | null; note: string | nu
 
 export type Brief = Omit<Update, 'text'> & { excerpt: string }
 
-export type Why = 'unfunded' | 'money' | 'costly' | 'repo' | 'rest'
+export type Why = 'unfunded' | 'money' | 'costly' | 'repo' | 'rest' | 'idle'
 
 export type Overview = Summary & {
   budgets: Budget[]

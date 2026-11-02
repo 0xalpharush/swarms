@@ -1,4 +1,5 @@
 import { lazy, type ReactNode, Suspense, useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
+import * as Answer from '../shared/Answer.ts'
 import * as Memo from '../shared/Memo.ts'
 import type { Config, Detail, Entry, Me, Member, Note, Said } from '../shared/Api.ts'
 import { merge } from '../shared/Trail.ts'
@@ -15,7 +16,7 @@ import { Markdown } from './Markdown.tsx'
 import { Room } from './Room.tsx'
 import { Link } from './router.tsx'
 import { Transcript } from './Transcript.tsx'
-import { Bar, Status } from './Visual.tsx'
+import { Bar, Energy, Status } from './Visual.tsx'
 
 const Code = lazy(() => import('./Code.tsx').then((module) => ({ default: module.Code })))
 
@@ -60,6 +61,7 @@ export function Swarm(props: { config: Config | undefined; id: string }) {
   const [chat, setChat] = useState<{ handles: ReadonlyMap<string, string>; me: Me | null; members: readonly Member[]; online: readonly string[]; said: readonly Said[]; watching: number }>({ handles: new Map(), me: null, members: [], online: [], said: [], watching: 0 })
   const heard = useCallback((said: readonly Said[], me: Me | null, members: readonly Member[], online: readonly string[], watching: number) => setChat((previous) => ({ handles: new Map(members.map((member) => [member.address, member.handle])), me, members, online, watching, said: [...said, ...previous.said.filter((item) => !said.some((other) => other.id === item.id) && item.id > (said.at(-1)?.id ?? 0))] })), [])
   const [funding, setFunding] = useState(() => here().searchParams.has('fund'))
+  const tick = useNow(1000)
   const wide = useMedia('(min-width: 1100px)')
   const phone = useMedia('(max-width: 799px)')
   const running = detail.data?.status === 'running'
@@ -139,12 +141,8 @@ export function Swarm(props: { config: Config | undefined; id: string }) {
       <header className="swarm-head">
         <i aria-label={swarm.status} className="tile-dot" data-status={swarm.status} title={working(swarm)} />
         <h1 title={swarm.title}>{swarm.title}</h1>
-        <span className="swarm-sum">{usd(swarm.raised)} raised</span>
-        {swarm.status === 'done' ? (
-          swarm.answer && <button className="btn btn-high swarm-back" onClick={() => setResult(true)} type="button">Result</button>
-        ) : (
-          <button className="btn btn-high swarm-back" onClick={() => back(note)} type="button">Fund</button>
-        )}
+        <Energy now={tick} onFund={swarm.status === 'done' ? undefined : () => back(note)} swarm={swarm} />
+        {swarm.status === 'done' && swarm.answer && <button className="btn btn-high swarm-back" onClick={() => setResult(true)} type="button">Result</button>}
       </header>
       {result && <Result onClose={() => setResult(false)} swarm={swarm} />}
       <div className="room-layout">
@@ -246,7 +244,7 @@ function Result(props: { onClose: () => void; swarm: Detail }) {
           <p className="label">{answer?.done ? 'The result' : 'Latest update'}</p>
           <button className="btn btn-low" onClick={close} type="button">Close</button>
         </header>
-        <div className="sheet-body">{answer ? <Markdown text={answer.text} /> : <p className="empty">No result yet.</p>}</div>
+        <div className="sheet-body">{answer ? <Markdown text={Answer.unround(answer.text)} /> : <p className="empty">No result yet.</p>}</div>
       </article>
     </div>
   )

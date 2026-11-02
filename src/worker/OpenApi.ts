@@ -234,7 +234,7 @@ const schemas = {
         notes: { items: ref('Note'), type: 'array' },
         pledges: { items: ref('Pledge'), type: 'array' },
         reason: nullable({ description: 'Why the swarm is waiting, when it is.', type: 'string' }),
-        why: nullable({ description: 'The reason as a code: unfunded (no money yet), money (too little payable), costly (the next call holds more than any one source can pay), repo (not enough to open its repository) or rest (stopped after repeated errors).', enum: ['unfunded', 'money', 'costly', 'repo', 'rest'], type: 'string' }),
+        why: nullable({ description: 'The reason as a code: unfunded (no money yet), money (too little payable), costly (the next call holds more than any one source can pay), repo (not enough to open its repository) rest (stopped after repeated errors) or idle (the agent found nothing worth spending on, so the swarm rests until a note or new money).', enum: ['unfunded', 'money', 'costly', 'repo', 'rest', 'idle'], type: 'string' }),
         updates: { items: ref('Brief'), type: 'array' },
         working: nullable(ref('Working')),
       }),

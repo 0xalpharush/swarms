@@ -1,5 +1,6 @@
 import { type ReactNode, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { Config, Detail, Entry, Me, Said } from '../shared/Api.ts'
+import * as Answer from '../shared/Answer.ts'
 import * as Mention from '../shared/Mention.ts'
 import { decimal, units } from '../shared/Memo.ts'
 import { Alert, explain } from './Alert.tsx'
@@ -48,7 +49,7 @@ function Beat(props: { entry: Entry; head: boolean }) {
         <span className="beat-who" style={{ color: hue(who) }}>{who === agent ? 'Agent' : entry.who}</span>
       )}
       {entry.kind === 'message' ? (
-        <div className="beat-say"><Markdown text={entry.text} /></div>
+        <div className="beat-say"><Markdown text={Answer.unround(entry.text)} /></div>
       ) : (
         <p className="beat-text">{quiet && <span aria-hidden="true" className="beat-mark">›</span>}{entry.text}</p>
       )}
@@ -218,6 +219,7 @@ export function Transcript(props: {
   const [start, setStart] = useState(false)
   const box = useRef<HTMLOListElement>(null)
   const follow = useRef<'live' | 'reading'>('live')
+  const pinned = useRef(0)
   const [below, setBelow] = useState(false)
   const working = swarm.working
   const since = props.live.since ?? working?.since
@@ -229,7 +231,7 @@ export function Transcript(props: {
     for (const entry of props.entries) if (entry.who && !seen.includes(entry.who)) seen.push(entry.who)
     return seen
   }, [props.entries])
-  const shown = useMemo(() => props.entries.filter((entry) => entry.kind !== 'funds' && (who === 'all' || speaker(entry.who) === who)), [props.entries, who])
+  const shown = useMemo(() => props.entries.filter((entry) => entry.kind !== 'funds' && !(entry.kind === 'status' && /^Round \d+ /.test(entry.text)) && (who === 'all' || speaker(entry.who) === who)), [props.entries, who])
   const streaming = Object.entries(props.live.streams)
     .map(([name, stream]) => ({ name, now: now(stream), stream }))
     .filter((item) => item.now && streamed && (who === 'all' || who === item.name))
@@ -248,22 +250,33 @@ export function Transcript(props: {
     setStart(false)
   }, [who])
 
+  const bottom = (element: HTMLElement) => {
+    element.scrollTop = element.scrollHeight
+    pinned.current = element.scrollTop
+  }
+
   useLayoutEffect(() => {
     const element = box.current
     if (!element) return
-    if (follow.current === 'live') element.scrollTop = element.scrollHeight
+    if (follow.current === 'live') bottom(element)
     else setBelow(true)
   }, [last?.seq, last?.event, shown.length, streaming.length, voices.length, funded.length])
 
   useEffect(() => {
     const element = box.current
     if (!element) return
-    const observer = new ResizeObserver(() => {
-      if (follow.current === 'live') element.scrollTop = element.scrollHeight
-    })
-    observer.observe(element)
-    return () => observer.disconnect()
-  }, [])
+    const stick = () => {
+      if (follow.current === 'live') bottom(element)
+    }
+    const resized = new ResizeObserver(stick)
+    resized.observe(element)
+    const changed = new MutationObserver(stick)
+    changed.observe(element, { characterData: true, childList: true, subtree: true })
+    return () => {
+      resized.disconnect()
+      changed.disconnect()
+    }
+  }, [props.entries.length > 0 || !!working])
 
   const older = async () => {
     const element = box.current
@@ -278,6 +291,7 @@ export function Transcript(props: {
     props.onEntries(read.entries)
     requestAnimationFrame(() => {
       element.scrollTop += element.scrollHeight - height
+      pinned.current = element.scrollTop
     })
   }
 
@@ -311,8 +325,10 @@ export function Transcript(props: {
           className="timeline"
           onScroll={(event) => {
             const element = event.currentTarget
-            follow.current = element.scrollHeight - element.scrollTop - element.clientHeight < 48 ? 'live' : 'reading'
-            if (follow.current === 'live') setBelow(false)
+            if (element.scrollHeight - element.scrollTop - element.clientHeight < 48) {
+              follow.current = 'live'
+              setBelow(false)
+            } else if (Math.abs(element.scrollTop - pinned.current) > 2) follow.current = 'reading'
           }}
           ref={box}
         >
@@ -334,7 +350,7 @@ export function Transcript(props: {
             <li className="beat beat-now" data-kind={item.now?.kind === 'text' ? 'message' : item.now?.kind === 'input' ? 'tool' : 'thinking'} key={item.name}>
               <span className="beat-who" style={{ color: hue(item.name) }}>{item.name === agent ? 'Agent' : item.name}</span>
               {item.now?.kind === 'text' ? (
-                <div className="beat-say"><Markdown streaming text={item.now.text} /><span className="caret" /></div>
+                <div className="beat-say"><Markdown streaming text={Answer.unround(item.now.text)} /><span className="caret" /></div>
               ) : (
                 <p className="beat-text">{item.now?.kind === 'input' && <span aria-hidden="true" className="beat-mark">›</span>}{item.now?.text}<span className="caret" /></p>
               )}
@@ -345,8 +361,8 @@ export function Transcript(props: {
           <button
             className="btn btn-medium feed-jump"
             onClick={() => {
-              box.current?.scrollTo({ behavior: 'smooth', top: box.current.scrollHeight })
               follow.current = 'live'
+              if (box.current) bottom(box.current)
               setBelow(false)
             }}
             type="button"

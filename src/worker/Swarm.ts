@@ -199,6 +199,7 @@ export class Swarm extends DurableObject<Cloudflare.Env> {
     )
     this.announce(`@${(await Store.account(this.env, input.contributor)).handle} pledged ${trim(input.amount)} ${Chain.currencies[input.token].symbol}${input.note ? ` behind "${input.note}"` : ''}.`)
     const row = await Store.find(this.env, input.swarm)
+    this.kv.delete('resting')
     if (row) await this.upfront(row, input.id, input.token, BigInt(Memo.units(input.amount)))
     if (input.noteId) await this.steer(input.swarm, input.noteId, `pledged ${trim(input.amount)} ${Chain.currencies[input.token].symbol}`)
     if (!this.kv.get<string>('turn')) await this.ctx.storage.setAlarm(Date.now())
@@ -206,6 +207,7 @@ export class Swarm extends DurableObject<Cloudflare.Env> {
 
   async contributed(input: Contributed) {
     this.kv.put('id', input.swarm)
+    this.kv.delete('resting')
     this.kv.delete('exhausted:pool')
     this.log(
       'funds',
@@ -219,6 +221,7 @@ export class Swarm extends DurableObject<Cloudflare.Env> {
 
   async budgeted(input: Budgeted) {
     this.kv.put('id', input.swarm)
+    this.kv.delete('resting')
     this.log(
       'funds',
       `${short(input.contributor)} set a budget of ${trim(input.amount)} ${Chain.currencies[input.token].symbol} ${per(input.period)}${input.note ? ' with a note' : ''}`,
@@ -429,6 +432,7 @@ export class Swarm extends DurableObject<Cloudflare.Env> {
   }
 
   async advance(row: Store.Row) {
+    if (this.kv.get<number>('resting')) return null
     const worked = this.kv.get<number>('n') ?? 0
     await this.fund(row)
     const money = await this.refresh(row)
@@ -607,6 +611,12 @@ export class Swarm extends DurableObject<Cloudflare.Env> {
     this.kv.put('failures', failures)
     if (status === 'completed') this.kv.delete('wanted')
     if (answer?.done) return this.done(row, 'The agent reports the goal is met.')
+    const acted = this.ctx.storage.sql.exec<{ n: number }>("SELECT COUNT(*) AS n FROM feed WHERE at >= ? AND kind IN ('tool', 'machine')", started).one().n
+    if (status === 'completed' && acted === 0) {
+      this.kv.put('resting', Date.now())
+      await this.pause(row, 'paused', `Resting: the agent found nothing worth spending on, so the swarm stopped asking it and spends nothing. ${dollars(money.left)} is kept for later; a note or new money wakes it.`, 'idle')
+      return null
+    }
     const wanted = BigInt(this.kv.get<string>('wanted') ?? '0')
     if (status !== 'completed' && (money.left < Store.reserve || wanted > money.biggest)) {
       this.kv.put('failures', 0)
@@ -1358,6 +1368,7 @@ export class Swarm extends DurableObject<Cloudflare.Env> {
   }
 
   async steer(swarm: string, noteId: string, what: string): Promise<Note | undefined> {
+    this.kv.delete('resting')
     const row = await Store.find(this.env, swarm)
     const agent = this.kv.get<string>('agent')
     const turn = this.kv.get<string>('turn')
@@ -1747,6 +1758,7 @@ const costs = 'Every model call holds up to about $0.05 until it finishes and ev
 function brief(money: Money, notes: Note[], reports: string[], lent: Guest[], repo: Repo, shelf: string) {
   return [
     'You are the agent of a crowdfunded swarm. People put real money into this work, and every model call, machine-second and tool call you make is paid from it.',
+    'Every message the swarm sends you costs money, because your whole thread is read again. When nothing is worth doing, say so in a line or two without calling a tool: the swarm then rests and spends nothing until a contributor adds money or a note. There are no rounds: do not number your updates or call them rounds, and start each update with a short headline that says what changed.',
     '',
     `Goal: ${money.row.title}`,
     money.row.goal,
@@ -1772,6 +1784,9 @@ function brief(money: Money, notes: Note[], reports: string[], lent: Guest[], re
 function next(money: Money, notes: Note[], lent: Guest[], repo: Repo, shelf: string, resumed: boolean) {
   return [
     `${resumed ? 'New money came in, so carry on where you left off' : 'Keep going'}. ${funds(money)}.`,
+    '',
+    'Every message the swarm sends you costs money, because your whole thread is read again. When nothing is worth doing, say so in a line or two without calling a tool: the swarm then rests and spends nothing until a contributor adds money or a note, and you will hear from it then.',
+    'There are no rounds: do not number your updates or call them rounds. Start each update with a short headline that says what changed.',
     '',
     repository(repo),
     '',
