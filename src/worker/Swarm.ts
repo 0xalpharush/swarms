@@ -476,8 +476,7 @@ export class Swarm extends DurableObject<Cloudflare.Env> {
     if (base) this.kv.put('seen', base)
     else this.kv.delete('seen')
     const fresh = this.kv.get<boolean>('fresh')
-    const shelf = shelving(row.id, this.env.SWARMS_URL, this.kv.get<Record<string, Seen>>('artifacts') ?? {}, fresh || !this.kv.get<boolean>('shelved'))
-    const text = fresh ? brief(money, notes, this.reports(), lent, repo, shelf) : next(money, notes, lent, repo, shelf, resumed)
+    const text = fresh ? brief(money, notes, this.reports(), lent, repo) : next(money, notes, lent, repo, resumed)
     const sent = await Gateway.prompt(this.env, row.id, agent, { prompt: text, steer: false })
     if (!sent.ok) {
       this.log('error', 'The gateway did not take the next message for the agent.', sent.detail)
@@ -612,6 +611,8 @@ export class Swarm extends DurableObject<Cloudflare.Env> {
     if (status === 'completed') this.kv.delete('wanted')
     if (answer?.done) return this.done(row, 'The agent reports the goal is met.')
     const acted = this.ctx.storage.sql.exec<{ n: number }>("SELECT COUNT(*) AS n FROM feed WHERE at >= ? AND kind IN ('tool', 'machine')", started).one().n
+    const stored = this.ctx.storage.sql.exec<{ n: number }>("SELECT COUNT(*) AS n FROM feed WHERE at >= ? AND kind = 'tool' AND ((text || coalesce(detail, '')) LIKE '%kv_set%' OR (text || coalesce(detail, '')) LIKE '%bucket_put%' OR (text || coalesce(detail, '')) LIKE '%git_create%')", started).one().n
+    if (stored > 0 || !this.kv.get<number>('published')) await this.expose(row).catch((error: unknown) => console.error('Making the swarm data public failed', error))
     if (status === 'completed' && acted === 0) {
       this.kv.put('resting', Date.now())
       await this.pause(row, 'paused', `Resting: the agent found nothing worth spending on, so the swarm stopped asking it and spends nothing. ${dollars(money.left)} is kept for later; a note or new money wakes it.`, 'idle')
@@ -638,6 +639,26 @@ export class Swarm extends DurableObject<Cloudflare.Env> {
       return wake
     }
     return status === 'completed' ? Math.max(Date.now(), started + quickMs) : Date.now() + settleMs
+  }
+
+  async expose(row: Store.Row) {
+    const hidden: ['bucket' | 'git' | 'kv', string][] = []
+    for (const [kind, page] of [['kv', (cursor: string | null) => Gateway.values(this.env, row.id, cursor).then((found) => found.ok ? { cursor: found.value.cursor, items: found.value.entries } : undefined)], ['bucket', (cursor: string | null) => Gateway.objects(this.env, row.id, cursor).then((found) => found.ok ? { cursor: found.value.cursor, items: found.value.objects } : undefined)]] as const) {
+      let cursor: string | null = null
+      for (let pages = 0; pages < 20; pages++) {
+        const found: { cursor: string | null; items: { key: string; public: boolean }[] } | undefined = await page(cursor)
+        if (!found) break
+        for (const item of found.items) if (!item.public) hidden.push([kind, item.key])
+        cursor = found.cursor
+        if (!cursor) break
+      }
+    }
+    const listed = await Gateway.repos(this.env, row.id)
+    if (listed.ok) for (const repo of listed.value.repos) if (!repo.public) hidden.push(['git', repo.name])
+    let shown = 0
+    for (const [kind, name] of hidden) if ((await Gateway.reveal(this.env, row.id, kind, name)).ok) shown++
+    this.kv.put('published', Date.now())
+    if (shown) this.log('status', `Made ${shown} private item${shown === 1 ? '' : 's'} the agent stored public, so everything the swarm produces can be read by anyone.`, hidden.map(([kind, name]) => `${kind} ${name}`).join('\n'))
   }
 
   async sweep(row: Store.Row) {
@@ -1723,80 +1744,36 @@ function funds(money: Money) {
 }
 
 function repository(repo: Repo) {
-  const use = [
-    `From a cell, commit text files with tools.mcp__gateway__git_commit({ name: "${repo.name}", branch: "main", message, files: [{ path, text }] }); git_files, git_read and git_log show what is there.`,
-    `From a Modal machine created with apt: ["git"], get a clone and push URL with tools.mcp__gateway__git_remote({ name: "${repo.name}" }), clone it, commit and push to main, pulling first if someone else pushed. The URL is a secret: never print or echo it, or put it in a file, a commit or your reply.`,
-  ]
-  if (repo.state === 'ready')
-    return [`The swarm keeps its code in its public git repository "${repo.name}" on branch main, which contributors read on the swarm's page. Commit what you produce (code, scripts, results, notes) as you go, in small commits with messages that say what each change is: contributors watch each commit land live.`, ...use].join('\n')
-  if (repo.state === 'create')
-    return [
-      `Every swarm keeps its work in its own public git repository, which contributors browse live on its page. Your next tool call, before anything else, creates it: tools.mcp__gateway__git_create({ name: "${repo.name}", public: true }). It costs $1 of the swarm's money, once (if it already exists, make it public with tools.mcp__gateway__git_visibility({ name: "${repo.name}", public: true })). Then commit a README.md stating the goal and the plan, and commit what you produce as you go, in small commits with messages that say what each change is.`,
-      ...use,
-    ].join('\n')
-  return `The swarm gets its public code repository "${repo.name}" as soon as one of its funders can pay ${dollars(Store.repoAt)} at once (the repository costs $1); until then, keep your results in your updates.`
+  if (repo.state === 'ready') return `Its code goes in the public git repository "${repo.name}" on main; commit as you go.`
+  if (repo.state === 'create') return `Create its public git repository first: tools.mcp__gateway__git_create({ name: "${repo.name}", public: true }) ($1, once), then commit as you go.`
+  return ''
 }
 
-function shelving(swarm: string, origin: string, seen: Record<string, Seen>, full: boolean) {
-  const published = Object.entries(seen)
-  const list = published.length
-    ? `Artifacts published so far: ${published.map(([slug, item]) => `"${item.title}" (artifacts/${slug}, version ${item.version})`).join('; ')}.`
-    : 'No artifacts are published yet.'
-  if (!full) return `${list} Keep them current as results come in: update an artifact's data file and its manifest's updated time rather than publishing a new one, and publish a new one only for something contributors cannot follow yet.`
+const open = 'Everything this swarm stores is public, for anyone to read: pass public: true to kv_set, bucket_put and git_create.'
+
+function brief(money: Money, notes: Note[], reports: string[], lent: Guest[], repo: Repo) {
   return [
-    `Artifacts let contributors follow along on the swarm's page beside the transcript: a live dashboard of the numbers that matter, a chart, a table, a write-up. ${list}`,
-    `Publish one by storing its files under artifacts/<slug>/ in the bucket, public and kept 90 days, for example tools.mcp__gateway__bucket_put({ key: "artifacts/leaderboard/index.html", text: html, contentType: "text/html; charset=utf-8", public: true, retention: 7776000 }) (base64 instead of text for a PNG), then its manifest: tools.mcp__gateway__kv_set({ key: "artifacts/leaderboard", value: { title: "Leaderboard", summary: "<one line>", entry: "index.html", kind: "dashboard", updated: new Date().toISOString() }, public: true }). A slug is lower case letters, digits, dots, hyphens and underscores; file names are letters, digits, dots, hyphens and underscores, at most four folders deep. An entry can be HTML, Markdown, CSV, JSON, SVG or PNG.`,
-    `HTML runs sandboxed on the swarm's page: it may load scripts and styles from cdn.jsdelivr.net, unpkg.com, cdnjs.cloudflare.com and esm.sh, fetch its own files by relative URL and read the swarm's public API (${origin}/v1/swarms/${swarm}, its /updates and /artifacts), and nothing else, so keep the numbers in a data file such as data.json that the page fetches, and update that file as results come in: contributors see each update within a minute.`,
-    'Keep to a few artifacts that matter, and say in your update which you published or changed. A bucket_put costs $0.005 and a kv_set $0.0005; the page tells contributors about each new artifact.',
-  ].join('\n')
-}
-
-const pacing = 'Work in one continuous thread for as long as the money lasts. Whenever you stop to reply, the reply is an update that contributors read on the swarm\'s page: say what you tried and found since your last one, with concrete numbers, and what you pushed or published. You will then be told to keep going, with any new notes from contributors, so do not wait for permission and do not stop early. Contributors may also message you while you work. When the goal is fully met, end your reply with one last line that is exactly "STATUS: done".'
-
-const costs = 'Every model call holds up to about $0.05 until it finishes and every web search up to about $0.10, so many at once can hold the whole budget when money is short.'
-
-function brief(money: Money, notes: Note[], reports: string[], lent: Guest[], repo: Repo, shelf: string) {
-  return [
-    'You are the agent of a crowdfunded swarm. People put real money into this work, and every model call, machine-second and tool call you make is paid from it.',
-    'Every message the swarm sends you costs money, because your whole thread is read again. When nothing is worth doing, say so in a line or two without calling a tool: the swarm then rests and spends nothing until a contributor adds money or a note. There are no rounds: do not number your updates or call them rounds, and start each update with a short headline that says what changed.',
-    '',
     `Goal: ${money.row.title}`,
     money.row.goal,
     '',
-    `Budget: ${funds(money)}. Every request you make, and every request of the subagents you spawn, is paid from the contributions, one at a time, by whichever still has money, so you do not need to manage money beyond spending it well. ${costs}`,
-    '',
-    pacing,
-    '',
-    repository(repo),
-    '',
-    shelf,
-    '',
-    'For anything that needs a real machine (running code, benchmarks, installs, downloads), create a Modal sandbox with tools.mcp__gateway__compute_create({ image: "python:3.12-slim", cpu: 1, memory: 1024, lease: 300, timeout: 900, attach: "<short name>" }). It joins as a hand with that name, so pass hand: "<short name>" to exec_command and the file tools to work there. A machine keeps running between your updates while its lease lasts; terminate it with tools.mcp__gateway__compute_terminate as soon as you no longer need it.',
-    'For anything that needs a real web browser (sites that need JavaScript, logins, forms, screenshots), create a Browserbase browser with tools.mcp__gateway__browser_create({ minutes: 15 }), at the same time as the sandbox that drives it (Promise.all), not one after the other. Its connectUrl is a secret Chrome DevTools URL: in the sandbox, pip install playwright and call chromium.connect_over_cdp(connectUrl), then browser.contexts[0].pages[0]; pass the URL to the script through a file or an environment variable, never print it or put it anywhere else. Browsers cost $0.12 an hour; close every browser you create with tools.mcp__gateway__browser_close({ name }) when you are done with it.',
-    '',
-    ...(lent.length ? [...lending(lent, money.left), ''] : []),
-    'Contributors steer the swarm with their money. Their notes, with the money behind each and its share of everything contributed (weigh them by that share; new notes may arrive while you work):',
+    `This is a crowdfunded swarm: everything you and your subagents spend is paid from contributors' money (${funds(money)}). They read your replies as updates and steer with notes, weighted by the money behind them:`,
     listed(notes),
+    '',
+    open,
+    repository(repo),
+    ...(lent.length ? ['', ...lending(lent, money.left)] : []),
     ...(reports.length ? ['', 'Your latest updates before this conversation restarted:', ...reports.map((report) => clip(report, 1500))] : []),
-  ].join('\n')
+    '',
+    'End a reply with "STATUS: done" when the goal is met.',
+  ].filter((line, index, all) => line !== '' || all[index - 1] !== '').join('\n')
 }
 
-function next(money: Money, notes: Note[], lent: Guest[], repo: Repo, shelf: string, resumed: boolean) {
+function next(money: Money, notes: Note[], lent: Guest[], repo: Repo, resumed: boolean) {
   return [
-    `${resumed ? 'New money came in, so carry on where you left off' : 'Keep going'}. ${funds(money)}.`,
-    '',
-    'Every message the swarm sends you costs money, because your whole thread is read again. When nothing is worth doing, say so in a line or two without calling a tool: the swarm then rests and spends nothing until a contributor adds money or a note, and you will hear from it then.',
-    'There are no rounds: do not number your updates or call them rounds. Start each update with a short headline that says what changed.',
-    '',
-    repository(repo),
-    '',
-    shelf,
+    `${resumed ? 'New money came in' : 'Keep going'}: ${funds(money)}.`,
+    ...(notes.length ? ['', 'Notes:', listed(notes)] : []),
+    ...(repo.state === 'create' ? ['', repository(repo)] : []),
     ...(lent.length ? ['', ...lending(lent, money.left)] : []),
-    '',
-    'Contributor notes (money behind each, share of everything contributed):',
-    listed(notes),
-    '',
-    'Reply with your next update when you next stop, and end it with "STATUS: done" only when the goal is met.',
   ].join('\n')
 }
 

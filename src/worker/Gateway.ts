@@ -85,7 +85,7 @@ export function revoke(env: Cloudflare.Env, key: string) {
 export function agent(env: Cloudflare.Env, swarm: string, input: { name: string; payer: { secret: string; url: string } }) {
   return send<{ id: string }>(env, '/v1/agents', {
     app: app(swarm),
-    body: { harness: 'codex', name: input.name, payer: input.payer, thinking: 'low' },
+    body: { harness: 'codex', name: input.name, payer: input.payer },
   })
 }
 
@@ -103,6 +103,24 @@ export function turn(env: Cloudflare.Env, swarm: string, agent: string, turn: st
 
 export function events(env: Cloudflare.Env, swarm: string, agent: string, after: number) {
   return send<Page>(env, `/v1/agents/${agent}/events?after=${after}&limit=128`, { app: app(swarm) })
+}
+
+type Stored = { key: string; public: boolean }
+
+export function values(env: Cloudflare.Env, swarm: string, cursor: string | null) {
+  return send<{ cursor: string | null; entries: Stored[] }>(env, '/v1/kv/list', { app: app(swarm), body: { limit: 100, prefix: '', ...(cursor ? { cursor } : {}) } })
+}
+
+export function objects(env: Cloudflare.Env, swarm: string, cursor: string | null) {
+  return send<{ cursor: string | null; objects: Stored[] }>(env, '/v1/bucket/list', { app: app(swarm), body: { limit: 100, prefix: '', ...(cursor ? { cursor } : {}) } })
+}
+
+export function repos(env: Cloudflare.Env, swarm: string) {
+  return send<{ repos: { name: string; public: boolean }[] }>(env, '/v1/git/list', { app: app(swarm), body: {} })
+}
+
+export function reveal(env: Cloudflare.Env, swarm: string, kind: 'bucket' | 'git' | 'kv', name: string) {
+  return send<unknown>(env, `/v1/${kind}/visibility`, { app: app(swarm), body: kind === 'git' ? { name, public: true } : { key: name, public: true } })
 }
 
 export function sandboxes(env: Cloudflare.Env, swarm: string) {
