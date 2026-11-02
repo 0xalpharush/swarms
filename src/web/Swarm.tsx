@@ -140,6 +140,7 @@ export function Swarm(props: { config: Config | undefined; id: string }) {
     <article className="page swarm room-page" data-status={swarm.status}>
       <header className="swarm-head">
         <div className="swarm-title">
+          <Link aria-label="All swarms" className="swarm-home" to="/join">←</Link>
           <i aria-label={swarm.status} className="tile-dot" data-status={swarm.status} title={working(swarm)} />
           <h1 title={swarm.title}>{swarm.title}</h1>
           {swarm.status === 'done' && swarm.answer && <button className="btn btn-high swarm-back" onClick={() => setResult(true)} type="button">Result</button>}

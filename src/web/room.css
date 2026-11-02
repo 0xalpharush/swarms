@@ -728,3 +728,12 @@ button.energy:focus-visible { outline:2px solid #3f7d4e; outline-offset:2px; }
   .transcript-who button:hover, .room-tabs button:hover { color:inherit; }
 }
 @media (pointer:coarse) { .code-file-bar button { position:relative; } }
+
+.swarm-home { display:none; }
+@media (max-width:799px) {
+  .app:has(.room-page) > .game-header { display:none; }
+  .room-page { padding-top:env(safe-area-inset-top); }
+  .swarm-head { padding-top:8px; }
+  .swarm-home { display:grid; flex-shrink:0; place-items:center; width:36px; height:36px; margin:-4px -6px -4px -8px; border-radius:10px; color:var(--black); font:18px var(--mono); text-decoration:none; }
+  .swarm-home:active { background:#eef2ea; }
+}
