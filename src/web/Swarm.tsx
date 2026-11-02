@@ -139,26 +139,29 @@ export function Swarm(props: { config: Config | undefined; id: string }) {
   return (
     <article className="page swarm room-page" data-status={swarm.status}>
       <header className="swarm-head">
-        <i aria-label={swarm.status} className="tile-dot" data-status={swarm.status} title={working(swarm)} />
-        <h1 title={swarm.title}>{swarm.title}</h1>
+        <div className="swarm-title">
+          <i aria-label={swarm.status} className="tile-dot" data-status={swarm.status} title={working(swarm)} />
+          <h1 title={swarm.title}>{swarm.title}</h1>
+          {swarm.status === 'done' && swarm.answer && <button className="btn btn-high swarm-back" onClick={() => setResult(true)} type="button">Result</button>}
+        </div>
         <Energy now={tick} onFund={swarm.status === 'done' ? undefined : () => back(note)} swarm={swarm} />
-        {swarm.status === 'done' && swarm.answer && <button className="btn btn-high swarm-back" onClick={() => setResult(true)} type="button">Result</button>}
+        {!phone && (
+          <nav aria-label="Swarm" className="room-tabs" role="tablist">
+            {tabs.filter((item) => item !== 'room' || !wide).map((item) => (
+              <button aria-controls={`panel-${item}`} aria-selected={shown === item} key={item} onClick={() => setTab(item)} role="tab" type="button">
+                {labels[item]}
+              </button>
+            ))}
+          </nav>
+        )}
       </header>
       {result && <Result onClose={() => setResult(false)} swarm={swarm} />}
       <div className="room-layout">
         <section className="room-main">
-          {phone ? (
+          {phone && (
             <nav aria-label="Swarm" className="phone-views" role="tablist">
               {(['transcript', 'room', 'code', 'machines'] as const).map((item) => (
                 <button aria-selected={shown === item} key={item} onClick={() => setTab(item)} role="tab" type="button">
-                  {labels[item]}
-                </button>
-              ))}
-            </nav>
-          ) : (
-            <nav aria-label="Swarm" className="room-tabs" role="tablist">
-              {tabs.filter((item) => item !== 'room' || !wide).map((item) => (
-                <button aria-controls={`panel-${item}`} aria-selected={shown === item} key={item} onClick={() => setTab(item)} role="tab" type="button">
                   {labels[item]}
                 </button>
               ))}
