@@ -99,9 +99,11 @@ export const maxParallel = 4
 
 export const stock = reserve + perWorker * BigInt(maxParallel - 1)
 
-export const repoAt = 1_500_000n
-
 export const repoCost = 1_000_000n
+
+export const perCall = 40_000n
+
+export const repoAt = repoCost + perCall
 
 export const budget = { days: 30, max: 100_000_000n, min: minPledge, period: 86_400 } as const
 

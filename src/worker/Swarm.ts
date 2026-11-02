@@ -122,7 +122,7 @@ const chunk = 100_000n
 
 const handChunk = 50_000n
 
-const perCall = 40_000n
+const perCall = Store.perCall
 
 const recentMs = 10_000
 
@@ -360,8 +360,10 @@ export class Swarm extends DurableObject<Cloudflare.Env> {
     const notes = await this.notes(money.row)
     const parallel = Store.parallel(money.left)
     const lent = await this.guests(row.id)
-    const repo = await this.repo(row, money.biggest >= Store.repoCost + perCall ? Payer.max(money.left, BigInt(money.row.remaining)) : 0n)
+    const repo = await this.repo(row, money.biggest)
     const base = repo.state === 'ready' ? await this.head(row.id, repo.name) : null
+    if (base) this.kv.put('seen', base)
+    else this.kv.delete('seen')
     const fresh = this.kv.get<boolean>('fresh')
     const text = fresh ? brief(money, n, parallel, notes, this.reports(), lent, repo) : next(money, n, parallel, notes, lent, repo)
     const sent = await Gateway.prompt(this.env, row.id, agent, { prompt: text, steer: false })
@@ -445,7 +447,7 @@ export class Swarm extends DurableObject<Cloudflare.Env> {
     if (!ended && now - (this.kv.get<number>('checked') ?? 0) < refreshMs) return now + followMs
 
     this.kv.put('checked', now)
-    const [report, money] = await Promise.all([Gateway.turn(this.env, row.id, agent, turn), this.refresh(row)])
+    const [report, money] = await Promise.all([Gateway.turn(this.env, row.id, agent, turn), this.refresh(row), this.watch(row)])
     if (report.ok && !['queued', 'running'].includes(report.value.status)) return this.finish(row, report.value)
     if (!report.ok && report.status !== 401 && report.status < 500)
       return this.finish(row, { error: report.detail, request_id: turn, status: 'failed' })
@@ -1164,6 +1166,15 @@ export class Swarm extends DurableObject<Cloudflare.Env> {
     return { name, state: left >= Store.repoAt ? 'create' : 'later' }
   }
 
+  async watch(row: Store.Row) {
+    const repo = await this.repo(row, 0n)
+    if (repo.state !== 'ready') return
+    const fresh = await this.pushed(row.id, repo.name, this.kv.get<string>('seen') ?? null)
+    if (!fresh[0]) return
+    this.kv.put('seen', fresh[0].sha)
+    for (const commit of fresh.reverse()) this.log('status', `Pushed ${commit.sha.slice(0, 7)} to ${repo.name}: ${redact(commit.message.split('\n')[0] ?? '')}`)
+  }
+
   async commits(swarm: string, name: string, limit: number) {
     const owner = await this.owner()
     const read = owner
@@ -1450,13 +1461,13 @@ function repository(repo: Repo) {
     `From a Modal machine created with apt: ["git"], get a clone and push URL with tools.mcp__gateway__git_remote({ name: "${repo.name}" }), clone it, commit and push to main, pulling first if someone else pushed. The URL is a secret: never print or echo it, or put it in a file, a commit or your reply.`,
   ]
   if (repo.state === 'ready')
-    return [`The swarm keeps its code in its public git repository "${repo.name}" on branch main, which contributors read on the swarm's page. Commit what this round produces (code, scripts, results, notes) with messages that say what each change is.`, ...use].join('\n')
+    return [`The swarm keeps its code in its public git repository "${repo.name}" on branch main, which contributors read on the swarm's page. Commit what this round produces (code, scripts, results, notes) as you go, in small commits with messages that say what each change is, not all at the end: contributors watch each commit land live.`, ...use].join('\n')
   if (repo.state === 'create')
     return [
-      `The swarm can now afford a public code repository that contributors read on its page. Before anything else, create it once with tools.mcp__gateway__git_create({ name: "${repo.name}", public: true }); it costs $1 of the swarm's money (if it already exists, make it public with tools.mcp__gateway__git_visibility({ name: "${repo.name}", public: true })). Then commit what this round produces to it, with messages that say what each change is.`,
+      `Every swarm keeps its work in its own public git repository, which contributors browse live on its page. Your first tool call this round, before planning or sending explorers, creates it: tools.mcp__gateway__git_create({ name: "${repo.name}", public: true }). It costs $1 of the swarm's money, once (if it already exists, make it public with tools.mcp__gateway__git_visibility({ name: "${repo.name}", public: true })). Then commit a README.md stating the goal and the plan, and commit what this round produces as you go, in small commits with messages that say what each change is.`,
       ...use,
     ].join('\n')
-  return `The swarm gets its public code repository "${repo.name}" once it holds ${dollars(Store.repoAt)} (the repository costs $1), so this round does not create one and keeps its results in the report.`
+  return `The swarm gets its public code repository "${repo.name}" as soon as one of its funders can pay ${dollars(Store.repoAt)} at once (the repository costs $1), so this round does not create one and keeps its results in the report.`
 }
 
 function brief(
@@ -1476,11 +1487,11 @@ function brief(
     '',
     `Budget: ${funds(money)}. This is round ${n}; rounds continue while the money lasts. Every request you and your explorers make is paid from the contributions, one at a time, by whichever still has money, so you do not need to manage money beyond spending it well.`,
     '',
+    repository(repo),
+    '',
     crew(parallel),
     '',
     'For anything that needs a real machine (running code, benchmarks, installs, downloads), create a Modal sandbox with tools.mcp__gateway__compute_create({ image: "python:3.12-slim", cpu: 1, memory: 1024, lease: 300, timeout: 900, attach: "<short name>" }). It joins as a hand with that name, so pass hand: "<short name>" to exec_command and the file tools to work there. Terminate every sandbox you create with tools.mcp__gateway__compute_terminate before you reply.',
-    '',
-    repository(repo),
     '',
     ...(lent.length ? [...lending(lent, money.left), ''] : []),
     'Contributors steer the swarm with their money. Their notes, with the money behind each and its share of everything contributed (weigh them by that share; new notes may arrive while you work):',
