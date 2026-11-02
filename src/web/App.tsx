@@ -126,7 +126,7 @@ export function App() {
           </section>
         )}
       </main>
-      <Footer config={config} />
+      {!swarm && <Footer config={config} />}
     </div>
   )
 }

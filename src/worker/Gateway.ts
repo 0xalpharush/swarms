@@ -68,6 +68,16 @@ export function me(env: Cloudflare.Env) {
   return send<{ wallet: `0x${string}` }>(env, '/api/keys/me')
 }
 
+let operator: Promise<string | undefined> | undefined
+
+export function wallet(env: Cloudflare.Env) {
+  const known = (operator ??= me(env).then((result) => (result.ok ? result.value.wallet.toLowerCase() : undefined)))
+  void known.then((value) => {
+    if (!value && operator === known) operator = undefined
+  })
+  return known
+}
+
 export function revoke(env: Cloudflare.Env, key: string) {
   return send<unknown>(env, '/api/keys/revoke', { body: {}, key })
 }

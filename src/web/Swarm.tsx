@@ -8,6 +8,7 @@ import { Broadcast } from './Broadcast.tsx'
 import { Feed } from './Feed.tsx'
 import { Budgets, Contributions, Pledges } from './Backing.tsx'
 import { Connect } from './Connect.tsx'
+import { Artifacts } from './Artifacts.tsx'
 import { Box } from './Contribute.tsx'
 import { ago, duration, mach, percent, short, usd } from './format.ts'
 import { type Draft, useBroadcast, useMedia, useNow, usePoll } from './hooks.ts'
@@ -21,9 +22,23 @@ const Code = lazy(() => import('./Code.tsx').then((module) => ({ default: module
 
 const rounds = { cancelled: 'Cancelled', completed: 'Completed', failed: 'Failed', running: 'Running' } as const satisfies Record<Round['status'], string>
 
-const tabs = ['transcript', 'room', 'answer', 'fund', 'code', 'machines', 'brief'] as const
+const tabs = ['transcript', 'room', 'artifacts', 'answer', 'fund', 'code', 'machines', 'brief'] as const
 
 type Tab = (typeof tabs)[number]
+
+const docked = ['transcript', 'room', 'artifacts', 'answer'] as const satisfies readonly Tab[]
+
+const icons: Record<(typeof docked)[number] | 'more', ReactNode> = {
+  answer: <path d="M5 4h10l4 4v12H5zM14 4v5h5M8 13l3 3 5-6" />,
+  artifacts: <path d="M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z" />,
+  more: <path d="M5 12h.01M12 12h.01M19 12h.01" strokeWidth="3" />,
+  room: <path d="M4 5h16v11H9l-5 4zM8 9h8M8 12h5" />,
+  transcript: <path d="M4 6h16M4 10h11M4 14h16M4 18h8" />,
+}
+
+function chosen() {
+  return new URLSearchParams(location.search).get('artifact') ?? undefined
+}
 
 function subscribe(listener: () => void) {
   addEventListener('hashchange', listener)
@@ -49,7 +64,13 @@ export function Swarm(props: { config: Config | undefined; id: string }) {
   const [entries, setEntries] = useState<readonly Entry[]>([])
   const [note, setNote] = useState('')
   const [tab, setTab] = useTab()
+  const [artifact, setArtifact] = useState(chosen)
+  const [unread, setUnread] = useState(0)
+  const [more, setMore] = useState(false)
   const wide = useMedia('(min-width: 1100px)')
+  const phone = useMedia('(max-width: 799px)')
+  const running = detail.data?.status === 'running'
+  const [shelf] = usePoll(() => Api.artifacts(props.id), running ? 30_000 : 60_000, props.id)
   const last = useRef(0)
   const box = useRef<HTMLDivElement>(null)
   const loaded = detail.data !== undefined
@@ -72,6 +93,13 @@ export function Swarm(props: { config: Config | undefined; id: string }) {
   useEffect(() => {
     if (detail.data) document.title = `${detail.data.title} · Swarms`
   }, [detail.data?.title])
+
+  useEffect(() => {
+    const url = new URL(location.href)
+    if (artifact) url.searchParams.set('artifact', artifact)
+    else url.searchParams.delete('artifact')
+    history.replaceState(null, '', url)
+  }, [artifact])
 
   useEffect(() => {
     if (!loaded) return
@@ -112,16 +140,27 @@ export function Swarm(props: { config: Config | undefined; id: string }) {
     setTab('fund')
     setTimeout(() => document.getElementById('amount')?.focus({ preventScroll: true }), 120)
   }
-  const room = <Room config={props.config} onBack={back} onSteered={reload} swarm={swarm} />
+  const open = (slug: string) => {
+    setArtifact(slug)
+    setTab('artifacts')
+  }
+  const choose = (next: Tab) => {
+    setMore(false)
+    setTab(next)
+  }
+  const room = <Room config={props.config} onArtifact={open} onBack={back} onSteered={reload} onUnread={setUnread} swarm={swarm} visible={wide || shown === 'room'} />
+  const count = shelf.data?.artifacts.length ?? 0
   const labels: Record<Tab, ReactNode> = {
     answer: swarm.answer ? `Answer · R${swarm.answer.round}` : 'Answer',
+    artifacts: count ? `Artifacts · ${count}` : 'Artifacts',
     brief: 'Brief',
     code: swarm.code ? `Code · ${swarm.code.name}` : 'Code',
     fund: swarm.status === 'done' ? 'Backers' : 'Back it',
     machines: connected ? `Machines · ${connected}` : 'Machines',
-    room: 'Room',
+    room: unread ? <>Room<span className="tab-count">{unread}</span></> : 'Room',
     transcript: live ? <><i className="tab-live" />Transcript</> : 'Transcript',
   }
+  const short: Record<(typeof docked)[number], string> = { answer: 'Answer', artifacts: 'Artifacts', room: 'Room', transcript: 'Live' }
 
   return (
     <article className="page swarm room-page" data-status={swarm.status}>
@@ -142,13 +181,15 @@ export function Swarm(props: { config: Config | undefined; id: string }) {
       {swarm.status !== 'running' && <p className="banner">{swarm.status === 'done' ? 'Done. The answer is what the swarm found; the transcript replays every round.' : swarm.reason ?? (swarm.status === 'paused' ? 'Paused: the money is used up. A contribution, budget or pledge starts the next round.' : 'No money behind it yet. The first contribution starts round 1.')}</p>}
       <div className="room-layout">
         <section className="room-main">
-          <nav aria-label="Swarm" className="room-tabs" role="tablist">
-            {tabs.filter((item) => item !== 'room' || !wide).map((item) => (
-              <button aria-controls={`panel-${item}`} aria-selected={shown === item} key={item} onClick={() => setTab(item)} role="tab" type="button">
-                {labels[item]}
-              </button>
-            ))}
-          </nav>
+          {!phone && (
+            <nav aria-label="Swarm" className="room-tabs" role="tablist">
+              {tabs.filter((item) => item !== 'room' || !wide).map((item) => (
+                <button aria-controls={`panel-${item}`} aria-selected={shown === item} key={item} onClick={() => setTab(item)} role="tab" type="button">
+                  {labels[item]}
+                </button>
+              ))}
+            </nav>
+          )}
           <div className="room-panel" data-tab={shown} hidden={shown !== 'transcript'} id="panel-transcript" role="tabpanel">
             <Broadcast
               empty={swarm.status !== 'done' && <button className="btn btn-high" onClick={() => back(note)} type="button">Back it to start round 1</button>}
@@ -158,8 +199,14 @@ export function Swarm(props: { config: Config | undefined; id: string }) {
               swarm={swarm}
             />
           </div>
-          {shown !== 'transcript' && (
+          {!wide && (
+            <div className="room-panel" data-tab="room" hidden={shown !== 'room'} id="panel-room" role="tabpanel">
+              {room}
+            </div>
+          )}
+          {shown !== 'transcript' && shown !== 'room' && (
             <div className="room-panel room-page-panel" data-tab={shown} id={`panel-${shown}`} role="tabpanel">
+              {shown === 'artifacts' && <Artifacts artifacts={shelf.data?.artifacts} error={shelf.error} onSelect={setArtifact} selected={artifact} working={live} />}
               {shown === 'answer' && (
                 <>
                   <section className="quest-findings">
@@ -208,12 +255,40 @@ export function Swarm(props: { config: Config | undefined; id: string }) {
                   </section>
                 </>
               )}
-              {shown === 'room' && room}
             </div>
           )}
         </section>
         {wide && <aside className="room-side">{room}</aside>}
       </div>
+      {phone && (
+        <>
+          {more && <button aria-label="Close the menu" className="dock-scrim" onClick={() => setMore(false)} type="button" />}
+          {more && (
+            <div className="dock-sheet" role="menu">
+              {(['fund', 'code', 'machines', 'brief'] as const).map((item) => (
+                <button aria-current={shown === item} key={item} onClick={() => choose(item)} role="menuitem" type="button">
+                  {labels[item]}
+                </button>
+              ))}
+            </div>
+          )}
+          <nav aria-label="Swarm" className="dock">
+            {docked.map((item) => (
+              <button aria-current={shown === item && !more} className="dock-item" key={item} onClick={() => choose(item)} type="button">
+                <svg aria-hidden viewBox="0 0 24 24">{icons[item]}</svg>
+                <span>{short[item]}</span>
+                {item === 'transcript' && live && <i className="dock-live" />}
+                {item === 'room' && unread > 0 && <b className="dock-count">{unread > 99 ? '99+' : unread}</b>}
+                {item === 'artifacts' && count > 0 && <b className="dock-count dock-quiet">{count}</b>}
+              </button>
+            ))}
+            <button aria-current={more || (['fund', 'code', 'machines', 'brief'] as readonly Tab[]).includes(shown)} aria-expanded={more} className="dock-item" onClick={() => setMore(!more)} type="button">
+              <svg aria-hidden viewBox="0 0 24 24">{icons.more}</svg>
+              <span>More</span>
+            </button>
+          </nav>
+        </>
+      )}
     </article>
   )
 }

@@ -1,11 +1,12 @@
 import { DurableObject } from 'cloudflare:workers'
 import type { Account, Address, Hex } from 'viem'
 import { keccak256, stringToHex } from 'viem'
-import type { Chatter, Code, Currency, Entry, Hand, Kind, Live, Note, Researcher, Round, Said, Steer, Terms, Token } from '../shared/Api.ts'
+import type { Artifact, Chatter, Code, Currency, Entry, Hand, Kind, Live, Note, Researcher, Round, Said, Shown, Steer, Terms, Token } from '../shared/Api.ts'
 import { advance, researchId } from '../shared/Research.ts'
 import { type Buffers, clip, memory, narrate, redact } from '../shared/Trail.ts'
 import * as Answer from '../shared/Answer.ts'
 import * as Memo from '../shared/Memo.ts'
+import * as Artifacts from './Artifacts.ts'
 import * as Chain from './Chain.ts'
 import * as Gateway from './Gateway.ts'
 import * as Hands from './Hands.ts'
@@ -89,6 +90,8 @@ type Repo = { name: string; state: 'create' | 'later' | 'ready' }
 
 type Guest = { label: string; name: string; terms: Terms }
 
+type Seen = { round: number; title: string; version: number }
+
 const schema = [
   'CREATE TABLE IF NOT EXISTS researchers (id TEXT NOT NULL, round INTEGER NOT NULL, snapshot TEXT NOT NULL, PRIMARY KEY (id, round))',
   'CREATE TABLE IF NOT EXISTS feed (seq INTEGER PRIMARY KEY AUTOINCREMENT, at INTEGER NOT NULL, round INTEGER NOT NULL, kind TEXT NOT NULL, text TEXT NOT NULL, detail TEXT)',
@@ -102,6 +105,7 @@ const columns = [
   ['rounds', 'base', 'ALTER TABLE rounds ADD COLUMN base TEXT'],
   ['feed', 'who', 'ALTER TABLE feed ADD COLUMN who TEXT'],
   ['feed', 'event', 'ALTER TABLE feed ADD COLUMN event INTEGER'],
+  ['chat', 'artifact', 'ALTER TABLE chat ADD COLUMN artifact TEXT'],
 ] as const
 
 const followMs = 2_000
@@ -141,6 +145,8 @@ const recentMs = 10_000
 const holdMs = 90_000
 
 const confirmMs = 8_000
+
+const shelfMs = 30_000
 
 export class Swarm extends DurableObject<Cloudflare.Env> {
   stepping: Promise<number | null> | undefined
@@ -402,7 +408,8 @@ export class Swarm extends DurableObject<Cloudflare.Env> {
     if (base) this.kv.put('seen', base)
     else this.kv.delete('seen')
     const fresh = this.kv.get<boolean>('fresh')
-    const text = fresh ? brief(money, n, parallel, notes, this.reports(), lent, repo) : next(money, n, parallel, notes, lent, repo)
+    const shelf = shelving(row.id, this.env.SWARMS_URL, this.kv.get<Record<string, Seen>>('artifacts') ?? {}, fresh || !this.kv.get<boolean>('shelved'))
+    const text = fresh ? brief(money, n, parallel, notes, this.reports(), lent, repo, shelf) : next(money, n, parallel, notes, lent, repo, shelf)
     const sent = await Gateway.prompt(this.env, row.id, agent, { prompt: text, steer: false })
     if (!sent.ok) {
       this.log('error', `The gateway refused round ${n}.`, sent.detail)
@@ -413,6 +420,7 @@ export class Swarm extends DurableObject<Cloudflare.Env> {
     const now = Date.now()
     await this.cap(row, money.left / Hands.share)
     this.kv.put('fresh', false)
+    this.kv.put('shelved', true)
     this.kv.put('turn', sent.value.request_id)
     this.kv.delete('paused')
     this.kv.put('round', n)
@@ -485,7 +493,7 @@ export class Swarm extends DurableObject<Cloudflare.Env> {
     if (!ended && now - (this.kv.get<number>('checked') ?? 0) < refreshMs) return now + followMs
 
     this.kv.put('checked', now)
-    const [report, money] = await Promise.all([Gateway.turn(this.env, row.id, agent, turn), this.refresh(row), this.watch(row)])
+    const [report, money] = await Promise.all([Gateway.turn(this.env, row.id, agent, turn), this.refresh(row), this.watch(row), now - (this.kv.get<number>('shelvedAt') ?? 0) >= shelfMs ? this.publish(row.id) : undefined])
     if (report.ok && !['queued', 'running'].includes(report.value.status)) return this.finish(row, report.value)
     if (!report.ok && report.status !== 401 && report.status < 500)
       return this.finish(row, { error: report.detail, request_id: turn, status: 'failed' })
@@ -530,6 +538,7 @@ export class Swarm extends DurableObject<Cloudflare.Env> {
       `Round ${n} ${status}, spending ${dollars(spent > 0n ? spent : 0n)}${commits.length ? ` and pushing ${commits.length} commit${commits.length === 1 ? '' : 's'} to ${repo.name}` : ''}.`,
       status === 'completed' ? (commits.length ? commits.map((commit) => `${commit.sha.slice(0, 7)} ${commit.message.split('\n')[0]}`).join('\n') : null) : message,
     )
+    await this.publish(row.id)
     this.announce(`Round ${n} ${status}, spending ${dollars(spent > 0n ? spent : 0n)}.${status === 'completed' && message ? ` ${Answer.excerpt(Answer.parse(n, redact(message), 0).text, 280)}` : ''}`)
 
     const failures = status === 'completed' ? 0 : (this.kv.get<number>('failures') ?? 0) + 1
@@ -1278,9 +1287,29 @@ export class Swarm extends DurableObject<Cloudflare.Env> {
     return note
   }
 
+  async publish(swarm: string) {
+    this.kv.put('shelvedAt', Date.now())
+    const found = await Artifacts.list(this.env, swarm, false).catch(() => undefined)
+    if (!found) return
+    const known = this.kv.get<Record<string, Seen>>('artifacts') ?? {}
+    const round = this.kv.get<number>('round') ?? 0
+    const next: Record<string, Seen> = {}
+    for (const artifact of found) {
+      const seen = known[artifact.slug]
+      const changed = !!seen && seen.version !== artifact.version && seen.round !== round
+      if (!seen) {
+        this.log('status', `Published the artifact "${artifact.title}"`, [artifact.summary, `${Artifacts.base(swarm)}/${artifact.slug}/${artifact.entry}`].filter(Boolean).join('\n'))
+        this.announce(`New artifact: ${artifact.title}${artifact.summary ? `, ${artifact.summary}` : ''}`, { slug: artifact.slug, title: artifact.title })
+      }
+      if (changed) this.log('status', `Updated the artifact "${artifact.title}" (version ${artifact.version})`, artifact.summary)
+      next[artifact.slug] = { round: !seen || changed ? round : seen.round, title: artifact.title, version: artifact.version }
+    }
+    this.kv.put('artifacts', next)
+  }
+
   messages(query: { after: number; before?: number | undefined; limit: number }): Said[] {
     const sql = this.ctx.storage.sql
-    const columns = 'SELECT id, at, author, text, mentions, steer FROM chat'
+    const columns = 'SELECT id, at, author, text, mentions, steer, artifact FROM chat'
     const rows =
       query.before !== undefined
         ? sql.exec<Record<string, SqlStorageValue>>(`${columns} WHERE id < ? ORDER BY id DESC LIMIT ?`, query.before, query.limit).toArray().reverse()
@@ -1311,23 +1340,24 @@ export class Swarm extends DurableObject<Cloudflare.Env> {
     return this.speak(input.author, input.text, input.mentions, steer)
   }
 
-  announce(text: string) {
-    this.speak(null, redact(text), [], null)
+  announce(text: string, artifact: Shown | null = null) {
+    this.speak(null, redact(text), [], null, artifact)
   }
 
-  speak(author: Address | null, text: string, mentions: Address[], steer: Steer | null): Said {
+  speak(author: Address | null, text: string, mentions: Address[], steer: Steer | null, artifact: Shown | null = null): Said {
     const at = Date.now()
     const row = this.ctx.storage.sql
       .exec<{ id: number }>(
-        'INSERT INTO chat (at, author, text, mentions, steer) VALUES (?, ?, ?, ?, ?) RETURNING id',
+        'INSERT INTO chat (at, author, text, mentions, steer, artifact) VALUES (?, ?, ?, ?, ?, ?) RETURNING id',
         at,
         author,
         text,
         JSON.stringify(mentions),
         steer ? JSON.stringify(steer) : null,
+        artifact ? JSON.stringify(artifact) : null,
       )
       .one()
-    const message: Said = { at, author, id: Number(row.id), mentions, steer, text }
+    const message: Said = { artifact, at, author, id: Number(row.id), mentions, steer, text }
     this.broadcast({ message, type: 'said' })
     return message
   }
@@ -1620,6 +1650,20 @@ function repository(repo: Repo) {
   return `The swarm gets its public code repository "${repo.name}" as soon as one of its funders can pay ${dollars(Store.repoAt)} at once (the repository costs $1), so this round does not create one and keeps its results in the report.`
 }
 
+function shelving(swarm: string, origin: string, seen: Record<string, Seen>, full: boolean) {
+  const published = Object.entries(seen)
+  const list = published.length
+    ? `Artifacts published so far: ${published.map(([slug, item]) => `"${item.title}" (artifacts/${slug}, version ${item.version})`).join('; ')}.`
+    : 'No artifacts are published yet.'
+  if (!full) return `${list} Keep them current as results come in: update an artifact's data file and its manifest's updated time rather than publishing a new one, and publish a new one only for something contributors cannot follow yet.`
+  return [
+    `Artifacts let contributors follow along on the swarm's page beside the transcript: a live dashboard of the numbers that matter, a chart, a table, a write-up. ${list}`,
+    `Publish one by storing its files under artifacts/<slug>/ in the bucket, public and kept 90 days, for example tools.mcp__gateway__bucket_put({ key: "artifacts/leaderboard/index.html", text: html, contentType: "text/html; charset=utf-8", public: true, retention: 7776000 }) (base64 instead of text for a PNG), then its manifest: tools.mcp__gateway__kv_set({ key: "artifacts/leaderboard", value: { title: "Leaderboard", summary: "<one line>", entry: "index.html", kind: "dashboard", updated: new Date().toISOString() }, public: true }). A slug is lower case letters, digits, dots, hyphens and underscores; file names are letters, digits, dots, hyphens and underscores, at most four folders deep. An entry can be HTML, Markdown, CSV, JSON, SVG or PNG.`,
+    `HTML runs sandboxed on the swarm's page: it may load scripts and styles from cdn.jsdelivr.net, unpkg.com, cdnjs.cloudflare.com and esm.sh, fetch its own files by relative URL and read the swarm's public API (${origin}/v1/swarms/${swarm}, its /rounds and /artifacts), and nothing else, so keep the numbers in a data file such as data.json that the page fetches, and update that file as results come in: contributors see each update within a minute.`,
+    'Keep to a few artifacts that matter, and say in your report which you published or updated. A bucket_put costs $0.005 and a kv_set $0.0005; the page tells contributors about each new artifact.',
+  ].join('\n')
+}
+
 function brief(
   money: Money,
   n: number,
@@ -1628,6 +1672,7 @@ function brief(
   reports: { message: string | null; n: number }[],
   lent: Guest[],
   repo: Repo,
+  shelf: string,
 ) {
   return [
     'You are the lead agent of a crowdfunded swarm. People put real money into this work, and every model call, machine-second and tool call you make is paid from it.',
@@ -1638,6 +1683,8 @@ function brief(
     `Budget: ${funds(money)}. This is round ${n}; rounds continue while the money lasts. Every request you and your explorers make is paid from the contributions, one at a time, by whichever still has money, so you do not need to manage money beyond spending it well.`,
     '',
     repository(repo),
+    '',
+    shelf,
     '',
     crew(parallel),
     '',
@@ -1655,12 +1702,14 @@ function brief(
   ].join('\n')
 }
 
-function next(money: Money, n: number, parallel: number, notes: Note[], lent: Guest[], repo: Repo) {
+function next(money: Money, n: number, parallel: number, notes: Note[], lent: Guest[], repo: Repo, shelf: string) {
   return [
     `Round ${n}. ${funds(money)}.`,
     crew(parallel),
     '',
     repository(repo),
+    '',
+    shelf,
     ...(lent.length ? ['', ...lending(lent, money.left)] : []),
     '',
     'Contributor notes (money behind each, share of everything contributed):',
@@ -1699,6 +1748,7 @@ function listed(notes: Note[]) {
 
 function said(row: Record<string, SqlStorageValue>): Said {
   return {
+    artifact: row['artifact'] === null || row['artifact'] === undefined ? null : (JSON.parse(String(row['artifact'])) as Shown),
     at: Number(row['at']),
     author: row['author'] === null ? null : (String(row['author']) as Address),
     id: Number(row['id']),

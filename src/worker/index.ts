@@ -1,4 +1,5 @@
 import { Hono } from 'hono'
+import * as Artifacts from './Artifacts.ts'
 import * as Operations from './Operations.ts'
 import * as Problem from './Problem.ts'
 import * as Rest from './Rest.ts'
@@ -16,6 +17,20 @@ app.get('/x/card.svg', (c) => XFrames.card(c.req.query('title') ?? 'Fund a resea
 app.get('/x/s/:id', async (c) => {
   const result = await Operations.get(c.env, { swarm: c.req.param('id') })
   return result.ok ? XFrames.swarm(new URL(c.req.url).origin, result.value) : Problem.json(result)
+})
+
+app.get('/a/:id/:slug', (c) => c.redirect(`${new URL(c.req.url).pathname}/`, 301))
+
+app.on(['GET', 'HEAD'], '/a/:id/:slug/*', (c) => {
+  const [, , id = '', slug = '', ...rest] = new URL(c.req.url).pathname.split('/')
+  if (!/^[A-Za-z0-9_-]{1,64}$/.test(id)) return new Response('No such swarm.', { status: 404 })
+  let path: string
+  try {
+    path = rest.map(decodeURIComponent).join('/')
+  } catch {
+    return new Response('No such artifact file.', { status: 404 })
+  }
+  return Artifacts.serve(c.env, c.req.raw, id, slug, path)
 })
 
 app.all(Sessions.path, (c) => Sessions.auth(c.env).fetch(c.req.raw))
@@ -63,6 +78,10 @@ app.post('/api/swarms/:id/budgets/:budget', async (c) =>
     await Operations.allow(c.env, { ...(await Rest.body(c.req.raw)), budget: c.req.param('budget'), swarm: c.req.param('id') }),
     201,
   ),
+)
+
+app.get('/api/swarms/:id/artifacts', async (c) =>
+  Problem.respond(await Operations.artifacts(c.env, { swarm: c.req.param('id') }, new URL(c.req.url).origin)),
 )
 
 app.get('/api/swarms/:id/chat', async (c) =>

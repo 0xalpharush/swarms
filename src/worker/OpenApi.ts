@@ -70,6 +70,20 @@ const schemas = {
     },
     'The signed-in account.',
   ),
+  Artifact: object(
+    {
+      entry: { description: 'The file the artifact opens at, relative to its folder.', type: 'string' },
+      form: { description: 'How the page shows it: page is HTML, run sandboxed.', enum: ['page', 'image', 'markdown', 'table', 'json', 'text'], type: 'string' },
+      kind: { description: 'What the swarm calls it, such as dashboard, chart or write-up.', type: 'string' },
+      slug: string,
+      summary: nullable(string),
+      title: string,
+      updatedAt: nullable(time),
+      url: { description: 'Where to load it: /a/<swarm>/<slug>/<entry>, served from the gateway bucket with a sandboxing Content-Security-Policy.', type: 'string' },
+      version: { description: "The manifest's version, which grows with every update.", type: 'integer' },
+    },
+    "Something a swarm published for contributors to follow along: files under artifacts/<slug>/ in its gateway bucket and a manifest at artifacts/<slug> in its kv, both public.",
+  ),
   Answer: object(
     {
       at: time,
@@ -529,6 +543,15 @@ export function document(origin: string) {
             ...failures(400, 404, 409, 502),
           },
           summary: 'Count a transfer',
+        },
+      },
+      '/v1/swarms/{id}/artifacts': {
+        get: {
+          description: "The dashboards, charts, tables and write-ups the swarm's agents published, from the public manifests under artifacts/ in the swarm's gateway kv. Load each from its url.",
+          operationId: 'listArtifacts',
+          parameters: [swarm],
+          responses: { ...ok(object({ artifacts: { items: ref('Artifact'), type: 'array' } }), 'The artifacts.'), ...failures(404, 502) },
+          summary: 'Artifacts',
         },
       },
       '/v1/swarms/{id}/chat': {

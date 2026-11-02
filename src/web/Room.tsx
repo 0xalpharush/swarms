@@ -125,7 +125,15 @@ function Rename(props: { address: string; name: string | null; onDone: () => voi
   )
 }
 
-export function Room(props: { config: Config | undefined; onBack: (note: string) => void; onSteered: () => void; swarm: Detail }) {
+export function Room(props: {
+  config: Config | undefined
+  onArtifact: (slug: string) => void
+  onBack: (note: string) => void
+  onSteered: () => void
+  onUnread: (count: number) => void
+  swarm: Detail
+  visible: boolean
+}) {
   const id = props.swarm.id
   const done = props.swarm.status === 'done'
   const wallet = useWallet()
@@ -214,6 +222,16 @@ export function Room(props: { config: Config | undefined; onBack: (note: string)
   }, [token])
 
   const newest = messages.at(-1)?.id
+  const seen = useRef<number | undefined>(undefined)
+  const onUnread = props.onUnread
+  const myself = me?.address
+  useEffect(() => {
+    if (newest === undefined) return
+    if (seen.current === undefined || props.visible) seen.current = newest
+    const after = seen.current
+    onUnread(props.visible ? 0 : messages.filter((item) => item.id > after && item.author !== null && item.author !== myself).length)
+  }, [messages, newest, props.visible, onUnread, myself])
+
   useLayoutEffect(() => {
     const element = list.current
     if (!element || newest === undefined) return
@@ -461,11 +479,16 @@ export function Room(props: { config: Config | undefined; onBack: (note: string)
           const author = item.author
           if (!author)
             return (
-              <li className="said said-system" key={item.id}>
+              <li className="said said-system" data-artifact={!!item.artifact} key={item.id}>
                 <p>
                   <Words handles={handles} me={myNames} text={item.text} />
                   <time dateTime={new Date(item.at).toISOString()}>{minute(item.at)}</time>
                 </p>
+                {item.artifact && (
+                  <button className="said-open" onClick={() => item.artifact && props.onArtifact(item.artifact.slug)} type="button">
+                    Open {item.artifact.title} →
+                  </button>
+                )}
               </li>
             )
           const previous = messages[index - 1]

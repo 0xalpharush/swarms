@@ -1,5 +1,5 @@
 import * as Answer from '../shared/Answer.ts'
-import type { Account, Budget, BudgetRequested, Budgeted, Chatter, Config, Contributed, Contribution, Currency, Detail, Entry, Kind, Live as LiveEvent, Me, Member, Note, Pledge, Pledged, Posted, Requested, Researcher, Room, Round, Said, Status, Summary, Token, Way } from '../shared/Api.ts'
+import type { Account, Artifact, Budget, BudgetRequested, Budgeted, Chatter, Config, Contributed, Contribution, Currency, Detail, Entry, Form, Kind, Live as LiveEvent, Me, Member, Note, Pledge, Pledged, Posted, Requested, Researcher, Room, Round, Said, Status, Summary, Token, Way } from '../shared/Api.ts'
 import { decimal, maxNote, units } from '../shared/Memo.ts'
 import * as Mention from '../shared/Mention.ts'
 
@@ -654,6 +654,94 @@ export async function allow(key: string, budget: string): Promise<Budgeted> {
   return delay({ budget: allowed, swarm: summary(swarm) }, 600)
 }
 
+const board = `<!doctype html>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+*{box-sizing:border-box}body{margin:0;padding:20px;font:15px/1.4 Georgia,serif;color:#111;background:#fbfcf9}
+h1{margin:0;font-weight:400;font-size:24px;letter-spacing:-.02em}.at{margin:4px 0 18px;font:11px ui-monospace,monospace;color:#5c7350}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-bottom:18px}
+.card{padding:12px;border:1px solid #dbe2d0;border-radius:10px;background:#fff}.card b{display:block;font-weight:400;font-size:22px}.card span{font:10px ui-monospace,monospace;color:#666}
+.row{display:grid;grid-template-columns:minmax(90px,150px) 1fr 64px;align-items:center;gap:10px;margin:8px 0;font-size:14px}
+.bar{height:14px;border-radius:4px;background:#e7eddd;overflow:hidden}.bar i{display:block;height:100%;background:#3f7d4e;transition:width .8s}
+.cost{font:12px ui-monospace,monospace;color:#555;text-align:right}h2{font-weight:400;font-size:16px;margin:22px 0 6px}
+</style></head><body>
+<h1>Coding model leaderboard</h1><p class="at" id="at"></p>
+<div class="cards"><div class="card"><span>MODELS RUN</span><b>6</b></div><div class="card"><span>TASKS</span><b>1,560</b></div><div class="card"><span>BEST SOLVE RATE</span><b>41%</b></div><div class="card"><span>CHEAPEST PER SOLVE</span><b>$0.0006</b></div></div>
+<h2>SWE-bench Lite solve rate</h2><div id="rows"></div>
+<h2>Cost per solved task</h2><div id="cost"></div>
+<script>
+const rows=[["GLM-5.3",124,300,0.002],["Kimi K2.7",118,300,0.0031],["DeepSeek V4.1",109,300,0.0006],["gpt-oss-120b",92,300,0.0011],["Qwen3-Coder",71,260,0.0042]]
+const draw=(id,value,label)=>document.getElementById(id).innerHTML=rows.map(r=>'<div class="row"><span>'+r[0]+'</span><div class="bar"><i style="width:'+value(r)+'%"></i></div><span class="cost">'+label(r)+'</span></div>').join('')
+draw('rows',r=>r[1]/r[2]*100/0.5,r=>Math.round(r[1]/r[2]*100)+'%')
+draw('cost',r=>r[3]/0.0042*100,r=>'$'+r[3].toFixed(4))
+const tick=()=>document.getElementById('at').textContent='LIVE · updated '+new Date().toLocaleTimeString()
+tick();setInterval(tick,1000)
+</script></body></html>`
+
+const throughput = `<!doctype html>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<style>body{margin:0;padding:20px;font:15px/1.4 Georgia,serif;background:#fbfcf9}h1{font-weight:400;font-size:24px;margin:0 0 16px}svg{width:100%;height:auto}text{font:11px ui-monospace,monospace;fill:#555}</style>
+</head><body><h1>Parser throughput, GiB/s</h1><svg id="chart" viewBox="0 0 420 220"></svg>
+<script>
+const data=[["serde_json",0.41,0.44],["simd-json",1.36,1.62],["sonic-rs",1.55,2.01]]
+const svg=document.getElementById('chart');let out=''
+data.forEach((d,i)=>{const y=20+i*66;out+='<text x="0" y="'+(y+12)+'">'+d[0]+'</text>';[[d[1],'#3f7d4e','8 CPU'],[d[2],'#a5b79c','16 CPU']].forEach((b,j)=>{const w=b[0]/2.1*300;out+='<rect x="100" y="'+(y+j*22)+'" width="'+w+'" height="18" rx="3" fill="'+b[1]+'"/><text x="'+(106+w)+'" y="'+(y+j*22+13)+'">'+b[0]+' · '+b[2]+'</text>'})})
+svg.innerHTML=out
+</script></body></html>`
+
+const curve = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 260" font-family="monospace" font-size="11"><rect width="480" height="260" fill="#fbfcf9"/><text x="16" y="24" font-size="14" font-family="Georgia,serif">Solved tasks per dollar</text><g stroke="#e3e9dd"><line x1="50" y1="220" x2="460" y2="220"/><line x1="50" y1="160" x2="460" y2="160"/><line x1="50" y1="100" x2="460" y2="100"/><line x1="50" y1="40" x2="460" y2="40"/></g><g fill="#3f7d4e"><rect x="70" y="60" width="50" height="160" rx="3"/><rect x="150" y="150" width="50" height="70" rx="3"/><rect x="230" y="170" width="50" height="50" rx="3"/><rect x="310" y="185" width="50" height="35" rx="3"/><rect x="390" y="196" width="50" height="24" rx="3"/></g><g fill="#555" text-anchor="middle"><text x="95" y="238">DeepSeek</text><text x="175" y="238">gpt-oss</text><text x="255" y="238">GLM</text><text x="335" y="238">Kimi</text><text x="415" y="238">Qwen</text><text x="95" y="54">1,667</text><text x="175" y="144">909</text><text x="255" y="164">500</text><text x="335" y="179">323</text><text x="415" y="190">238</text></g></svg>`
+
+const results = `model,solved,tasks,solve rate,median latency s,cost per solved task
+GLM-5.3,124,300,41%,94,0.0020
+Kimi K2.7,118,300,39%,121,0.0031
+DeepSeek V4.1 Flash,109,300,36%,58,0.0006
+gpt-oss-120b,92,300,31%,77,0.0011
+Qwen3-Coder,71,260,27%,203,0.0042`
+
+const method = `# How the benchmark runs
+
+Every model gets **the same harness**: SWE-bench Lite's 300 tasks and a 50-task Rust subset with hidden tests, on identical python:3.12-slim machines.
+
+- One attempt per task, temperature 0.2, 30 tool calls at most
+- Cost is what the gateway charged for the run, divided by tasks solved
+- Timeouts count as failures
+
+| Setting | Value |
+| --- | --- |
+| Harness | swebench 3.0.4 |
+| Machines | 2 CPU, 4 GiB |
+| Max turns | 30 |
+
+The prompts and the harness are in the swarm's repository, so anyone can rerun it.`
+
+function shelf(items: readonly (readonly [string, string, string, string, Form, string, number])[]): Artifact[] {
+  return items.map(([slug, title, summary, kind, form, body, minutes]) => ({
+    entry: { image: 'chart.svg', json: 'data.json', markdown: 'README.md', page: 'index.html', table: 'results.csv', text: 'notes.txt' }[form],
+    form,
+    kind,
+    slug,
+    summary,
+    title,
+    updatedAt: at(minutes),
+    url: `data:${{ image: 'image/svg+xml', json: 'application/json', markdown: 'text/markdown', page: 'text/html', table: 'text/csv', text: 'text/plain' }[form]};charset=utf-8,${encodeURIComponent(body)}`,
+    version: 1 + (minutes % 5),
+  }))
+}
+
+const shelves: Record<string, Artifact[]> = {
+  'bench-coders': shelf([
+    ['leaderboard', 'Coding model leaderboard', 'Solve rate and cost per solved task, live.', 'dashboard', 'page', board, 2],
+    ['solved-per-dollar', 'Solved tasks per dollar', 'Which model gets the most done for the money.', 'chart', 'image', curve, 18],
+    ['results', 'Round 2 results', 'Every model on SWE-bench Lite, as a table.', 'table', 'table', results, 48],
+    ['method', 'How the benchmark runs', 'Harness, settings and how cost is counted.', 'write-up', 'markdown', method, 120],
+  ]),
+  'json-terabyte': shelf([['throughput', 'Parser throughput', 'GiB/s by machine size.', 'dashboard', 'page', throughput, 6]]),
+}
+
+export function artifacts(key: string) {
+  return find(key).then(() => delay({ artifacts: shelves[key] ?? [] }))
+}
+
 const talk: Record<string, readonly (readonly [number | null, string, number, string?])[]> = {
   'bench-coders': [
     [null, 'Round 3 started with $2.68 to spend and room for 3 explorers.', 46],
@@ -663,6 +751,7 @@ const talk: Record<string, readonly (readonly [number | null, string, number, st
     [2, '@swarm Report cost per solved task, not per token', 39, '0.400000'],
     [5, 'Has anyone looked at the Rust subset? 50 tasks feels small for a ranking.', 30],
     [0, '@5 small, but every task has hidden tests. I would rather have 50 honest ones than 500 leaky ones.', 27],
+    [null, 'New artifact: Coding model leaderboard, solve rate and cost per solved task, live.', 35],
     [null, '@8 pledged 0.15 MACH behind "Try a second pass at temperature 0".', 22],
     [8, '@swarm Try a second pass at temperature 0', 21, '0.100000'],
     [4, 'The harness repo is up. I forked it to run the same thing on my own GPU box.', 12],
@@ -673,6 +762,7 @@ const talk: Record<string, readonly (readonly [number | null, string, number, st
     [null, 'Round 2 started with $0.62 to spend and room for 3 explorers.', 29],
     [3, 'sonic-rs at 1.55 GiB/s on 8 CPUs is already past what I expected.', 25],
     [6, '@3 the baseline matters though. serde_json makes the speedup legible to everyone else.', 20],
+    [null, 'New artifact: Parser throughput, GiB/s by machine size.', 15],
     [5, 'Curious whether 16 CPUs buys anything. The lead thinks it is memory bound.', 11],
   ],
   'mev-map': [
@@ -743,7 +833,8 @@ function seed(swarm: Live) {
       settle(swarm)
       steer = steering(swarm, amount, Mention.idea(text))
     }
-    swarm.chat.push({ at: at(minutes), author, id: swarm.chat.length + 1, mentions: mentions(swarm, text), steer, text })
+    const shown = person === null && line.startsWith('New artifact: ') ? (shelves[swarm.id] ?? []).find((item) => line.includes(item.title)) : undefined
+    swarm.chat.push({ artifact: shown ? { slug: shown.slug, title: shown.title } : null, at: at(minutes), author, id: swarm.chat.length + 1, mentions: mentions(swarm, text), steer, text })
   }
   return swarm
 }
@@ -811,7 +902,7 @@ export async function say(key: string, input: { steer?: string; text: string }, 
     steer = steering(swarm, decimal(units(input.steer)), note)
     if (swarm.status === 'running') push(swarm, 'steer', `Steered the running round toward "${note}"`, null, Date.now())
   }
-  const message: Said = { at: Date.now(), author: who, id: (swarm.chat.at(-1)?.id ?? 0) + 1, mentions: mentions(swarm, text), steer, text }
+  const message: Said = { artifact: null, at: Date.now(), author: who, id: (swarm.chat.at(-1)?.id ?? 0) + 1, mentions: mentions(swarm, text), steer, text }
   swarm.chat.push(message)
   tell(key, { message, type: 'said' })
   return delay({ me: me(swarm, who) ?? { ...self }, message }, 250)
@@ -838,7 +929,7 @@ export function chatter(key: string, listener: (event: Chatter | { type: 'open' 
           if (!alive) return
           const text = spoken(remarks[turn % remarks.length] ?? '')
           turn++
-          const message: Said = { at: Date.now(), author, id: (seed(swarm).chat.at(-1)?.id ?? 0) + 1, mentions: mentions(swarm, text), steer: null, text }
+          const message: Said = { artifact: null, at: Date.now(), author, id: (seed(swarm).chat.at(-1)?.id ?? 0) + 1, mentions: mentions(swarm, text), steer: null, text }
           swarm.chat.push(message)
           tell(key, { message, type: 'said' })
           next()

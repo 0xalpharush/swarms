@@ -109,6 +109,10 @@ app.post('/v1/swarms/:id/hands', async (c) =>
   ),
 )
 
+app.get('/v1/swarms/:id/artifacts', async (c) =>
+  Problem.respond(await Operations.artifacts(c.env, { swarm: c.req.param('id') }, new URL(c.req.url).origin)),
+)
+
 app.get('/v1/swarms/:id/chat', async (c) =>
   Problem.respond(await Operations.room(c.env, { ...c.req.query(), swarm: c.req.param('id') }, await Sessions.who(c.env, c.req.raw))),
 )

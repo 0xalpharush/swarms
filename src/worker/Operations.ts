@@ -6,6 +6,7 @@ import { z } from 'zod'
 import type {
   Account,
   Answered,
+  Artifact,
   BudgetRequested,
   Budgeted,
   Config,
@@ -39,6 +40,7 @@ import * as Answer from '../shared/Answer.ts'
 import * as Connect from '../shared/Connect.ts'
 import * as Memo from '../shared/Memo.ts'
 import * as Mention from '../shared/Mention.ts'
+import * as Artifacts from './Artifacts.ts'
 import * as Chain from './Chain.ts'
 import * as Devices from './Devices.ts'
 import * as Hands from './Hands.ts'
@@ -538,6 +540,16 @@ export async function wait(env: Cloudflare.Env, input: Input<'wait'>, signal?: A
     await sleep(Math.min(2000, deadline - Date.now()), signal)
     all = await stub(env, swarm).rounds()
   }
+}
+
+export async function artifacts(env: Cloudflare.Env, input: Input<'swarm'>, origin: string): Promise<Problem.Result<{ artifacts: Artifact[] }>> {
+  const parsed = parse(schema.swarm, input)
+  if (!parsed.ok) return parsed
+  if (!(await Store.exists(env, parsed.value.swarm))) return missing()
+
+  const found = await Artifacts.list(env, parsed.value.swarm)
+  if (!found) return Problem.fail(502, 'upstream_failed', "The gateway did not list the swarm's artifacts.")
+  return Problem.ok({ artifacts: found.map((artifact) => ({ ...artifact, url: origin + artifact.url })) })
 }
 
 export async function room(env: Cloudflare.Env, input: Input<'room'>, address?: Address): Promise<Problem.Result<Room>> {

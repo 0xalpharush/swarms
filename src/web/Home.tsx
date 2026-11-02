@@ -45,10 +45,10 @@ export function Home() {
   return (
     <div className="page start">
       <nav aria-label="Getting started" className="quest-steps start-steps">
-        <span aria-current="step" className="quest-step" data-reached="true"><span>01</span>Path</span>
-        <span className="quest-step"><span>02</span>Question or swarm</span>
-        <span className="quest-step"><span>03</span>Back it</span>
-        <span className="quest-step"><span>04</span>Watch and steer</span>
+        <span aria-current="step" className="quest-step" data-reached="true"><span>01</span><em>Path</em></span>
+        <span className="quest-step"><span>02</span><em>Question or swarm</em></span>
+        <span className="quest-step"><span>03</span><em>Back it</em></span>
+        <span className="quest-step"><span>04</span><em>Watch and steer</em></span>
       </nav>
       <header className="start-head">
         <p className="label">Open research, funded together</p>

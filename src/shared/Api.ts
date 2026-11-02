@@ -277,7 +277,24 @@ export type Account = { address: `0x${string}`; handle: string; name: string | n
 
 export type Steer = { amount: string; backers: number; note: string; noteId: string; round: number | null; share: number; weight: string }
 
+export type Form = 'page' | 'image' | 'markdown' | 'table' | 'json' | 'text'
+
+export type Artifact = {
+  entry: string
+  form: Form
+  kind: string
+  slug: string
+  summary: string | null
+  title: string
+  updatedAt: number | null
+  url: string
+  version: number
+}
+
+export type Shown = { slug: string; title: string }
+
 export type Said = {
+  artifact: Shown | null
   at: number
   author: `0x${string}` | null
   id: number
