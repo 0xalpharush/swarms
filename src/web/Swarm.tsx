@@ -141,12 +141,12 @@ function Repository(props: { config: Config | undefined; swarm: Detail }) {
   if (!code || !props.config)
     return (
       <p className="empty">
-        The swarm keeps its code in a public repository once it holds {usd(props.config?.repoAt ?? '1.5')}: the repository costs $1 of its money, once, and each round pushes what it made. It holds {usd(props.swarm.remaining)} now.
+        The swarm's lead creates its public repository first thing in its first round that one funder can pay {usd(props.config?.repoAt ?? '1.04')} at once: the repository costs $1 of its money, once, and every commit then shows up here as it lands. It holds {usd(props.swarm.remaining)} now.
       </p>
     )
   return (
     <Suspense fallback={<p className="empty">Loading the code…</p>}>
-      <Code gateway={props.config.gateway} repo={code} rounds={props.swarm.history} />
+      <Code gateway={props.config.gateway} repo={code} rounds={props.swarm.history} swarm={props.swarm.id} />
     </Suspense>
   )
 }

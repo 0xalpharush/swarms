@@ -4,16 +4,17 @@ import { useEffect, useMemo, useState } from 'react'
 import type { Code as Repo, Round } from '../shared/Api.ts'
 import { ago, usd } from './format.ts'
 import { message } from './hooks.ts'
+import { Link } from './router.tsx'
 
-type Commit = { date: string | null; message: string; sha: string }
+export type Commit = { author?: { email: string | null; name: string | null }; date: string | null; message: string; parents?: string[]; sha: string }
 
-type Change = { additions: number; deletions: number; oldPath: string | null; patch: string; path: string; state: string | null }
+export type Change = { additions: number; deletions: number; oldPath: string | null; patch: string; path: string; state: string | null }
 
 const theme = { theme: 'pierre-light' } as const
 
-const unified = { diffStyle: 'unified', theme: 'pierre-light' } as const
+export const unified = { diffStyle: 'unified', theme: 'pierre-light' } as const
 
-async function read<value>(url: string): Promise<value> {
+export async function read<value>(url: string): Promise<value> {
   const response = await fetch(url)
   const data = (await response.json().catch(() => undefined)) as (value & { detail?: string }) | undefined
   if (!response.ok || !data) throw new Error(data?.detail ?? `The gateway answered ${response.status}.`)
@@ -40,7 +41,7 @@ function Tree(props: { onSelect: (path: string) => void; paths: readonly string[
   return <FileTree className="code-tree" model={model} />
 }
 
-function Viewer(props: { base: string; path: string; sha: string }) {
+export function Viewer(props: { base: string; path: string; sha: string }) {
   const [state, setState] = useState<{ error?: string; source?: { size: number; text?: string } }>({})
 
   useEffect(() => {
@@ -66,7 +67,7 @@ function Viewer(props: { base: string; path: string; sha: string }) {
   return <File className="code-view" file={file} options={theme} />
 }
 
-function patch(change: Change) {
+export function patch(change: Change) {
   if (/^(diff --git|---) /m.test(change.patch.split('\n')[0] ?? '')) return change.patch
   const before = change.state === 'A' ? '/dev/null' : `a/${change.oldPath ?? change.path}`
   const after = change.state === 'D' ? '/dev/null' : `b/${change.path}`
@@ -122,7 +123,7 @@ function Diffs(props: { base: string; commits: readonly Commit[]; round: Round }
   )
 }
 
-export function Code(props: { gateway: string; repo: Repo; rounds: readonly Round[] }) {
+export function Code(props: { gateway: string; repo: Repo; rounds: readonly Round[]; swarm: string }) {
   const base = `${props.gateway}/p/${props.repo.owner}/${props.repo.app}/git/${encodeURIComponent(props.repo.name)}`
   const version = props.rounds.map((round) => `${round.n}${round.status}`).join(',')
   const [state, setState] = useState<{ commits?: Commit[]; error?: string; files?: string[] }>({})
@@ -149,12 +150,17 @@ export function Code(props: { gateway: string; repo: Repo; rounds: readonly Roun
 
   if (state.error) return <p className="error">{state.error}</p>
   if (!commits || !state.files) return <p className="empty">Loading the code…</p>
-  if (!head) return <p className="empty">The repository {props.repo.name} has no commits yet. Each round pushes what it made, and it shows up here.</p>
+  if (!head)
+    return (
+      <p className="empty">
+        The repository {props.repo.name} has no commits yet. Each commit shows up here as it lands. <Link to={`/s/${encodeURIComponent(props.swarm)}/code`}>Open the code browser</Link>
+      </p>
+    )
 
   return (
     <div className="code">
       <p className="fine">
-        Public repository <strong>{props.repo.name}</strong>, {commits.length === 1 ? '1 commit' : `${commits.length} commits`}, last {head.date ? ago(Date.parse(head.date)) : head.sha.slice(0, 7)}.
+        Public repository <strong>{props.repo.name}</strong>, {commits.length === 1 ? '1 commit' : `${commits.length} commits`}, last {head.date ? ago(Date.parse(head.date)) : head.sha.slice(0, 7)}. <Link to={`/s/${encodeURIComponent(props.swarm)}/code`}>Open the code browser</Link>
       </p>
       <div className="code-browse">
         <Tree onSelect={setPath} paths={state.files} />

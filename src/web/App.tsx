@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { lazy, Suspense, useEffect, useState } from 'react'
 import type { Config } from '../shared/Api.ts'
 import { decimal } from '../shared/Memo.ts'
 import { fixture } from './api.ts'
@@ -10,6 +10,8 @@ import { New } from './New.tsx'
 import { Link, navigate, usePath } from './router.tsx'
 import { Swarm } from './Swarm.tsx'
 import * as Wallet from './wallet.ts'
+
+const Repo = lazy(() => import('./Repo.tsx').then((module) => ({ default: module.Repo })))
 
 function WalletButton(props: { config: Config | undefined }) {
   const wallet = useWallet()
@@ -75,10 +77,11 @@ export function App() {
   const path = usePath()
   const config = useConfig()
   const swarm = /^\/s\/([^/]+)\/?$/.exec(path)?.[1]
+  const code = /^\/s\/([^/]+)\/code\/?$/.exec(path)?.[1]
 
   useEffect(() => {
-    if (!swarm) document.title = path === '/new' ? 'Fund a new question · Swarms' : path === '/docs' ? 'API and MCP · Swarms' : 'Swarms · Fund breakthroughs'
-  }, [path, swarm])
+    if (!swarm && !code) document.title = path === '/new' ? 'Fund a new question · Swarms' : path === '/docs' ? 'API and MCP · Swarms' : 'Swarms · Fund breakthroughs'
+  }, [path, swarm, code])
 
   useEffect(() => {
     const listener = (event: KeyboardEvent) => {
@@ -101,6 +104,10 @@ export function App() {
           <New config={config} />
         ) : path === '/docs' ? (
           <Docs config={config} />
+        ) : code ? (
+          <Suspense fallback={<section className="page"><p className="empty">Loading the code browser…</p></section>}>
+            <Repo config={config} id={decodeURIComponent(code)} key={code} />
+          </Suspense>
         ) : swarm ? (
           <Swarm config={config} id={decodeURIComponent(swarm)} key={swarm} />
         ) : (

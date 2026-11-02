@@ -120,7 +120,7 @@ const schemas = {
     mach: string,
     minPledge: mach,
     perWorker: mach,
-    repoAt: { ...usd, description: 'What a swarm must hold before its lead creates its $1 code repository.' },
+    repoAt: { ...usd, description: 'What one of a swarm\'s funding sources must be able to pay at once before its lead creates its $1 code repository: the $1 and one call\'s reservation.' },
     reserve: mach,
     rpc: string,
     tokens: { items: object({ address, id: currency, pool: { description: 'Whether the swarm can pool it: transfers and budgets take pool tokens, pledges take all.', type: 'boolean' }, symbol: string }), type: 'array' },
