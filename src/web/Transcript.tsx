@@ -53,7 +53,7 @@ function Beat(props: { entry: Entry; head: boolean; times?: number | undefined }
       ) : (
         <p className="beat-text">{quiet && <span aria-hidden="true" className="beat-mark">›</span>}{entry.text}{props.times && <span className="beat-times"> ×{props.times}</span>}</p>
       )}
-      {quiet && open && detail && <pre className="beat-detail">{detail}</pre>}
+      {(quiet || entry.kind === 'error') && open && detail && <pre className="beat-detail">{detail}</pre>}
     </li>
   )
 }
