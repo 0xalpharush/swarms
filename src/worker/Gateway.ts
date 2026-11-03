@@ -85,7 +85,7 @@ export function revoke(env: Cloudflare.Env, key: string) {
 export function agent(env: Cloudflare.Env, swarm: string, input: { name: string; payer: { secret: string; url: string } }) {
   return send<{ id: string }>(env, '/v1/agents', {
     app: app(swarm),
-    body: { harness: 'codex', name: input.name, payer: input.payer },
+    body: { name: input.name, payer: input.payer },
   })
 }
 
