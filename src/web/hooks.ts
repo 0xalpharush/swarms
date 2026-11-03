@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react'
 import type { Config, Entry } from '../shared/Api.ts'
 import * as Api from './api.ts'
 import { boot, here, seeded, server } from './boot.ts'
@@ -11,6 +11,11 @@ export function message(error: unknown) {
 export function useConfig() {
   const [config, setConfig] = useState<Config | undefined>(() => boot()?.config)
   useEffect(() => {
+    const known = boot()?.config
+    if (known) {
+      void Wallet.restore(known).catch(() => {})
+      return
+    }
     let alive = true
     const load = () => {
       Api.config().then(
@@ -67,7 +72,28 @@ function keep(key: string, data: unknown) {
   } catch {}
 }
 
-export function usePoll<T>(load: () => Promise<T>, ms: number, key: string, options: { keep?: boolean } = {}) {
+function watch(listener: () => void) {
+  document.addEventListener('visibilitychange', listener)
+  return () => document.removeEventListener('visibilitychange', listener)
+}
+
+export function useVisible() {
+  return useSyncExternalStore(
+    watch,
+    () => document.visibilityState !== 'hidden',
+    () => true,
+  )
+}
+
+export function useStable<A extends unknown[], R>(run: (...args: A) => R) {
+  const current = useRef(run)
+  useLayoutEffect(() => {
+    current.current = run
+  })
+  return useCallback((...args: A) => current.current(...args), [])
+}
+
+export function usePoll<T>(load: () => Promise<T>, ms: number | ((data: T | undefined) => number), key: string, options: { keep?: boolean } = {}) {
   const [state, setState] = useState<{ data?: T | undefined; error?: string }>(() => {
     const data = remembered<T>(key) ?? seeded<T>(key) ?? (options.keep ? recall<T>(key) : undefined)
     const failed = seeded<string>(`!${key}`)
@@ -76,35 +102,50 @@ export function usePoll<T>(load: () => Promise<T>, ms: number, key: string, opti
   const warm = useRef(remembered(key) === undefined && (seeded(key) !== undefined || seeded(`!${key}`) !== undefined))
   const [version, setVersion] = useState(0)
   const current = useRef(load)
+  const pace = useRef(ms)
+  const held = useRef(state)
+  const text = useRef<string | undefined>(undefined)
+  const visible = useVisible()
 
   useEffect(() => {
     current.current = load
+    pace.current = ms
+    held.current = state
   })
 
   useEffect(() => {
+    if (!visible) return
     let alive = true
     let timer: ReturnType<typeof setTimeout> | undefined
     const run = async () => {
+      let latest = held.current.data
       try {
         const data = await current.current()
         if (!alive) return
-        if (options.keep) keep(key, data)
-        else remember(key, data)
-        setState({ data })
+        latest = data
+        const json = JSON.stringify(data)
+        const before = text.current ?? (held.current.data === undefined ? undefined : JSON.stringify(held.current.data))
+        text.current = json
+        if (json !== before || held.current.error !== undefined) {
+          if (options.keep) keep(key, data)
+          else remember(key, data)
+          setState({ data })
+        }
       } catch (error) {
         if (alive) setState((previous) => ({ ...previous, error: message(error) }))
       }
-      if (alive) timer = setTimeout(() => void run(), ms)
+      if (alive) timer = setTimeout(() => void run(), wait(latest))
     }
+    const wait = (data: T | undefined) => (typeof pace.current === 'number' ? pace.current : pace.current(data))
     if (warm.current) {
       warm.current = false
-      timer = setTimeout(() => void run(), ms)
+      timer = setTimeout(() => void run(), wait(held.current.data))
     } else void run()
     return () => {
       alive = false
       clearTimeout(timer)
     }
-  }, [key, ms, version])
+  }, [key, typeof ms === 'number' ? ms : 0, version, visible])
 
   const reload = useCallback(() => setVersion((value) => value + 1), [])
   return [state, reload] as const
@@ -172,12 +213,14 @@ export function useLive(id: string, active: boolean, onEntry: (entry: Entry) => 
   return { connected: active && connected, since, streams }
 }
 
-export function useNow(ms = 1000) {
+export function useNow(ms = 1000, active = true) {
   const [now, setNow] = useState(() => boot()?.now ?? Date.now())
   useEffect(() => {
+    if (!active) return
+    setNow(Date.now())
     const timer = setInterval(() => setNow(Date.now()), ms)
     return () => clearInterval(timer)
-  }, [ms])
+  }, [ms, active])
   return now
 }
 

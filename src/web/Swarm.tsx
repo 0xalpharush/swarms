@@ -8,7 +8,7 @@ import { here, seeded } from './boot.ts'
 import { Connect } from './Connect.tsx'
 import { asked, Fund } from './Contribute.tsx'
 import { ago, duration, mach, percent, short, usd } from './format.ts'
-import { remembered, useLive, useMedia, useNow, usePoll } from './hooks.ts'
+import { remembered, useLive, useMedia, usePoll, useStable, useVisible } from './hooks.ts'
 import { Lost } from './Lost.tsx'
 import { Presence } from './Ideas.tsx'
 import { Machines } from './Machines.tsx'
@@ -53,13 +53,13 @@ function useTab() {
 }
 
 export function Swarm(props: { config: Config | undefined; id: string }) {
-  const first = useRef(true)
+  const [entries, setEntries] = useState<readonly Entry[]>(() => trails.get(props.id) ?? remembered<Detail>(props.id)?.feed ?? seeded<Detail>(props.id)?.feed ?? [])
+  const first = useRef(entries.length === 0)
   const [detail, reload] = usePoll(() => {
     const full = first.current
     first.current = false
     return Api.swarm(props.id, full)
-  }, 5000, props.id)
-  const [entries, setEntries] = useState<readonly Entry[]>(() => trails.get(props.id) ?? remembered<Detail>(props.id)?.feed ?? seeded<Detail>(props.id)?.feed ?? [])
+  }, (data) => (data?.status === 'running' ? 5000 : 10_000), props.id)
   useEffect(() => {
     if (entries.length) trails.set(props.id, entries.slice(-400))
   }, [entries, props.id])
@@ -72,13 +72,13 @@ export function Swarm(props: { config: Config | undefined; id: string }) {
   const [chat, setChat] = useState<{ handles: ReadonlyMap<string, string>; me: Me | null; members: readonly Member[]; online: readonly string[]; said: readonly Said[]; watching: number }>({ handles: new Map(), me: null, members: [], online: [], said: [], watching: 0 })
   const heard = useCallback((said: readonly Said[], me: Me | null, members: readonly Member[], online: readonly string[], watching: number) => setChat((previous) => ({ handles: new Map(members.map((member) => [member.address, member.handle])), me, members, online, watching, said: [...said, ...previous.said.filter((item) => !said.some((other) => other.id === item.id) && item.id > (said.at(-1)?.id ?? 0))] })), [])
   const [funding, setFunding] = useState(() => here().searchParams.has('fund'))
-  const tick = useNow(1000)
+  const visible = useVisible()
   const wide = useMedia('(min-width: 1100px)')
   const phone = useMedia('(max-width: 799px)')
   const running = detail.data?.status === 'running'
   const last = useRef(0)
   const loaded = detail.data !== undefined
-  const stream = useLive(props.id, running, (entry) => setEntries((previous) => merge(previous, [entry])))
+  const stream = useLive(props.id, running && visible, (entry) => setEntries((previous) => merge(previous, [entry])))
   const coded = !!detail.data?.code
   useEffect(() => {
     if (!coded) return
@@ -101,8 +101,11 @@ export function Swarm(props: { config: Config | undefined; id: string }) {
     if (detail.data) document.title = `${detail.data.title} · Swarms`
   }, [detail.data?.title])
 
+  const pace = running ? 2000 : 10_000
+  const stamp = `${detail.data?.status}:${detail.data?.updatedAt}`
+  const polled = useRef(false)
   useEffect(() => {
-    if (!loaded) return
+    if (!loaded || !visible) return
     let alive = true
     let timer: ReturnType<typeof setTimeout> | undefined
     const run = async () => {
@@ -110,14 +113,26 @@ export function Swarm(props: { config: Config | undefined; id: string }) {
         const { entries: next } = await Api.feed(props.id, last.current)
         if (alive) setEntries((previous) => merge(previous, next))
       } catch {}
-      if (alive) timer = setTimeout(() => void run(), 2000)
+      if (alive) timer = setTimeout(() => void run(), pace)
     }
-    timer = setTimeout(() => void run(), 2000)
+    timer = setTimeout(() => void run(), polled.current ? 0 : 2000)
+    polled.current = true
     return () => {
       alive = false
       clearTimeout(timer)
     }
-  }, [loaded, props.id])
+  }, [loaded, props.id, pace, stamp, visible])
+
+  const back = useStable((text: string) => {
+    setTab('transcript')
+    if (text.trim()) {
+      setFunding(false)
+      return setDraft({ at: Date.now(), text })
+    }
+    setNote('')
+    setFunding(true)
+  })
+  const backNote = useStable((text: string) => back(text || note))
 
   if (!detail.data)
     return detail.error ? (
@@ -134,15 +149,6 @@ export function Swarm(props: { config: Config | undefined; id: string }) {
   const live = swarm.status === 'running'
   const shown: Tab = wide && tab === 'room' ? 'transcript' : tab
   const connected = swarm.hands.filter((hand) => hand.connected).length
-  const back = (text: string) => {
-    setTab('transcript')
-    if (text.trim()) {
-      setFunding(false)
-      return setDraft({ at: Date.now(), text })
-    }
-    setNote('')
-    setFunding(true)
-  }
   const fund = <Fund config={props.config} note={note} onDone={() => { reload(); setFunding(false) }} onNote={setNote} prefill={prefill} target={() => Promise.resolve({ id: swarm.id, wallet: swarm.wallet })} title={swarm.title} />
   const choose = (next: Tab) => {
     setTab(next)
@@ -165,7 +171,7 @@ export function Swarm(props: { config: Config | undefined; id: string }) {
           <h1 title={swarm.title}>{swarm.title}</h1>
           {swarm.status === 'done' && swarm.answer && <button className="btn btn-high swarm-back" onClick={() => setResult(true)} type="button">Result</button>}
         </div>
-        <Energy now={tick} onFund={swarm.status === 'done' ? undefined : () => back(note)} swarm={swarm} />
+        <Energy onFund={swarm.status === 'done' ? undefined : () => back(note)} swarm={swarm} />
         {!phone && (
           <nav aria-label="Swarm" className="room-tabs" role="tablist">
             {tabs.filter((item) => item !== 'room' || !wide).map((item) => (
@@ -198,7 +204,7 @@ export function Swarm(props: { config: Config | undefined; id: string }) {
               me={chat.me}
               onClose={() => setFunding(false)}
               onEmpty={swarm.status !== 'done' ? () => back(note) : undefined}
-              onFund={(text) => back(text || note)}
+              onFund={backNote}
               onEntries={(next) => setEntries((previous) => merge(previous, next))}
               onPeople={() => {
                 if (!wide) return setTab('room')

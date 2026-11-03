@@ -1,4 +1,4 @@
-import { type ReactNode, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { memo as pure, type ReactNode, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { Config, Detail, Entry, Me, Said } from '../shared/Api.ts'
 import * as Answer from '../shared/Answer.ts'
 import * as Mention from '../shared/Mention.ts'
@@ -10,7 +10,7 @@ import { memo } from '../shared/Transfer.ts'
 import * as Api from './api.ts'
 import { here } from './boot.ts'
 import { clock, usd } from './format.ts'
-import { agent, type Live, message, speaker, type Stream, useNow, useWallet } from './hooks.ts'
+import { agent, type Live, message, speaker, type Stream, useWallet } from './hooks.ts'
 import * as Wallet from './wallet.ts'
 import { Markdown } from './Markdown.tsx'
 
@@ -34,7 +34,7 @@ function now(stream: Stream | undefined) {
   return undefined
 }
 
-function Beat(props: { entry: Entry; head: boolean; times?: number | undefined }) {
+const Beat = pure(function Beat(props: { entry: Entry; head: boolean; times?: number | undefined }) {
   const [open, setOpen] = useState(false)
   const entry = props.entry
   const who = speaker(entry.who)
@@ -56,16 +56,16 @@ function Beat(props: { entry: Entry; head: boolean; times?: number | undefined }
       {(quiet || entry.kind === 'error') && open && detail && <pre className="beat-detail">{detail}</pre>}
     </li>
   )
-}
+})
 
-function Voice(props: { item: Said; name: string; onBack: ((note: string) => void) | undefined }) {
+const Voice = pure(function Voice(props: { item: Said; name: string; onBack: ((note: string) => void) | undefined }) {
   return (
     <li className="beat beat-voice" title={clock(props.item.at)}>
       <span className="beat-who">@{props.name}{props.item.steer && <button className="said-backed" disabled={!props.onBack} onClick={() => props.onBack?.(props.item.steer?.note ?? '')} title="Back this idea too" type="button">{usd(props.item.steer.amount)}{props.onBack && <b aria-hidden="true">+</b>}</button>}</span>
       <p className="beat-say"><span className="mention" data-swarm="true">@swarm</span> {Mention.idea(props.item.text)}</p>
     </li>
   )
-}
+})
 
 type Backed = { amount: string; at: number; id: string; monthly: boolean; note: string | null; who: string }
 
@@ -77,14 +77,14 @@ function backings(swarm: Detail): Backed[] {
   ]
 }
 
-function Funded(props: { item: Backed; name: string; onBack: ((note: string) => void) | undefined }) {
+const Funded = pure(function Funded(props: { item: Backed; name: string; onBack: ((note: string) => void) | undefined }) {
   return (
     <li className="beat beat-funded" data-go={!!(props.onBack && props.item.note)} onClick={() => props.item.note && props.onBack?.(props.item.note)} title={props.onBack && props.item.note ? 'Back this idea too' : clock(props.item.at)}>
       <span className="beat-coin" aria-hidden="true">$</span>
       <span><b>@{props.name}</b> funded {usd(props.item.amount)}{props.item.monthly ? ' a month' : ''}{props.item.note ? <> behind <i>“{props.item.note}”</i></> : null}</span>
     </li>
   )
-}
+})
 
 const stakes = ['0.5', '1', '5'] as const
 
@@ -213,7 +213,6 @@ export function Transcript(props: {
   tray?: ReactNode
 }) {
   const swarm = props.swarm
-  const tick = useNow(1000)
   const [who, setWho] = useState(asked)
   const [loading, setLoading] = useState(false)
   const [start, setStart] = useState(false)

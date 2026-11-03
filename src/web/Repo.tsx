@@ -92,7 +92,7 @@ function Timeline(props: {
   onPick: (sha: string) => void
   selected: string
 }) {
-  const now = useNow()
+  const now = useNow(props.commits.some((commit) => commit.date && Date.now() - Date.parse(commit.date) < 60_000) ? 1000 : 30_000)
   return (
     <ol className="repo-commits">
       {props.commits.map((commit) => {
@@ -302,7 +302,7 @@ function Browser(props: { base: string; detail: Detail; live: boolean }) {
 }
 
 export function Repo(props: { config: Config | undefined; id: string }) {
-  const [detail] = usePoll(() => Api.swarm(props.id), pollMs, props.id)
+  const [detail] = usePoll(() => Api.swarm(props.id, false), pollMs, props.id)
   const swarm = detail.data
   const code = swarm?.code
 

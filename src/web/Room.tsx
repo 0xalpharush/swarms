@@ -1,4 +1,4 @@
-import { type KeyboardEvent, type ReactNode, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { type KeyboardEvent, memo, type ReactNode, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { Config, Detail, Me, Member, Room as RoomState, Said, Way } from '../shared/Api.ts'
 import { seeded } from './boot.ts'
 import * as Answer from '../shared/Answer.ts'
@@ -6,7 +6,7 @@ import { decimal, maxNote, units } from '../shared/Memo.ts'
 import * as Mention from '../shared/Mention.ts'
 import * as Api from './api.ts'
 import { percent, usd, minute } from './format.ts'
-import { message as reason, useNow, useWallet } from './hooks.ts'
+import { message as reason, useNow, useVisible, useWallet } from './hooks.ts'
 import { code } from './Pledge.tsx'
 import * as Wallet from './wallet.ts'
 
@@ -59,7 +59,7 @@ function Backed(props: { onBack: ((note: string) => void) | undefined; steer: No
   )
 }
 
-export function Room(props: {
+export const Room = memo(function Room(props: {
   config: Config | undefined
   onBack: (note: string) => void
   onMessages?: (messages: readonly Said[], me: Me | null, members: readonly Member[], online: readonly string[], watching: number) => void
@@ -72,7 +72,6 @@ export function Room(props: {
   const done = props.swarm.status === 'done'
   const wallet = useWallet()
   const token = wallet.session?.token
-  const now = useNow(1000)
   const [seed] = useState(() => seeded<RoomState>(`room:${props.swarm.id}`))
   const [messages, setMessages] = useState<readonly Said[]>(() => seed?.messages ?? [])
   const [members, setMembers] = useState<readonly Member[]>(() => seed?.members ?? [])
@@ -83,6 +82,7 @@ export function Room(props: {
   const [online, setOnline] = useState<readonly string[]>([])
   const [watching, setWatching] = useState(0)
   const [typing, setTyping] = useState<Readonly<Record<string, number>>>({})
+  const now = useNow(1000, Object.values(typing).some((until) => until > Date.now()))
   const [text, setText] = useState('')
   const [caret, setCaret] = useState(0)
   const [pick, setPick] = useState(0)
@@ -124,12 +124,23 @@ export function Room(props: {
     void load(0)
   }, [load])
 
+  const shown = useVisible()
+  const away = useRef(false)
   useEffect(() => {
+    if (!shown) {
+      away.current = true
+      return
+    }
+    if (away.current) void load(last.current)
+    away.current = false
     const timer = setInterval(() => void load(last.current), 15_000)
     return () => clearInterval(timer)
-  }, [load])
+  }, [load, shown])
 
+  const backers = useRef(props.swarm.contributors)
   useEffect(() => {
+    if (backers.current === props.swarm.contributors) return
+    backers.current = props.swarm.contributors
     if (loaded) void load(last.current)
   }, [props.swarm.contributors, loaded, load])
 
@@ -482,4 +493,4 @@ export function Room(props: {
       </footer>
     </section>
   )
-}
+})
