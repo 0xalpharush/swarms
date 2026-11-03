@@ -214,7 +214,10 @@ export function useLive(id: string, active: boolean, onEntry: (entry: Entry) => 
         stream(speaker(event.entry.who), (current) => settle(current, event.entry))
         handler.current(event.entry)
       }
-    }, cursor.current ? () => cursor.current?.() ?? 0 : undefined)
+    }, cursor.current ? () => cursor.current?.() ?? 0 : undefined, cursor.current ? () => {
+      setConnected(false)
+      setPushed(false)
+    } : undefined)
   }, [active, id])
 
   return { connected: active && connected, pushed: active && connected && pushed, since, streams }

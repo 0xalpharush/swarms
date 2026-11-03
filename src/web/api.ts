@@ -79,7 +79,7 @@ export function feed(id: string, after: number, filter: { before?: number; who?:
   return fixture ? staged((fixtures) => fixtures.feed(id, after, filter)) : request<{ entries: Entry[]; next: number }>(`${path(id)}/feed?${query}`)
 }
 
-export function live(id: string, listener: (event: Live) => void, after?: () => number) {
+export function live(id: string, listener: (event: Live) => void, after?: () => number, lost?: () => void) {
   if (fixture) {
     let stop: (() => void) | undefined
     let alive = true
@@ -94,20 +94,23 @@ export function live(id: string, listener: (event: Live) => void, after?: () => 
   let alive = true
   let source: EventSource | undefined
   let timer: ReturnType<typeof setTimeout> | undefined
+  let seen = 0
   const again = (ms: number) => {
     source?.close()
     if (alive) timer = setTimeout(open, ms)
   }
   const open = () => {
-    const cursor = after?.()
+    const cursor = after ? Math.max(after(), seen) : undefined
     source = new EventSource(cursor === undefined ? `${path(id)}/live` : `${path(id)}/live?after=${cursor}`)
     source.onmessage = (message) => {
       const event = JSON.parse(String(message.data)) as Live
+      if (event.type === 'entry') seen = Math.max(seen, event.entry.seq)
       listener(event)
       if (cursor === undefined && (event.type === 'end' || event.type === 'idle')) again(event.type === 'end' ? 1500 : 4000)
     }
     source.onerror = () => {
-      listener({ type: 'idle' })
+      if (lost) lost()
+      else listener({ type: 'idle' })
       again(3000)
     }
   }
