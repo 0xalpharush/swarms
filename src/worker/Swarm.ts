@@ -746,9 +746,11 @@ export class Swarm extends DurableObject<Cloudflare.Env> {
   }
 
   async sweep(row: Store.Row) {
-    if (!(this.kv.get<Hand[]>('hands') ?? []).length) return
+    const started = this.ctx.storage.sql.exec<{ n: number }>("SELECT COUNT(*) AS n FROM feed WHERE at >= ? AND kind = 'machine' AND text LIKE 'Starting machine%'", this.kv.get<number>('swept') ?? 0).one().n
+    if (!started && !(this.kv.get<Hand[]>('hands') ?? []).length) return
     const listed = await Gateway.sandboxes(this.env, row.id)
     if (!listed.ok) return
+    this.kv.put('swept', Date.now())
     for (const sandbox of listed.value.sandboxes.filter((found) => found.status !== 'terminated')) {
       const ended = await Gateway.terminate(this.env, row.id, sandbox.sandboxId)
       if (ended.ok) this.log('machine', `Shut down ${sandbox.hand ?? sandbox.sandboxId}, which was still running when the swarm stopped.`)
@@ -1270,7 +1272,7 @@ export class Swarm extends DurableObject<Cloudflare.Env> {
         : 'Waiting for money: a contribution, budget or pledge keeps it going.')
     if (this.kv.get<number>('since')) {
       this.kv.delete('since')
-      await this.sweep(row)
+      if (why === 'idle' || why === 'rest') await this.sweep(row)
       if (status === 'paused') this.announce(text)
     }
     if (row.status === status && this.kv.get<string>('paused') === text && this.kv.get<Why>('why') === why) return
