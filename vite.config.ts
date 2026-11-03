@@ -33,6 +33,7 @@ export default defineConfig(({ command }) => {
 
   return {
     resolve: { alias: { '#ssr': fileURLToPath(new URL('./src/web/server.tsx', import.meta.url)) } },
+    environments: { client: { build: { rolldownOptions: { output: { codeSplitting: { groups: [{ name: 'hash', test: /\/viem\/_esm\/utils\/(hash\/keccak256|encoding\/toHex)\.js$/ }] } } } } } },
     server: { allowedHosts: ['terminal.local'] },
     plugins: [
       react(),
