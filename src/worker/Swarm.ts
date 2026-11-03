@@ -1065,7 +1065,7 @@ export class Swarm extends DurableObject<Cloudflare.Env> {
     for (const source of sources) {
       const channel = this.kv.get<Payer.Channel>(`channel:${source.id}`)
       const spent = BigInt(this.kv.get<string>('spent:' + source.id) ?? channel?.signed ?? '0')
-      const inside = channel ? Payer.max(BigInt(channel.deposit) - spent, 0n) : 0n
+      const inside = channel?.confirmed ? Payer.max(BigInt(channel.deposit) - spent, 0n) : 0n
       const room: Room | undefined = source.row
         ? await this.room(row, source).catch(() => undefined)
         : { amount: balances ? Payer.max(Vault.total(balances) - Vault.dust * 3n, 0n) : 0n, resets: null }
