@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { Detail, Status as Kind, Summary } from '../shared/Api.ts'
 import { duration, ratio, usd } from './format.ts'
+import { useNow } from './hooks.ts'
 
 const labels = { done: 'Done', funding: 'Funding', paused: 'Paused', running: 'Running' } as const satisfies Record<Kind, string>
 
@@ -45,7 +46,8 @@ export function progress(swarm: Pick<Detail, 'reason' | 'status' | 'why' | 'work
   return 'Out of energy'
 }
 
-export function Energy(props: { now: number; onFund?: (() => void) | undefined; swarm: Pick<Detail, 'raised' | 'reason' | 'remaining' | 'status' | 'why' | 'working'> }) {
+export function Energy(props: { onFund?: (() => void) | undefined; swarm: Pick<Detail, 'raised' | 'reason' | 'remaining' | 'status' | 'why' | 'working'> }) {
+  const now = useNow(1000, props.swarm.status === 'running' && !!props.swarm.working)
   const left = Number(props.swarm.remaining)
   const raised = Number(props.swarm.raised)
   const fill = raised > 0 ? Math.min(1, Math.max(0, left / raised)) : 0
@@ -60,7 +62,7 @@ export function Energy(props: { now: number; onFund?: (() => void) | undefined; 
     }
     before.current = left
   }, [left])
-  const state = progress(props.swarm, props.now)
+  const state = progress(props.swarm, now)
   const body = (
     <>
       <span className="energy-state">{state}</span>
