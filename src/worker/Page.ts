@@ -2,6 +2,7 @@ import { AsyncLocalStorage } from 'node:async_hooks'
 import { render } from '#ssr'
 import type { Boot, Face } from '../shared/Boot.ts'
 import * as Operations from './Operations.ts'
+import * as Store from './Store.ts'
 
 const store = new AsyncLocalStorage<Boot>()
 
@@ -14,6 +15,15 @@ export function rendered(path: string) {
 }
 
 let template: Promise<string> | undefined
+
+let chunks: Promise<{ code: string[]; repo: string[] }> | undefined
+
+function preloads(env: Cloudflare.Env, origin: string) {
+  chunks ??= env.ASSETS.fetch(new Request(`${origin}/preload.json`))
+    .then((response) => (response.ok ? (response.json() as Promise<{ code: string[]; repo: string[] }>) : { code: [], repo: [] }))
+    .catch(() => ({ code: [], repo: [] }))
+  return chunks
+}
 
 function shell(env: Cloudflare.Env, origin: string) {
   const loaded = env.ASSETS.fetch(new Request(`${origin}/index.html`)).then(async (response) => {
@@ -93,7 +103,7 @@ async function gather(env: Cloudflare.Env, url: URL): Promise<{ data: Record<str
     return { data, head: { ...head, title: 'Not found · Swarms' }, status: detail.status === 404 ? 404 : 200 }
   }
   data[id] = detail.value
-  const [room, code] = await Promise.all([within(Operations.room(env, { swarm: id }), 800), browsing ? within(Operations.code(env, { swarm: id }), 800) : undefined])
+  const [room, code] = await Promise.all([browsing ? undefined : within(Operations.room(env, { swarm: id }), 800), browsing ? within(Operations.code(env, { swarm: id }), 800) : undefined])
   if (room?.ok) data[`room:${id}`] = room.value
   if (code?.ok && code.value.snapshot) data[`code:${id}`] = code.value.snapshot
   const latest = detail.value.answer?.text
@@ -130,7 +140,9 @@ export async function page(request: Request, env: Cloudflare.Env) {
   const gathering = gather(env, url)
   const top = before.replace(/<title>[^<]*<\/title>/, '').replace('</head>', '§HEAD§</head>')
   const [opening = '', closing = ''] = top.split('§HEAD§')
-  void writer.write(encoder.encode(opening))
+  const browsing = /^\/s\/[^/]+\/code\/?$/.test(url.pathname)
+  const hinted = browsing ? (await preloads(env, url.origin)).repo.filter((file) => !opening.includes(file)) : []
+  void writer.write(encoder.encode(opening + hinted.map((file) => `<link rel="modulepreload" crossorigin href="/${file}">`).join('')))
 
   const work = (async () => {
     const { data, head, status } = await gathering
@@ -152,6 +164,7 @@ export async function page(request: Request, env: Cloudflare.Env) {
     return status
   })()
   work.catch(() => writer.abort().catch(() => {}))
-  const status = url.pathname.startsWith('/s/') ? (await gathering).status : 200
+  const id = /^\/s\/([^/]+)/.exec(url.pathname)?.[1]
+  const status = id ? ((await Store.exists(env, decodeURIComponent(id)).catch(() => true)) ? 200 : 404) : 200
   return new Response(readable, { headers: { 'cache-control': 'private, no-cache', 'content-type': 'text/html; charset=utf-8', link: '</fonts/ParadigmSerif-BetaRegular.woff2>; rel=preload; as=font; crossorigin' }, status })
 }

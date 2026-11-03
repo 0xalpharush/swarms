@@ -1488,10 +1488,14 @@ export class Swarm extends DurableObject<Cloudflare.Env> {
     const files = listed.files.filter((file) => file.type !== 'tree').map((file) => file.path)
     const head = log.commits[0]
     const path = files.find((file) => /^readme(\.md)?$/i.test(file)) ?? files.find((file) => /readme/i.test(file)) ?? files[0]
-    const read = head && path ? await Gateway.code<{ size: number; text?: string }>(this.env, owner, swarm, `${base}/read?path=${encodeURIComponent(path)}&ref=${head.sha}`) : undefined
+    const [read, diff] = await Promise.all([
+      head && path ? Gateway.code<{ size: number; text?: string }>(this.env, owner, swarm, `${base}/read?path=${encodeURIComponent(path)}&ref=${head.sha}`) : undefined,
+      head ? Gateway.code<{ files: NonNullable<Snapshot['diff']> }>(this.env, owner, swarm, `${base}/diff?ref=${head.sha}`) : undefined,
+    ])
     this.kv.put('snapshot', {
       at: Date.now(),
       commits: log.commits.map((commit) => ({ ...commit, message: redact(commit.message) })),
+      diff: diff && diff.files.reduce((total, change) => total + change.patch.length, 0) <= snapshotText * 2 ? diff.files.map((change) => ({ ...change, patch: redact(change.patch) })) : null,
       files: files.slice(0, snapshotFiles),
       name,
       readme: path && read?.text !== undefined && read.text.length <= snapshotText ? { path, text: redact(read.text) } : null,

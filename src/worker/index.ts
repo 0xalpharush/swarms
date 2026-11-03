@@ -1,5 +1,6 @@
 import { Hono } from 'hono'
 import * as Artifacts from './Artifacts.ts'
+import * as Code from './Code.ts'
 import * as Operations from './Operations.ts'
 import * as Page from './Page.ts'
 import * as Problem from './Problem.ts'
@@ -75,6 +76,11 @@ app.post('/api/swarms', async (c) => Problem.respond(await Operations.create(c.e
 
 app.get('/api/swarms/:id', async (c) => Problem.respond(await Operations.detail(c.env, { swarm: c.req.param('id') }, c.req.query('feed') !== '0')))
 
+app.get('/api/swarms/:id/git/:read', async (c) => {
+  const read = c.req.param('read')
+  if (!Code.readable(read)) return Problem.json({ code: 'not_found', detail: 'No such route.', status: 404 })
+  return Code.proxy(c.env, c.executionCtx, c.req.raw, c.req.param('id'), read)
+})
 app.get('/api/swarms/:id/code', async (c) => Problem.respond(await Operations.code(c.env, { swarm: c.req.param('id') })))
 app.get('/api/swarms/:id/feed', async (c) =>
   Problem.respond(

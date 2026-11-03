@@ -3,7 +3,7 @@ import { FileTree, useFileTree } from '@pierre/trees/react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { Config, Detail } from '../shared/Api.ts'
 import * as Api from './api.ts'
-import { type Change, Clone, type Commit, patch, read, unified, Viewer } from './Code.tsx'
+import { type Change, Clone, type Commit, local, patch, prefetch, read, seed as keepSnapshot, peek, unified, Viewer, warm } from './Code.tsx'
 import { ago, usd } from './format.ts'
 import { message, useNow, usePoll } from './hooks.ts'
 import { Link } from './router.tsx'
@@ -124,7 +124,9 @@ function Browser(props: { base: string; detail: Detail; live: boolean }) {
   const initial = useRef(query())
   const [seed] = useState(() => {
     const known = Api.coded(props.detail.id)
-    return known && known.name === props.detail.code?.name ? known : undefined
+    if (!known || known.name !== props.detail.code?.name) return undefined
+    keepSnapshot(props.base, known)
+    return known
   })
   const [log, setLog] = useState<{ commits: Commit[]; cursor: string | null; error?: string; seeded?: boolean } | undefined>(seed && { commits: seed.commits, cursor: null, seeded: true })
   const [fresh, setFresh] = useState<ReadonlySet<string>>(new Set())
@@ -132,7 +134,7 @@ function Browser(props: { base: string; detail: Detail; live: boolean }) {
   const [path, setPath] = useState<string | undefined>(initial.current.path)
   const [tab, setTab] = useState<'changes' | 'file'>(initial.current.path ? 'file' : 'changes')
   const [tree, setTree] = useState<{ error?: string; paths?: string[]; ref?: string }>(() => (seed?.commits[0] && !initial.current.ref ? { paths: seed.files, ref: seed.commits[0].sha } : {}))
-  const [diff, setDiff] = useState<{ changes?: Change[]; error?: string; ref?: string }>({})
+  const [diff, setDiff] = useState<{ changes?: Change[]; error?: string; ref?: string }>(() => (seed?.diff && seed.commits[0] && !initial.current.ref ? { changes: seed.diff, ref: seed.commits[0].sha } : {}))
   const known = useRef(new Set<string>())
 
   useEffect(() => {
@@ -175,11 +177,15 @@ function Browser(props: { base: string; detail: Detail; live: boolean }) {
   useEffect(() => {
     if (!ref) return
     let alive = true
-    if (tree.ref !== ref || !tree.paths) read<{ files: { path: string; type: string }[] }>(`${props.base}/files?ref=${ref}`).then(
+    const listed = peek<{ files: { path: string; type: string }[] }>(`${props.base}/files?ref=${ref}`)
+    const changed = peek<{ files: Change[] }>(`${props.base}/diff?ref=${ref}`)
+    if (listed && tree.ref !== ref) setTree({ paths: listed.files.filter((file) => file.type !== 'tree').map((file) => file.path), ref })
+    if (changed && diff.ref !== ref) setDiff({ changes: changed.files, ref })
+    if (!listed && (tree.ref !== ref || !tree.paths)) read<{ files: { path: string; type: string }[] }>(`${props.base}/files?ref=${ref}`).then(
       (files) => alive && setTree({ paths: files.files.filter((file) => file.type !== 'tree').map((file) => file.path), ref }),
       (error: unknown) => alive && setTree({ error: message(error), ref }),
     )
-    read<{ files: Change[] }>(`${props.base}/diff?ref=${ref}`).then(
+    if (!changed && (diff.ref !== ref || !diff.changes)) read<{ files: Change[] }>(`${props.base}/diff?ref=${ref}`).then(
       (found) => alive && setDiff({ changes: found.files, ref }),
       (error: unknown) => alive && setDiff({ error: message(error), ref }),
     )
@@ -187,6 +193,17 @@ function Browser(props: { base: string; detail: Detail; live: boolean }) {
       alive = false
     }
   }, [props.base, ref])
+
+  useEffect(() => {
+    if (tree.paths && tree.ref) prefetch(props.base, tree.paths, tree.ref)
+  }, [props.base, tree.paths, tree.ref])
+
+  const shas = log?.commits.slice(0, 8).map((commit) => commit.sha).join(',')
+  useEffect(() => {
+    if (!shas) return
+    const timer = setTimeout(() => warm(shas.split(',').flatMap((sha) => [`${props.base}/diff?ref=${sha}`, `${props.base}/files?ref=${sha}`]), 3), 800)
+    return () => clearTimeout(timer)
+  }, [props.base, shas])
 
   const older = async () => {
     if (!log?.cursor) return
@@ -311,7 +328,7 @@ export function Repo(props: { config: Config | undefined; id: string }) {
       ) : (
         <>
           <Clone repo={code} />
-          <Browser base={`${props.config.gateway}/p/${code.owner}/${code.app}/git/${encodeURIComponent(code.name)}`} detail={swarm} live={swarm.status !== 'done'} />
+          <Browser base={local(swarm.id)} detail={swarm} live={swarm.status !== 'done'} />
         </>
       )}
     </section>

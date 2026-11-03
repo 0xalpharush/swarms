@@ -18,11 +18,75 @@ void preloadHighlighter({ langs: ['markdown'], themes: ['pierre-light'] }).catch
 
 export const unified = { diffStyle: 'unified', theme: 'pierre-light' } as const
 
-export async function read<value>(url: string): Promise<value> {
+const kept = new Map<string, Promise<unknown>>()
+
+const settled = new Map<string, unknown>()
+
+const fixed = /[?&]ref=[0-9a-f]{40}(&|$)/
+
+async function fetched<value>(url: string): Promise<value> {
   const response = await fetch(url)
   const data = (await response.json().catch(() => undefined)) as (value & { detail?: string }) | undefined
   if (!response.ok || !data) throw new Error(data?.detail ?? `The gateway answered ${response.status}.`)
   return data
+}
+
+export function read<value>(url: string): Promise<value> {
+  if (!fixed.test(url) || /\/log\?/.test(url)) return fetched<value>(url)
+  const known = kept.get(url)
+  if (known) return known as Promise<value>
+  const pending = fetched<value>(url)
+  pending.then((value) => settled.set(url, value), () => kept.delete(url))
+  if (kept.size > 500) {
+    kept.clear()
+    settled.clear()
+  }
+  kept.set(url, pending)
+  return pending
+}
+
+export function keep(url: string, value: unknown) {
+  if (kept.has(url)) return
+  kept.set(url, Promise.resolve(value))
+  settled.set(url, value)
+}
+
+export function peek<value>(url: string) {
+  return settled.get(url) as value | undefined
+}
+
+export function warm(urls: readonly string[], width = 4) {
+  const queue = urls.filter((url) => !kept.has(url))
+  const next = (): Promise<void> => {
+    const url = queue.shift()
+    return url ? read(url).then(next, next) : Promise.resolve()
+  }
+  for (let index = 0; index < width; index++) void next()
+}
+
+export function source(base: string, path: string, sha: string) {
+  return `${base}/read?path=${encodeURIComponent(path)}&ref=${sha}`
+}
+
+export function seed(base: string, snapshot: Snapshot) {
+  const head = snapshot.commits[0]?.sha
+  if (!head) return
+  if (snapshot.readme) keep(source(base, snapshot.readme.path, head), { path: snapshot.readme.path, size: snapshot.readme.text.length, text: snapshot.readme.text })
+  if (snapshot.diff) keep(`${base}/diff?ref=${head}`, { files: snapshot.diff })
+}
+
+const binary = /\.(png|jpe?g|gif|webp|ico|pdf|zip|gz|tgz|bz2|xz|zst|tar|wasm|so|dylib|bin|exe|npz|npy|pkl|pt|parquet|sqlite|db|woff2?|ttf|mp[34]|mov)$/i
+
+export function prefetch(base: string, paths: readonly string[], sha: string) {
+  if (paths.length > 400) return
+  const go = () => warm(paths.filter((path) => !binary.test(path)).slice(0, 40).map((path) => source(base, path, sha)))
+  const idle = (globalThis as { requestIdleCallback?: (run: () => void) => void }).requestIdleCallback
+  if (idle) idle(go)
+  else setTimeout(go, 200)
+}
+
+export function local(swarm: string) {
+  return `/api/swarms/${encodeURIComponent(swarm)}/git`
 }
 
 function Tree(props: { onSelect: (path: string) => void; paths: readonly string[] }) {
@@ -46,14 +110,20 @@ function Tree(props: { onSelect: (path: string) => void; paths: readonly string[
 }
 
 export function Viewer(props: { base: string; path: string; preset?: string | undefined; sha: string }) {
-  const [state, setState] = useState<{ error?: string; source?: { size: number; text?: string } }>(() => (props.preset === undefined ? {} : { source: { size: props.preset.length, text: props.preset } }))
+  const [state, setState] = useState<{ error?: string; source?: { size: number; text?: string } }>(() => {
+    if (props.preset !== undefined) return { source: { size: props.preset.length, text: props.preset } }
+    const known = peek<{ size: number; text?: string }>(source(props.base, props.path, props.sha))
+    return known ? { source: known } : {}
+  })
   const narrow = useMedia('(max-width: 799px)')
 
   useEffect(() => {
     if (props.preset !== undefined) return setState({ source: { size: props.preset.length, text: props.preset } })
+    const known = peek<{ size: number; text?: string }>(source(props.base, props.path, props.sha))
+    if (known) return setState({ source: known })
     let alive = true
     setState({})
-    read<{ size: number; text?: string }>(`${props.base}/read?path=${encodeURIComponent(props.path)}&ref=${props.sha}`).then(
+    read<{ size: number; text?: string }>(source(props.base, props.path, props.sha)).then(
       (source) => alive && setState({ source }),
       (error: unknown) => alive && setState({ error: message(error) }),
     )
@@ -148,11 +218,13 @@ export function Clone(props: { repo: Repo }) {
 }
 
 export function Code(props: { gateway: string; repo: Repo; swarm: string; updates: readonly Pushed[] }) {
-  const base = `${props.gateway}/p/${props.repo.owner}/${props.repo.app}/git/${encodeURIComponent(props.repo.name)}`
+  const base = local(props.swarm)
   const version = String(props.updates.at(-1)?.at ?? 0)
   const [state, setState] = useState<{ commits?: Commit[]; error?: string; files?: string[]; readme?: { path: string; text: string } | null }>(() => {
     const known = Api.coded(props.swarm)
-    return known && known.name === props.repo.name ? { commits: known.commits, files: known.files, readme: known.readme } : {}
+    if (!known || known.name !== props.repo.name) return {}
+    seed(local(props.swarm), known)
+    return { commits: known.commits, files: known.files, readme: known.readme }
   })
   const [path, setPath] = useState<string>()
   const [open, setOpen] = useState<number>()
@@ -169,7 +241,11 @@ export function Code(props: { gateway: string; repo: Repo; swarm: string; update
       .catch(() => null)
       .then((snapshot): Pick<Snapshot, 'commits' | 'files' | 'readme'> | Promise<Pick<Snapshot, 'commits' | 'files' | 'readme'>> => (snapshot && snapshot.name === props.repo.name && (!latest || snapshot.commits.some((commit) => commit.sha === latest)) ? snapshot : direct()))
       .then(
-        (found) => alive && setState({ commits: found.commits, files: found.files, readme: found.readme }),
+        (found) => {
+          if (!alive) return
+          if ('name' in found) seed(base, found as Snapshot)
+          setState({ commits: found.commits, files: found.files, readme: found.readme })
+        },
         (error: unknown) => alive && setState({ error: message(error) }),
       )
     return () => {
@@ -180,6 +256,9 @@ export function Code(props: { gateway: string; repo: Repo; swarm: string; update
   const pushed = [...props.updates].filter((update) => update.commits.length).reverse()
   const commits = state.commits
   const head = commits?.[0]
+  useEffect(() => {
+    if (head && state.files) prefetch(base, state.files, head.sha)
+  }, [base, head?.sha, state.files])
   const shown = path ?? (state.files ? first(state.files) : undefined)
   const browser = `/s/${encodeURIComponent(props.swarm)}/code`
 

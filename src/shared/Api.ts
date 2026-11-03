@@ -97,6 +97,7 @@ export type Code = { app: string; clone: string; name: string; owner: string }
 export type Snapshot = {
   at: number
   commits: { author?: { email: string | null; name: string | null }; date: string | null; message: string; parents?: string[]; sha: string }[]
+  diff: { additions: number; deletions: number; oldPath: string | null; patch: string; path: string; state: string | null }[] | null
   files: string[]
   name: string
   readme: { path: string; text: string } | null
