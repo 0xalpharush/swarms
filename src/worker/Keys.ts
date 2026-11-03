@@ -34,6 +34,8 @@ const session = ['0xedc53b00', '0xdc48471e', '0x675402e5', '0x41e2c664'].map((se
 
 export const smallest = 5_000n
 
+export const fees = { allowance: 100_000n, least: 20_000n } as const
+
 export async function request(
   env: Cloudflare.Env,
   input: { amount: bigint; days: number; period: number; recipient: Address; token: Currency },
@@ -46,7 +48,10 @@ export async function request(
     chainId: toHex(Chain.chain.id),
     expiry: Math.floor(Date.now() / 1000) + input.days * 86_400,
     keyType: 'secp256k1',
-    limits: [{ limit: toHex(input.amount), ...(input.period ? { period: input.period } : {}), token }],
+    limits: [
+      { limit: toHex(input.amount), ...(input.period ? { period: input.period } : {}), token },
+      ...(input.token === 'mach' ? Chain.ids.map((id) => ({ limit: toHex(fees.allowance), token: Chain.tokens[id].address })) : []),
+    ],
     publicKey: access.publicKey,
     scopes: input.token === 'mach' ? session : [{ address: token, recipients: [input.recipient], selector: transferWithMemo }],
   }
@@ -99,13 +104,19 @@ async function verify(env: Cloudflare.Env, value: unknown, expected: Request) {
       const signer = SignatureEnvelope.extractAddress({ payload, signature: signed.signature })
       const limits = signed.limits ?? []
       const limit = expected.limits[0]
+      const extra = limits.slice(1).every((each) => {
+        const allowed = expected.limits.slice(1).find((candidate) => candidate.token.toLowerCase() === each.token.toLowerCase())
+        return !!allowed && BigInt(each.limit) <= BigInt(allowed.limit) && !each.period
+      })
       const matches =
         signed.type === 'secp256k1' &&
         !signed.isAdmin &&
         signed.address.toLowerCase() === expected.address.toLowerCase() &&
         Number(signed.chainId) === Number(expected.chainId) &&
         Number(signed.expiry) === expected.expiry &&
-        limits.length === 1 &&
+        limits.length >= 1 &&
+        limits.length <= expected.limits.length &&
+        extra &&
         limit !== undefined &&
         limits[0]?.token.toLowerCase() === limit.token.toLowerCase() &&
         BigInt(limits[0].limit) > 0n &&
@@ -162,6 +173,24 @@ export async function state(env: Cloudflare.Env, allowance: Store.Allowance): Pr
     published: true,
     revoked: metadata.isRevoked,
   }
+}
+
+export async function feeToken(env: Cloudflare.Env, allowance: Store.Allowance) {
+  const client = Chain.client(env)
+  const account = allowance.contributor as Address
+  const usable = await Promise.all(
+    Chain.ids.map(async (id) => {
+      const token = Chain.tokens[id].address
+      const [held, limit] = await Promise.all([
+        readContract(client, { abi: erc20Abi, address: token, args: [account], functionName: 'balanceOf' }).catch(() => 0n),
+        Actions.accessKey.getRemainingLimit(client, { accessKey: allowance.access_key, account, token }).catch(() => undefined),
+      ])
+      const room = limit?.remaining ?? 0n
+      return { token, usable: held < room ? held : room }
+    }),
+  )
+  const best = usable.reduce((most, each) => (each.usable > most.usable ? each : most))
+  return best.usable >= fees.least ? best.token : undefined
 }
 
 export function balance(env: Cloudflare.Env, account: Address, token: Currency) {

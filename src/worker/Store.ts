@@ -104,7 +104,7 @@ export const stock = reserve + headroom * 3n
 
 export const repoCost = 1_000_000n
 
-export const perCall = 40_000n
+export const perCall = 20_000n
 
 export const repoAt = repoCost + perCall
 

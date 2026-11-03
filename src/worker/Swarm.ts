@@ -86,7 +86,7 @@ export type Pay = {
   secret: string
 }
 
-export type Paid = { authorization: string; topUp?: string } | { code: string; detail: string; retry?: number; status: 401 | 402 | 429 }
+export type Paid = { authorization: string; topUp?: string } | { feeToken: Address } | { code: string; detail: string; retry?: number; status: 401 | 402 | 429 }
 
 type Source = { currency: Address; id: string; label: string; row: Store.Allowance | null }
 
@@ -257,7 +257,7 @@ export class Swarm extends DurableObject<Cloudflare.Env> {
       const init = { body: JSON.stringify({ key: 'probe' }), headers: { 'content-type': 'application/json', 'gateway-app': Gateway.app(row.id) }, method: 'POST' }
       const challenge = await fetch(this.env.GATEWAY_URL + '/v1/kv/get', init)
       const paid = await this.attempt(row, source, { challenge: challenge.headers.get('www-authenticate') ?? '', secret: '' }, [])
-      if (!('authorization' in paid)) return this.log('error', `Could not open ${source.label}'s channel yet.`, paid.failed)
+      if (!('authorization' in paid)) return this.log('error', `Could not open ${source.label}'s channel yet.`, 'failed' in paid ? paid.failed : 'The gateway cannot sponsor its network fee now.')
       await fetch(this.env.GATEWAY_URL + '/v1/kv/get', { ...init, headers: { ...init.headers, authorization: paid.authorization } })
       this.log('funds', `Opened ${source.label}'s channel with ${trim(Memo.decimal(BigInt(this.kv.get<Payer.Channel>(`channel:${id}`)?.deposit ?? String(amount))))} MACH, held in the escrow until the swarm spends it.`)
     } catch (error) {
@@ -866,7 +866,7 @@ export class Swarm extends DurableObject<Cloudflare.Env> {
       const result = await this.attempt(row, source, input, snapshots).catch(
         (error: unknown): Failed => ({ failed: String(error).split('\n')[0]?.slice(0, 300) ?? 'The payment failed.', room: undefined }),
       )
-      if ('authorization' in result) return result
+      if ('authorization' in result || 'feeToken' in result) return result
       if ((this.kv.get<number>('owing:' + source.id) ?? 0) <= Date.now()) {
         this.kv.put('owing:' + source.id, Date.now() + restMs)
         this.log('funds', `The swarm's wallet cannot pay the owner of hand ${input.hand ?? 'a lent machine'} over its own channel right now, so the gateway bills that hand's use and pays its owner.`, result.failed)
@@ -889,6 +889,7 @@ export class Swarm extends DurableObject<Cloudflare.Env> {
       const result = await this.attempt(row, source, input, snapshots).catch(
         (error: unknown): Failed => ({ failed: String(error).split('\n')[0]?.slice(0, 300) ?? 'The payment failed.', room: { amount: 0n, resets: Date.now() + retryMs } }),
       )
+      if ('feeToken' in result) return result
       if ('authorization' in result) {
         if (current !== source.id) {
           this.kv.put('payer', source.id)
@@ -926,7 +927,7 @@ export class Swarm extends DurableObject<Cloudflare.Env> {
     }
   }
 
-  async attempt(row: Store.Row, source: Source, input: Pay, snapshots: Payer.Snapshot[]): Promise<{ authorization: string; topUp?: string } | Failed> {
+  async attempt(row: Store.Row, source: Source, input: Pay, snapshots: Payer.Snapshot[]): Promise<{ authorization: string; topUp?: string } | { feeToken: Address } | Failed> {
     const payee = owner(source)
     const offered = Payer.offer(input.challenge, source.currency, payee)
     if (!offered)
@@ -938,11 +939,20 @@ export class Swarm extends DurableObject<Cloudflare.Env> {
     const price = offered.amount
     const step = payee ? handChunk : chunk
 
+    const unsponsored = async (): Promise<{ feeToken: Address } | Failed | undefined> => {
+      if (offered.fee.feePayer || source.row?.token !== 'mach') return undefined
+      const token = await Keys.feeToken(this.env, source.row)
+      if (!token) return { failed: `The gateway cannot sponsor the network fee now, and ${source.label}'s key holds no stablecoin allowance for fees, or its wallet too little of it.`, room: undefined }
+      return offered.fee.feeToken?.toLowerCase() === token.toLowerCase() ? undefined : { feeToken: token }
+    }
+
     if (!channel) {
       const room = await this.room(row, source)
       const deposit = source.row ? room.amount : Payer.min(Payer.max(step, price), room.amount)
       if (deposit < price)
         return { failed: `It can put in ${Memo.decimal(room.amount)} now, less than the ${Memo.decimal(price)} this request holds.`, price, room, small: room.amount >= perCall }
+      const fee = await unsponsored()
+      if (fee) return fee
       const authorization = await mppx.createCredential(offered.response, { depositRaw: String(deposit) })
       const entry = Payer.opened(this.kv, source.id)
       if (!entry) throw new Error('mppx stored no channel for the open')
@@ -983,6 +993,8 @@ export class Swarm extends DurableObject<Cloudflare.Env> {
           small: room.amount + Payer.max(unspent, 0n) >= perCall,
         }
       }
+      const fee = await unsponsored()
+      if (fee) return fee
       topUp = await mppx.createCredential(offered.response, { action: 'topUp', additionalDepositRaw: String(additional), channelId: channel.id, descriptor: channel.descriptor })
     }
     const authorization = await mppx.createCredential(offered.response, { action: 'voucher', channelId: channel.id, cumulativeAmountRaw: String(need), descriptor: channel.descriptor })

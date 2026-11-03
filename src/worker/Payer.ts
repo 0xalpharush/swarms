@@ -78,6 +78,7 @@ export function offer(challenge: string | readonly string[], currency: Address, 
   if (!found) return undefined
   return {
     amount: BigInt((found.request as { amount: string }).amount),
+    fee: (found.request as { methodDetails?: { feePayer?: boolean; feeToken?: string } }).methodDetails ?? {},
     response: new Response(null, { headers: { 'www-authenticate': Challenge.serialize(found) }, status: 402 }),
   }
 }
