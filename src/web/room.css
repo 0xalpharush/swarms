@@ -655,7 +655,7 @@ button.said-backed:not(:disabled):hover { background:#2f5f37; }
 .code-sub-head code { color:var(--black); }
 @media (max-width:799px) {
   .repo-card .code-browse { grid-template-columns:1fr; }
-  .repo-card .code-tree { height:200px; border-right:0; border-bottom:1px solid #e3e9dd; }
+  .repo-card .code-tree { height:min(200px,calc(var(--code-tree-rows,6) * 30px + 16px)); border-right:0; border-bottom:1px solid #e3e9dd; }
   .repo-card .code-file { height:auto; max-height:60vh; }
   .repo-card-meta { display:none; }
 }
@@ -711,7 +711,7 @@ button.energy:focus-visible { outline:2px solid #3f7d4e; outline-offset:2px; }
 
 @media (max-width:799px) {
   .repo-card .code-file { max-height:none; overflow:visible; }
-  .repo-card .code-tree { height:min(200px,28vh); }
+  .repo-card .code-tree { height:min(200px,28vh,calc(var(--code-tree-rows,6) * 30px + 16px)); }
   .swarm-head { gap:6px; padding:4px 12px 8px; }
   .phone-views button { height:38px; }
   .transcript-bar { padding-top:4px; padding-bottom:4px; }

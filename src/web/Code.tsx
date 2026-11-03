@@ -1,7 +1,7 @@
 import { preloadHighlighter } from '@pierre/diffs'
 import { File, PatchDiff } from '@pierre/diffs/react'
 import { FileTree, useFileTree } from '@pierre/trees/react'
-import { useEffect, useMemo, useState } from 'react'
+import { type CSSProperties, useEffect, useMemo, useState } from 'react'
 import type { Code as Repo, Pushed, Snapshot } from '../shared/Api.ts'
 import * as Api from './api.ts'
 import { ago, usd } from './format.ts'
@@ -42,7 +42,7 @@ function Tree(props: { onSelect: (path: string) => void; paths: readonly string[
     model.resetPaths(props.paths)
   }, [model, props.paths])
 
-  return <FileTree className="code-tree" model={model} />
+  return <FileTree className="code-tree" model={model} style={{ '--code-tree-rows': Math.min(props.paths.length, 12) } as CSSProperties} />
 }
 
 export function Viewer(props: { base: string; path: string; preset?: string | undefined; sha: string }) {
