@@ -27,9 +27,9 @@ export async function proxy(env: Cloudflare.Env, context: Pick<ExecutionContext,
   const hit = await cache.match(key).catch(() => undefined)
   if (hit) return hit
 
-  const [row, owner] = await Promise.all([Store.find(env, swarm), Gateway.wallet(env)])
-  if (!row?.repo || !owner) return Response.json({ code: 'not_found', detail: 'This swarm has no repository yet.', status: 404 }, { status: 404 })
-  const upstream = await fetch(`${env.GATEWAY_URL}/p/${owner}/${Gateway.app(swarm)}/git/${encodeURIComponent(row.repo)}/${read}?${query}${forever ? '' : `&at=${Math.floor(Date.now() / 5000)}`}`, { headers: { accept: 'application/json' } })
+  const [repo, owner] = await Promise.all([Store.repo(env, swarm), Gateway.wallet(env)])
+  if (!repo || !owner) return Response.json({ code: 'not_found', detail: 'This swarm has no repository yet.', status: 404 }, { status: 404 })
+  const upstream = await fetch(`${env.GATEWAY_URL}/p/${owner}/${Gateway.app(swarm)}/git/${encodeURIComponent(repo)}/${read}?${query}${forever ? '' : `&at=${Math.floor(Date.now() / 5000)}`}`, { headers: { accept: 'application/json' } })
   const body = await upstream.arrayBuffer()
   const response = new Response(body, {
     headers: {

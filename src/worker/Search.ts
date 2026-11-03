@@ -93,6 +93,11 @@ export async function sync(env: Cloudflare.Env, swarm: string, turns: readonly T
   if (missing.length) await env.DB.batch(missing.flatMap((turn) => statements(env, swarm, turn)))
 }
 
+export function lags(turns: readonly { endedAt: number | null; n: number }[], reports: readonly { ended_at: number; round: number }[]) {
+  const known = new Map(reports.map((row) => [row.round, row.ended_at]))
+  return turns.some((turn) => turn.endedAt !== null && known.get(turn.n) !== turn.endedAt)
+}
+
 export async function lagging(env: Cloudflare.Env) {
   const { results } = await env.DB.prepare(
     "select id from swarms s where rounds > (select count(*) from reports r where r.swarm = s.id) + (status = 'running') order by updated_at desc limit 5",

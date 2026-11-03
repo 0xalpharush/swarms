@@ -59,7 +59,7 @@ export type View = {
   reason: string | null
   why: Why | null
   steered: string[]
-  turns: Search.Turn[]
+  ended: { endedAt: number; n: number }[]
   updates: Update[]
   working: Working | null
 }
@@ -305,14 +305,17 @@ export class Swarm extends DurableObject<Cloudflare.Env> {
     await this.ctx.storage.setAlarm(now)
   }
 
-  view(): View {
+  view(shape: { feed?: number; texts?: boolean } = {}): View {
     this.ctx.waitUntil(this.heal())
     const sql = this.ctx.storage.sql
-    const feed = sql
-      .exec<Record<string, SqlStorageValue>>('SELECT seq, at, kind, text, detail, who, event FROM feed ORDER BY seq DESC LIMIT 200')
-      .toArray()
-      .reverse()
-      .map(entry)
+    const limit = shape.feed ?? 200
+    const feed = limit > 0
+      ? sql
+          .exec<Record<string, SqlStorageValue>>('SELECT seq, at, kind, text, detail, who, event FROM feed ORDER BY seq DESC LIMIT ?', limit)
+          .toArray()
+          .reverse()
+          .map(entry)
+      : []
     const id = this.kv.get<string>('id')
     const repo = this.kv.get<string>('repo')
     const owner = this.kv.get<string>('owner')
@@ -325,8 +328,8 @@ export class Swarm extends DurableObject<Cloudflare.Env> {
       reason: this.kv.get<string>('paused') ?? null,
       why: this.kv.get<string>('paused') ? (this.kv.get<Why>('why') ?? 'money') : null,
       steered: this.steered(),
-      turns,
-      updates: updates(turns),
+      ended: turns.flatMap((turn) => (turn.endedAt === null ? [] : [{ endedAt: turn.endedAt, n: turn.n }])),
+      updates: shape.texts === false ? updates(turns).map((update) => ({ ...update, text: '' })) : updates(turns),
       working: this.working(),
     }
   }

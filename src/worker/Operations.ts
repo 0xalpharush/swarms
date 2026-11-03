@@ -1,3 +1,4 @@
+import { waitUntil } from 'cloudflare:workers'
 import { encodeFunctionData, isAddress, parseEventLogs } from 'viem'
 import type { Address, Hex } from 'viem'
 import { getTransactionReceipt } from 'viem/actions'
@@ -46,6 +47,7 @@ import * as Mention from '../shared/Mention.ts'
 import * as Artifacts from './Artifacts.ts'
 import * as Chain from './Chain.ts'
 import * as Devices from './Devices.ts'
+import * as Edge from './Edge.ts'
 import * as Hands from './Hands.ts'
 import * as Keys from './Keys.ts'
 import * as Problem from './Problem.ts'
@@ -298,18 +300,35 @@ async function provisioned(env: Cloudflare.Env, row: Store.Row) {
   return { ...updated, wallet: updated.wallet }
 }
 
-async function load(env: Cloudflare.Env, id: string) {
+type Shape = { feed?: number; texts?: boolean }
+
+async function load(env: Cloudflare.Env, id: string, shape: Shape = {}) {
+  const viewing = Store.seen(id) ? Promise.resolve(stub(env, id).view(shape)) : undefined
   const found = await Store.find(env, id)
   if (!found) return undefined
   const row = await provisioned(env, found)
-
-  const view = await stub(env, id).view()
-  const latest = view.updates.at(-1)
-  if (!row.answer && latest) {
-    row.answer = JSON.stringify({ at: latest.at, done: latest.done, text: latest.text })
-    await Store.update(env, id, { answer: row.answer })
-  }
+  const view = await (viewing ?? stub(env, id).view(shape))
+  await backfill(env, row, view.updates.at(-1), shape)
   return { row, view }
+}
+
+async function ledgered(env: Cloudflare.Env, id: string, shape: Shape) {
+  const viewing = Store.seen(id) ? Promise.resolve(stub(env, id).view(shape)) : undefined
+  const ledger = await Store.ledger(env, id)
+  if (!ledger) return undefined
+  const row = await provisioned(env, ledger.row)
+  const view = await (viewing ?? stub(env, id).view(shape))
+  await backfill(env, row, view.updates.at(-1), shape)
+  if (Search.lags(view.ended, ledger.reports))
+    waitUntil(logged(Promise.resolve(stub(env, id).turns()).then((turns) => Search.sync(env, id, turns))))
+  return { ledger, row, view }
+}
+
+async function backfill(env: Cloudflare.Env, row: Store.Row, latest: Update | undefined, shape: Shape) {
+  if (row.answer || !latest) return
+  const last = shape.texts === false ? (await stub(env, row.id).pulse()).updates.at(-1) ?? latest : latest
+  row.answer = JSON.stringify({ at: last.at, done: last.done, text: last.text })
+  await Store.update(env, row.id, { answer: row.answer })
 }
 
 export function config(env: Cloudflare.Env): Config {
@@ -342,8 +361,8 @@ export async function list(env: Cloudflare.Env, input: Input<'list'>): Promise<P
   const parsed = parse(schema.list, input)
   if (!parsed.ok) return parsed
 
-  const rows = await Store.list(env, parsed.value.status)
-  return Problem.ok({ swarms: rows.map((row) => Store.summary(row)) })
+  const status = parsed.value.status
+  return Problem.ok({ swarms: await Edge.cached(env, `swarms?status=${status ?? ''}`, listSeconds, async () => (await Store.list(env, status)).map((row) => Store.summary(row))) })
 }
 
 export async function create(env: Cloudflare.Env, input: Input<'create'>): Promise<Problem.Result<Summary>> {
@@ -358,30 +377,24 @@ export async function create(env: Cloudflare.Env, input: Input<'create'>): Promi
 
 const firstFeed = 80
 
+const listSeconds = 3
+
 export async function detail(env: Cloudflare.Env, input: Input<'swarm'>, feed = true): Promise<Problem.Result<Detail>> {
   const parsed = parse(schema.swarm, input)
   if (!parsed.ok) return parsed
-  const loaded = await load(env, parsed.value.swarm)
+  const loaded = await ledgered(env, parsed.value.swarm, { feed: feed ? firstFeed : 0, texts: false })
   if (!loaded) return missing()
 
-  const row = loaded.row
-  const view = loaded.view
-  const [pledges, notes, budgets, contributions] = await Promise.all([
-    Store.pledges(env, row.id),
-    Store.notes(env, row.id, BigInt(row.raised), new Set(view.steered)),
-    Store.budgets(env, row.id),
-    Store.contributions(env, row.id),
-    logged(Search.sync(env, row.id, view.turns)),
-  ])
+  const { ledger, row, view } = loaded
   return Problem.ok({
     ...Store.summary(row),
-    budgets,
+    budgets: ledger.budgets,
     code: view.code,
-    contributions,
-    feed: feed ? view.feed.slice(-firstFeed) : [],
+    contributions: ledger.contributions,
+    feed: view.feed,
     hands: view.hands,
-    notes,
-    pledges,
+    notes: ledger.notes(new Set(view.steered)),
+    pledges: ledger.pledges,
     reason: view.reason,
     why: view.why,
     updates: view.updates.map(({ text: _text, ...update }) => update),
@@ -392,26 +405,18 @@ export async function detail(env: Cloudflare.Env, input: Input<'swarm'>, feed = 
 export async function get(env: Cloudflare.Env, input: Input<'swarm'>): Promise<Problem.Result<Overview>> {
   const parsed = parse(schema.swarm, input)
   if (!parsed.ok) return parsed
-  const loaded = await load(env, parsed.value.swarm)
+  const loaded = await ledgered(env, parsed.value.swarm, { feed: 0 })
   if (!loaded) return missing()
 
-  const row = loaded.row
-  const view = loaded.view
-  const [pledges, notes, budgets, contributions] = await Promise.all([
-    Store.pledges(env, row.id),
-    Store.notes(env, row.id, BigInt(row.raised), new Set(view.steered)),
-    Store.budgets(env, row.id),
-    Store.contributions(env, row.id),
-    logged(Search.sync(env, row.id, view.turns)),
-  ])
+  const { ledger, row, view } = loaded
   return Problem.ok({
     ...Store.summary(row),
-    budgets,
+    budgets: ledger.budgets,
     code: view.code,
-    contributions,
+    contributions: ledger.contributions,
     hands: view.hands,
-    notes,
-    pledges,
+    notes: ledger.notes(new Set(view.steered)),
+    pledges: ledger.pledges,
     reason: view.reason,
     why: view.why,
     updates: view.updates.map(({ text, ...update }) => ({ ...update, excerpt: Answer.excerpt(text) })),
@@ -422,7 +427,7 @@ export async function get(env: Cloudflare.Env, input: Input<'swarm'>): Promise<P
 export async function answer(env: Cloudflare.Env, input: Input<'swarm'>): Promise<Problem.Result<Answered>> {
   const parsed = parse(schema.swarm, input)
   if (!parsed.ok) return parsed
-  const loaded = await load(env, parsed.value.swarm)
+  const loaded = await load(env, parsed.value.swarm, { feed: 0, texts: false })
   if (!loaded) return missing()
 
   const summary = Store.summary(loaded.row)
@@ -1110,7 +1115,8 @@ function excerpt(entry: Entry, terms: readonly string[], size = 240) {
 }
 
 export async function problems(env: Cloudflare.Env): Promise<Problem.Result<{ problems: (Brief.Problem & { open: boolean; swarm: string | null })[] }>> {
-  const rows = await Store.list(env)
+  const listed = await list(env, {})
+  const rows = listed.ok ? listed.value.swarms : []
   const taken = new Map(rows.filter((row) => row.status !== 'done' && row.problem).map((row) => [row.problem as string, row.id]))
   return Problem.ok({ problems: Brief.problems.map((item) => ({ ...item, open: !taken.has(item.id), swarm: taken.get(item.id) ?? null })) })
 }
@@ -1118,7 +1124,7 @@ export async function problems(env: Cloudflare.Env): Promise<Problem.Result<{ pr
 export async function machines(env: Cloudflare.Env, input: Input<'swarm'>): Promise<Problem.Result<{ machines: Fleet.Machine[] }>> {
   const parsed = parse(schema.swarm, input)
   if (!parsed.ok) return parsed
-  const loaded = await load(env, parsed.value.swarm)
+  const loaded = await load(env, parsed.value.swarm, { feed: 0, texts: false })
   if (!loaded) return missing()
   const [entries, lent] = await Promise.all([stub(env, parsed.value.swarm).feed(0, { limit: 2000 }), hands(env, input)])
   return Problem.ok({ machines: Fleet.fleet(entries, loaded.view.hands, lent.ok ? lent.value.hands : []) })
@@ -1127,9 +1133,9 @@ export async function machines(env: Cloudflare.Env, input: Input<'swarm'>): Prom
 export async function backers(env: Cloudflare.Env, input: Input<'swarm'>): Promise<Problem.Result<{ backers: Member[]; ideas: Note[] }>> {
   const parsed = parse(schema.swarm, input)
   if (!parsed.ok) return parsed
-  const row = await Store.find(env, parsed.value.swarm)
-  if (!row) return missing()
-  const view = await stub(env, row.id).view()
+  const loaded = await load(env, parsed.value.swarm, { feed: 0, texts: false })
+  if (!loaded) return missing()
+  const { row, view } = loaded
   const [members, ideas] = await Promise.all([Store.members(env, row.id), Store.notes(env, row.id, BigInt(row.raised), new Set(view.steered))])
   return Problem.ok({ backers: [...members].sort((a, b) => Number(BigInt(Math.round(Number(b.backed) * 1e6)) - BigInt(Math.round(Number(a.backed) * 1e6)))), ideas })
 }

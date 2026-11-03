@@ -6,7 +6,6 @@ import * as Page from './Page.ts'
 import * as Problem from './Problem.ts'
 import * as Rest from './Rest.ts'
 import * as Sessions from './Sessions.ts'
-import * as Store from './Store.ts'
 import * as XFrames from './XFrames.ts'
 
 export { Swarm } from './Swarm.ts'
@@ -36,7 +35,10 @@ app.get('*', async (c, next) => {
   return Page.page(c.req.raw, c.env)
 })
 
-app.get('/x', async (c) => XFrames.start(new URL(c.req.url).origin, (await Store.list(c.env).catch(() => [])).map((row) => Store.summary(row)), new URL(c.req.url)))
+app.get('/x', async (c) => {
+  const listed = await Operations.list(c.env, {}).catch(() => undefined)
+  return XFrames.start(new URL(c.req.url).origin, listed?.ok ? listed.value.swarms : [], new URL(c.req.url))
+})
 
 app.get('/x/card.svg', (c) => XFrames.card(c.req.query('title') ?? 'Fund a research swarm'))
 

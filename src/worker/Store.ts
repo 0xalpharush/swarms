@@ -164,14 +164,36 @@ export async function list(env: Cloudflare.Env, status?: Summary['status']) {
   return results
 }
 
+const known = new Set<string>()
+
+export function seen(id: string) {
+  return known.has(id)
+}
+
 export async function exists(env: Cloudflare.Env, id: string) {
-  return (await env.DB.prepare('select 1 from swarms where id = ?').bind(id).first()) !== null
+  if (known.has(id)) return true
+  const found = (await env.DB.prepare('select 1 from swarms where id = ?').bind(id).first()) !== null
+  if (found) known.add(id)
+  return found
 }
 
 export async function find(env: Cloudflare.Env, id: string) {
-  return env.DB.prepare(totals + ' where s.id = ?')
+  const row = await env.DB.prepare(totals + ' where s.id = ?')
     .bind(id)
     .first<Row>()
+  if (row) known.add(row.id)
+  return row
+}
+
+const repos = new Map<string, { at: number; repo: string }>()
+
+export async function repo(env: Cloudflare.Env, id: string) {
+  const cached = repos.get(id)
+  if (cached && Date.now() - cached.at < 60_000) return cached.repo
+  const row = await env.DB.prepare('select repo from swarms where id = ?').bind(id).first<{ repo: string | null }>()
+  if (row) known.add(id)
+  if (row?.repo) repos.set(id, { at: Date.now(), repo: row.repo })
+  return row?.repo ?? null
 }
 
 export async function insert(
@@ -216,18 +238,23 @@ export async function active(env: Cloudflare.Env, swarm: string) {
   return results
 }
 
+function legacyPledges(env: Cloudflare.Env, swarm: string) {
+  return env.DB.prepare("select * from pledges where swarm = ? and status != 'pending' order by created_at desc limit 200").bind(swarm)
+}
+
+function heldPledges(env: Cloudflare.Env, swarm: string) {
+  return env.DB.prepare("select * from budgets where swarm = ? and period = 0 and status != 'pending' order by created_at desc limit 200").bind(swarm)
+}
+
 export async function pledges(env: Cloudflare.Env, swarm: string): Promise<Pledge[]> {
-  const [legacy, held] = await Promise.all([
-    env.DB.prepare("select * from pledges where swarm = ? and status != 'pending' order by created_at desc limit 200")
-      .bind(swarm)
-      .all<Backing>(),
-    env.DB.prepare("select * from budgets where swarm = ? and period = 0 and status != 'pending' order by created_at desc limit 200")
-      .bind(swarm)
-      .all<Allowance>(),
-  ])
+  const [legacy, held] = await Promise.all([legacyPledges(env, swarm).all<Backing>(), heldPledges(env, swarm).all<Allowance>()])
+  return pledged(legacy.results, held.results)
+}
+
+function pledged(legacy: Backing[], held: Allowance[]): Pledge[] {
   return [
-    ...held.results.map((row) => pledge(row)),
-    ...legacy.results.map((row) => ({
+    ...held.map((row) => pledge(row)),
+    ...legacy.map((row) => ({
       amount: Memo.decimal(BigInt(row.amount)),
       at: row.created_at,
       contributor: row.contributor,
@@ -299,12 +326,12 @@ export function contribution(row: Gift): Contribution {
   }
 }
 
+function gifts(env: Cloudflare.Env, swarm: string) {
+  return env.DB.prepare('select * from contributions where swarm = ? order by created_at desc limit 200').bind(swarm)
+}
+
 export async function contributions(env: Cloudflare.Env, swarm: string): Promise<Contribution[]> {
-  const { results } = await env.DB.prepare(
-    'select * from contributions where swarm = ? order by created_at desc limit 200',
-  )
-    .bind(swarm)
-    .all<Gift>()
+  const { results } = await gifts(env, swarm).all<Gift>()
   return results.map(contribution)
 }
 
@@ -438,15 +465,17 @@ export function view(row: Allowance, now = Date.now()): Budget {
   }
 }
 
+function periodic(env: Cloudflare.Env, swarm: string) {
+  return env.DB.prepare("select * from budgets where swarm = ? and period > 0 and status != 'pending' order by created_at desc limit 200").bind(swarm)
+}
+
 export async function budgets(env: Cloudflare.Env, swarm: string): Promise<Budget[]> {
-  const { results } = await env.DB.prepare(
-    "select * from budgets where swarm = ? and period > 0 and status != 'pending' order by created_at desc limit 200",
-  )
-    .bind(swarm)
-    .all<Allowance>()
+  const { results } = await periodic(env, swarm).all<Allowance>()
   const now = Date.now()
   return results.map((row) => view(row, now))
 }
+
+type Weighed = { backers: number; id: string; note: string; weight: number }
 
 export async function notes(
   env: Cloudflare.Env,
@@ -454,7 +483,23 @@ export async function notes(
   raised: bigint,
   steered: ReadonlySet<string>,
 ): Promise<Note[]> {
-  const { results } = await env.DB.prepare(
+  const { results } = await weighing(env, swarm).all<Weighed>()
+  return weighed(results, raised, steered)
+}
+
+function weighed(results: Weighed[], raised: bigint, steered: ReadonlySet<string>): Note[] {
+  return results.map((row) => ({
+    backers: row.backers,
+    id: row.id,
+    note: row.note,
+    share: raised > 0n ? Number((BigInt(row.weight) * 10_000n) / raised) / 10_000 : 0,
+    steered: steered.has(row.id),
+    weight: Memo.decimal(BigInt(row.weight)),
+  }))
+}
+
+function weighing(env: Cloudflare.Env, swarm: string) {
+  return env.DB.prepare(
     `select note_id as id, min(note) as note, sum(weight) as weight, count(distinct contributor) as backers from (
       select note_id, note, cast(amount as integer) as weight, contributor from pledges where swarm = ?1 and status != 'pending' and note_id is not null
       union all
@@ -464,17 +509,40 @@ export async function notes(
       union all
       select note_id, note, cast(amount as integer) as weight, contributor from steers where swarm = ?1
     ) group by note_id order by weight desc limit 50`,
-  )
-    .bind(swarm)
-    .all<{ backers: number; id: string; note: string; weight: number }>()
-  return results.map((row) => ({
-    backers: row.backers,
-    id: row.id,
-    note: row.note,
-    share: raised > 0n ? Number((BigInt(row.weight) * 10_000n) / raised) / 10_000 : 0,
-    steered: steered.has(row.id),
-    weight: Memo.decimal(BigInt(row.weight)),
-  }))
+  ).bind(swarm)
+}
+
+export type Ledger = {
+  budgets: Budget[]
+  contributions: Contribution[]
+  notes: (steered: ReadonlySet<string>) => Note[]
+  pledges: Pledge[]
+  reports: { ended_at: number; round: number }[]
+  row: Row
+}
+
+export async function ledger(env: Cloudflare.Env, id: string): Promise<Ledger | undefined> {
+  const [found, legacy, held, weights, budgeted, given, reports] = await env.DB.batch<Record<string, unknown>>([
+    env.DB.prepare(totals + ' where s.id = ?').bind(id),
+    legacyPledges(env, id),
+    heldPledges(env, id),
+    weighing(env, id),
+    periodic(env, id),
+    gifts(env, id),
+    env.DB.prepare('select round, ended_at from reports where swarm = ?').bind(id),
+  ])
+  const row = found?.results[0] as Row | undefined
+  if (!row) return undefined
+  known.add(row.id)
+  const now = Date.now()
+  return {
+    budgets: (budgeted?.results as Allowance[]).map((allowance) => view(allowance, now)),
+    contributions: (given?.results as Gift[]).map(contribution),
+    notes: (steered) => weighed(weights?.results as Weighed[], BigInt(row.raised), steered),
+    pledges: pledged(legacy?.results as Backing[], held?.results as Allowance[]),
+    reports: reports?.results as { ended_at: number; round: number }[],
+    row,
+  }
 }
 
 const backing = `select contributor, amount, note_id, way, at from (
