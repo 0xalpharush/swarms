@@ -133,6 +133,10 @@ const quickMs = 60_000
 
 const vendorCap = 1_000_000n
 
+const stuckTurns = 3
+
+const idleSpend = 10_000n
+
 const unfundedMs = 15 * 60_000
 
 const restMs = 10 * 60_000
@@ -634,9 +638,20 @@ export class Swarm extends DurableObject<Cloudflare.Env> {
     const acted = this.ctx.storage.sql.exec<{ n: number }>("SELECT COUNT(*) AS n FROM feed WHERE at >= ? AND kind IN ('tool', 'machine')", started).one().n
     const stored = this.ctx.storage.sql.exec<{ n: number }>("SELECT COUNT(*) AS n FROM feed WHERE at >= ? AND kind = 'tool' AND ((text || coalesce(detail, '')) LIKE '%kv_set%' OR (text || coalesce(detail, '')) LIKE '%bucket_put%' OR (text || coalesce(detail, '')) LIKE '%git_create%')", started).one().n
     if (stored > 0 || !this.kv.get<number>('published')) await this.expose(row).catch((error: unknown) => console.error('Making the swarm data public failed', error))
-    if (status === 'completed' && acted === 0) {
+    const idle = status === 'completed' && !commits.length && Date.now() - started < quickMs && spent < idleSpend
+    const streak = idle ? (this.kv.get<number>('stuck') ?? 0) + 1 : 0
+    this.kv.put('stuck', streak)
+    if (status === 'completed' && (acted === 0 || streak >= stuckTurns)) {
       this.kv.put('resting', Date.now())
-      await this.pause(row, 'paused', `Resting: the agent found nothing worth spending on, so the swarm stopped asking it and spends nothing. ${dollars(money.left)} is kept for later; a note or new money wakes it.`, 'idle')
+      this.kv.put('stuck', 0)
+      await this.pause(
+        row,
+        'paused',
+        acted === 0
+          ? `Resting: the agent found nothing worth spending on, so the swarm stopped asking it and spends nothing. ${dollars(money.left)} is kept for later; a note or new money wakes it.`
+          : `Resting: the agent's last ${stuckTurns} updates came within a minute each and produced nothing, so the swarm stopped asking it. ${dollars(money.left)} is kept for later; a note or new money wakes it.`,
+        'idle',
+      )
       return null
     }
     const wanted = BigInt(this.kv.get<string>('wanted') ?? '0')
