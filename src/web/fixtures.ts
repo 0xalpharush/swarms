@@ -3,6 +3,7 @@ import type { Account, Artifact, Code, Budget, BudgetRequested, Budgeted, Chatte
 import { decimal, maxNote, units } from '../shared/Memo.ts'
 import * as Mention from '../shared/Mention.ts'
 import { problems } from '../shared/ResearchBrief.ts'
+import { pace, scene, visitor } from './stage.ts'
 
 type Line = readonly [Kind, string, (string | null)?, string?]
 
@@ -10,15 +11,9 @@ type Backing = { amount: string; contributor: `0x${string}`; note: string }
 
 type Live = Omit<Detail, 'answer' | 'reason' | 'updates' | 'why' | 'working'> & { updates: Update[]; chat: Said[]; cursor: number; flicker: readonly string[]; next: number; script: readonly Line[]; since: number | null; steered: Set<string>; steers: Backing[] }
 
-export const pace = typeof window !== 'undefined' && window.top !== window ? 0.2 : 1
-
-export const scene = new Set((typeof location === 'undefined' ? '' : (new URLSearchParams(location.search).get('scene') ?? '')).split(',').filter(Boolean))
-
 const minute = 60_000
 
 const started = Date.now()
-
-export const visitor = '0x7a3f5e1b2c4d6e8f9a0b1c2d3e4f5a6b7c8d9c2e'
 
 export const balances: Record<Currency, bigint> = scene.has('broke') ? { mach: 0n, ousd: 0n, pathusd: 0n, usdce: 0n } : { mach: 1_250_000n, ousd: 420_000n, pathusd: 3_000_000n, usdce: 8_750_000n }
 

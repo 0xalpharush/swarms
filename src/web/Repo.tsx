@@ -3,6 +3,7 @@ import { FileTree, useFileTree } from '@pierre/trees/react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { Config, Detail } from '../shared/Api.ts'
 import * as Api from './api.ts'
+import { here } from './boot.ts'
 import { type Change, Clone, type Commit, local, patch, prefetch, read, seed as keepSnapshot, peek, unified, Viewer, warm } from './Code.tsx'
 import { ago, usd } from './format.ts'
 import { message, useNow, usePoll } from './hooks.ts'
@@ -26,7 +27,7 @@ function title(commit: Commit) {
 }
 
 function query() {
-  const params = new URLSearchParams(location.search)
+  const params = here().searchParams
   return { path: params.get('path') ?? undefined, ref: params.get('ref') ?? undefined }
 }
 

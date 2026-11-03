@@ -1,8 +1,12 @@
 import type { Account, Artifact, BudgetRequested, Budgeted, Chatter, Config, Contributed, Currency, Detail, Entry, Issued, Lent, Live, Pledged, Posted, Problem, Requested, Room, Snapshot, Summary, Token } from '../shared/Api.ts'
 import { seeded } from './boot.ts'
-import * as Fixtures from './fixtures.ts'
+import { visitor } from './stage.ts'
 
 export const fixture = typeof location !== 'undefined' && new URLSearchParams(location.search).has('fixture')
+
+function staged<T>(run: (fixtures: typeof import('./fixtures.ts')) => T | Promise<T>): Promise<T> {
+  return import('./fixtures.ts').then(run)
+}
 
 export class Failure extends Error {
   readonly code: string
@@ -35,7 +39,7 @@ function path(id: string) {
 }
 
 export function config() {
-  loaded ??= fixture ? Fixtures.config() : request<Config>('/api/config')
+  loaded ??= fixture ? staged((fixtures) => fixtures.config()) : request<Config>('/api/config')
   loaded.catch(() => {
     loaded = undefined
   })
@@ -43,11 +47,11 @@ export function config() {
 }
 
 export function swarms() {
-  return fixture ? Fixtures.swarms() : request<{ swarms: Summary[] }>('/api/swarms')
+  return fixture ? staged((fixtures) => fixtures.swarms()) : request<{ swarms: Summary[] }>('/api/swarms')
 }
 
 export function swarm(id: string, feed = true) {
-  return fixture ? Fixtures.swarm(id) : request<Detail>(feed ? path(id) : `${path(id)}?feed=0`)
+  return fixture ? staged((fixtures) => fixtures.swarm(id)) : request<Detail>(feed ? path(id) : `${path(id)}?feed=0`)
 }
 
 const snapshots = new Map<string, { at: number; read: Promise<Snapshot | null>; value?: Snapshot | null }>()
@@ -72,11 +76,21 @@ export function feed(id: string, after: number, filter: { before?: number; who?:
   const query = new URLSearchParams({ after: String(after) })
   if (filter.before !== undefined) query.set('before', String(filter.before))
   if (filter.who !== undefined) query.set('who', filter.who)
-  return fixture ? Fixtures.feed(id, after, filter) : request<{ entries: Entry[]; next: number }>(`${path(id)}/feed?${query}`)
+  return fixture ? staged((fixtures) => fixtures.feed(id, after, filter)) : request<{ entries: Entry[]; next: number }>(`${path(id)}/feed?${query}`)
 }
 
 export function live(id: string, listener: (event: Live) => void) {
-  if (fixture) return Fixtures.live(id, listener)
+  if (fixture) {
+    let stop: (() => void) | undefined
+    let alive = true
+    void staged((fixtures) => {
+      if (alive) stop = fixtures.live(id, listener)
+    })
+    return () => {
+      alive = false
+      stop?.()
+    }
+  }
   let alive = true
   let source: EventSource | undefined
   let timer: ReturnType<typeof setTimeout> | undefined
@@ -105,27 +119,27 @@ export function live(id: string, listener: (event: Live) => void) {
 }
 
 export function create(input: { goal: string; problem?: string; title: string }) {
-  return fixture ? Fixtures.create(input) : request<Summary>('/api/swarms', input)
+  return fixture ? staged((fixtures) => fixtures.create(input)) : request<Summary>('/api/swarms', input)
 }
 
 export function pledge(id: string, input: { amount: string; note?: string; token: Currency }) {
-  return fixture ? Fixtures.pledge(id, input) : request<Requested>(`${path(id)}/pledges`, input)
+  return fixture ? staged((fixtures) => fixtures.pledge(id, input)) : request<Requested>(`${path(id)}/pledges`, input)
 }
 
 export function contribute(id: string, input: { hash: string; note?: string }) {
-  return fixture ? Fixtures.contribute(id, input) : request<Contributed>(`${path(id)}/contributions`, input)
+  return fixture ? staged((fixtures) => fixtures.contribute(id, input)) : request<Contributed>(`${path(id)}/contributions`, input)
 }
 
 export function budget(id: string, input: { amount: string; note?: string; token: Token }) {
-  return fixture ? Fixtures.budget(id, input) : request<BudgetRequested>(`${path(id)}/budgets`, input)
+  return fixture ? staged((fixtures) => fixtures.budget(id, input)) : request<BudgetRequested>(`${path(id)}/budgets`, input)
 }
 
 export function allow(id: string, budget: string, keyAuthorization: unknown) {
-  return fixture ? Fixtures.allow(id, budget) : request<Budgeted>(`${path(id)}/budgets/${encodeURIComponent(budget)}`, { keyAuthorization })
+  return fixture ? staged((fixtures) => fixtures.allow(id, budget)) : request<Budgeted>(`${path(id)}/budgets/${encodeURIComponent(budget)}`, { keyAuthorization })
 }
 
 export function hands(id: string) {
-  return fixture ? Promise.resolve(Fixtures.lent(id)) : request<{ hands: Lent[] }>(`${path(id)}/hands`)
+  return fixture ? staged((fixtures) => fixtures.lent(id)) : request<{ hands: Lent[] }>(`${path(id)}/hands`)
 }
 
 export function hand(id: string, label: string) {
@@ -135,32 +149,52 @@ export function hand(id: string, label: string) {
 }
 
 export function artifacts(id: string) {
-  return fixture ? Fixtures.artifacts(id) : request<{ artifacts: Artifact[] }>(`${path(id)}/artifacts`)
+  return fixture ? staged((fixtures) => fixtures.artifacts(id)) : request<{ artifacts: Artifact[] }>(`${path(id)}/artifacts`)
 }
 
 export function account() {
-  return fixture ? Fixtures.account(bearer ? Fixtures.visitor : undefined) : request<Account>('/api/me')
+  return fixture ? staged((fixtures) => fixtures.account(bearer ? visitor : undefined)) : request<Account>('/api/me')
 }
 
 export function rename(name: string | null) {
-  return fixture ? Fixtures.rename(bearer ? Fixtures.visitor : undefined, name) : request<Account>('/api/me', { name })
+  return fixture ? staged((fixtures) => fixtures.rename(bearer ? visitor : undefined, name)) : request<Account>('/api/me', { name })
 }
 
 export function room(id: string, query: { after?: number; before?: number } = {}) {
   const search = new URLSearchParams()
   if (query.after) search.set('after', String(query.after))
   if (query.before) search.set('before', String(query.before))
-  return fixture ? Fixtures.room(id, query, bearer ? Fixtures.visitor : undefined) : request<Room>(`${path(id)}/chat?${search}`)
+  return fixture ? staged((fixtures) => fixtures.room(id, query, bearer ? visitor : undefined)) : request<Room>(`${path(id)}/chat?${search}`)
 }
 
 export function say(id: string, input: { steer?: string; text: string }) {
-  return fixture ? Fixtures.say(id, input, bearer ? Fixtures.visitor : undefined) : request<Posted>(`${path(id)}/chat`, input)
+  return fixture ? staged((fixtures) => fixtures.say(id, input, bearer ? visitor : undefined)) : request<Posted>(`${path(id)}/chat`, input)
 }
 
 export type Line = { close: () => void; hello: () => void; typing: () => void }
 
 export function chatter(id: string, listener: (event: Chatter | { type: 'open' | 'closed' }) => void): Line {
-  if (fixture) return Fixtures.chatter(id, listener)
+  if (fixture) {
+    let line: Line | undefined
+    let closed = false
+    let greeted = false
+    void staged((fixtures) => {
+      if (closed) return
+      line = fixtures.chatter(id, listener)
+      if (greeted) line.hello()
+    })
+    return {
+      close: () => {
+        closed = true
+        line?.close()
+      },
+      hello: () => {
+        greeted = true
+        line?.hello()
+      },
+      typing: () => line?.typing(),
+    }
+  }
   let alive = true
   let socket: WebSocket | undefined
   let timer: ReturnType<typeof setTimeout> | undefined
@@ -199,5 +233,5 @@ export function chatter(id: string, listener: (event: Chatter | { type: 'open' |
 }
 
 export function confirm(id: string, pledge: string, keyAuthorization: unknown) {
-  return fixture ? Fixtures.confirm(id, pledge) : request<Pledged>(`${path(id)}/pledges/${encodeURIComponent(pledge)}`, { keyAuthorization })
+  return fixture ? staged((fixtures) => fixtures.confirm(id, pledge)) : request<Pledged>(`${path(id)}/pledges/${encodeURIComponent(pledge)}`, { keyAuthorization })
 }

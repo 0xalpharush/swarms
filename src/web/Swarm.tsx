@@ -24,9 +24,20 @@ function load() {
   return import('./Code.tsx').then((module) => (loaded = module))
 }
 
+function roomy() {
+  const connection = (navigator as { connection?: { effectiveType?: string; saveData?: boolean } }).connection
+  return !connection?.saveData && (connection?.effectiveType ?? '4g') === '4g'
+}
+
+function idle(run: () => void) {
+  const schedule = (window as { requestIdleCallback?: (run: () => void, options: { timeout: number }) => number }).requestIdleCallback
+  if (schedule) return schedule(run, { timeout: 3000 })
+  return setTimeout(run, 1500)
+}
+
 const Code = lazy(() => load().then((module) => ({ default: module.Code })))
 
-const trails = new Map<string, readonly Entry[]>()
+const trails = new Map<string, { entries: readonly Entry[]; seq: number }>()
 
 const tabs = ['transcript', 'room', 'code', 'machines', 'about'] as const
 
@@ -53,15 +64,16 @@ function useTab() {
 }
 
 export function Swarm(props: { config: Config | undefined; id: string }) {
-  const [entries, setEntries] = useState<readonly Entry[]>(() => trails.get(props.id) ?? remembered<Detail>(props.id)?.feed ?? seeded<Detail>(props.id)?.feed ?? [])
+  const [entries, setEntries] = useState<readonly Entry[]>(() => trails.get(props.id)?.entries ?? remembered<Detail>(props.id)?.feed ?? seeded<Detail>(props.id)?.feed ?? [])
   const first = useRef(entries.length === 0)
   const [detail, reload] = usePoll(() => {
     const full = first.current
     first.current = false
     return Api.swarm(props.id, full)
   }, (data) => (data?.status === 'running' ? 5000 : 10_000), props.id)
+  const last = useRef(trails.get(props.id)?.seq ?? highest(entries))
   useEffect(() => {
-    if (entries.length) trails.set(props.id, entries.slice(-400))
+    if (entries.length) trails.set(props.id, { entries: entries.slice(-400), seq: last.current })
   }, [entries, props.id])
   const [note, setNote] = useState('')
   const [tab, setTab] = useTab()
@@ -76,32 +88,37 @@ export function Swarm(props: { config: Config | undefined; id: string }) {
   const wide = useMedia('(min-width: 1100px)')
   const phone = useMedia('(max-width: 799px)')
   const running = detail.data?.status === 'running'
-  const last = useRef(0)
   const loaded = detail.data !== undefined
   const stream = useLive(props.id, running && visible, (entry) => setEntries((previous) => merge(previous, [entry])))
   const coded = !!detail.data?.code
   useEffect(() => {
     if (!coded) return
+    let alive = true
     const timer = setTimeout(() => {
-      void load()
       void Api.code(props.id).catch(() => undefined)
+      if (!phone && roomy())
+        idle(() => {
+          if (alive) void load()
+        })
     }, 300)
-    return () => clearTimeout(timer)
-  }, [coded, props.id])
+    return () => {
+      alive = false
+      clearTimeout(timer)
+    }
+  }, [coded, phone, props.id])
+  const warm = (item: Tab) => (item === 'code' && coded ? { onFocus: () => void load(), onPointerEnter: () => void load(), onTouchStart: () => void load() } : {})
 
   useEffect(() => {
-    if (detail.data) setEntries((previous) => merge(previous, detail.data?.feed ?? []))
+    if (!detail.data) return
+    last.current = Math.max(last.current, highest(detail.data.feed))
+    setEntries((previous) => merge(previous, detail.data?.feed ?? []))
   }, [detail.data])
-
-  useEffect(() => {
-    last.current = entries.reduce((most, entry) => Math.max(most, entry.seq), 0)
-  }, [entries])
 
   useEffect(() => {
     if (detail.data) document.title = `${detail.data.title} · Swarms`
   }, [detail.data?.title])
 
-  const pace = running ? 2000 : 10_000
+  const pace = running ? (stream.pushed ? 15_000 : 2000) : 10_000
   const stamp = `${detail.data?.status}:${detail.data?.updatedAt}`
   const polled = useRef(false)
   useEffect(() => {
@@ -111,7 +128,9 @@ export function Swarm(props: { config: Config | undefined; id: string }) {
     const run = async () => {
       try {
         const { entries: next } = await Api.feed(props.id, last.current)
-        if (alive) setEntries((previous) => merge(previous, next))
+        if (!alive) return
+        last.current = Math.max(last.current, highest(next))
+        setEntries((previous) => merge(previous, next))
       } catch {}
       if (alive) timer = setTimeout(() => void run(), pace)
     }
@@ -175,7 +194,7 @@ export function Swarm(props: { config: Config | undefined; id: string }) {
         {!phone && (
           <nav aria-label="Swarm" className="room-tabs" role="tablist">
             {tabs.filter((item) => item !== 'room' || !wide).map((item) => (
-              <button aria-controls={`panel-${item}`} aria-selected={shown === item} key={item} onClick={() => setTab(item)} role="tab" type="button">
+              <button aria-controls={`panel-${item}`} aria-selected={shown === item} key={item} onClick={() => setTab(item)} role="tab" type="button" {...warm(item)}>
                 {labels[item]}
               </button>
             ))}
@@ -188,7 +207,7 @@ export function Swarm(props: { config: Config | undefined; id: string }) {
           {phone && (
             <nav aria-label="Swarm" className="phone-views" role="tablist">
               {(['transcript', 'room', 'code', 'machines'] as const).map((item) => (
-                <button aria-selected={shown === item} key={item} onClick={() => setTab(item)} role="tab" type="button">
+                <button aria-selected={shown === item} key={item} onClick={() => setTab(item)} role="tab" type="button" {...warm(item)}>
                   {labels[item]}
                 </button>
               ))}
@@ -252,6 +271,10 @@ export function Swarm(props: { config: Config | undefined; id: string }) {
       </div>
     </article>
   )
+}
+
+function highest(entries: readonly Entry[]) {
+  return entries.reduce((most, entry) => Math.max(most, entry.seq), 0)
 }
 
 function working(swarm: Detail) {
