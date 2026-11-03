@@ -131,7 +131,7 @@ const settleMs = 15_000
 
 const quickMs = 60_000
 
-const vendorCap = 250_000n
+const vendorCap = 1_000_000n
 
 const unfundedMs = 15 * 60_000
 
