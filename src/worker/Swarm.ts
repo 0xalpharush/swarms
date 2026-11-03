@@ -270,9 +270,10 @@ export class Swarm extends DurableObject<Cloudflare.Env> {
   async heal() {
     const now = Date.now()
     const id = this.kv.get<string>('id')
-    if (id && this.kv.get<boolean>('refunded')) {
+    if (id && !this.kv.get<boolean>('open')) {
       const row = await Store.find(this.env, id)
-      if (row) await this.reopen(row)
+      if (row?.status === 'done' && (this.kv.get<boolean>('refunded') || this.kv.get<number>('refundAt') === undefined)) await this.reopen(row)
+      if (row && (row.status !== 'done' || this.kv.get<number>('refundAt') === undefined)) this.kv.put('open', true)
     }
     if (id && !this.kv.get<number>('published') && now - (this.kv.get<number>('exposing') ?? 0) > 60_000) {
       this.kv.put('exposing', now)
