@@ -58,6 +58,22 @@ export async function swap(env: Cloudflare.Env, owner: ReturnType<typeof Account
   return { fee: fee(receipt), hash: receipt.transactionHash, minimum, quote, received }
 }
 
+export async function buy(env: Cloudflare.Env, owner: ReturnType<typeof Account.fromSecp256k1>, to: Token, amount: bigint) {
+  const client = Chain.client(env)
+  const tokenIn = Chain.tokens.ousd.address
+  const tokenOut = Chain.tokens[to].address
+  const quote = await Actions.dex.getBuyQuote(client, { amountOut: amount, tokenIn, tokenOut })
+  const { receipt } = await Actions.dex.buySync(client, {
+    account: owner,
+    amountOut: amount,
+    feeToken: tokenIn,
+    maxAmountIn: quote + (quote * slippage) / 10_000n,
+    tokenIn,
+    tokenOut,
+  })
+  return { fee: fee(receipt), hash: receipt.transactionHash, quote }
+}
+
 export async function send(
   env: Cloudflare.Env,
   owner: ReturnType<typeof Account.fromSecp256k1>,

@@ -1,6 +1,8 @@
 import { DurableObject } from 'cloudflare:workers'
 import type { Account, Address, Hex } from 'viem'
-import { keccak256, stringToHex } from 'viem'
+import { isAddress, keccak256, stringToHex } from 'viem'
+import { Challenge } from 'mppx'
+import { Mppx, tempo } from 'mppx/client'
 import type { Artifact, Chatter, Code, Currency, Entry, Hand, Kind, Live, Note, Said, Shown, Steer, Terms, Token, Update, Working } from '../shared/Api.ts'
 import { type Buffers, type Crew, clip, crew, memory, narrate, redact, subagent } from '../shared/Trail.ts'
 import * as Answer from '../shared/Answer.ts'
@@ -71,7 +73,10 @@ export type Spoken = {
 }
 
 export type Pay = {
+  amount?: string | undefined
   app?: string | undefined
+  operation?: string | undefined
+  path?: string | undefined
   attempt?: number | undefined
   challenge: string | string[]
   channels?: Payer.Snapshot[] | undefined
@@ -125,6 +130,8 @@ const maxFailures = 3
 const settleMs = 15_000
 
 const quickMs = 60_000
+
+const vendorCap = 250_000n
 
 const unfundedMs = 15 * 60_000
 
@@ -676,6 +683,51 @@ export class Swarm extends DurableObject<Cloudflare.Env> {
     if (shown) this.log('status', `Made ${shown} private item${shown === 1 ? '' : 's'} the agent stored public, so everything the swarm produces can be read by anyone.`, hidden.map(([kind, name]) => `${kind} ${name}`).join('\n'))
   }
 
+  async vendor(row: Store.Row, input: Pay): Promise<Paid> {
+    const refused = (detail: string): Paid => ({ code: 'payment_failed', detail, status: 402 })
+    const serialized = (Array.isArray(input.challenge) ? input.challenge : [input.challenge])[0]
+    if (!serialized || !row.sealed_wallet || !row.wallet) return refused('No challenge, or this swarm has no wallet.')
+    const challenge = (() => {
+      try {
+        return Challenge.deserialize(serialized)
+      } catch {
+        return undefined
+      }
+    })()
+    const request = challenge?.request as { amount?: string; currency?: string; methodDetails?: { chainId?: number }; recipient?: string } | undefined
+    const amount = /^[1-9]\d{0,18}$/.test(request?.amount ?? '') ? BigInt(request!.amount!) : 0n
+    if (
+      challenge?.method !== 'tempo' ||
+      challenge.intent !== 'charge' ||
+      String(request?.currency).toLowerCase() !== Chain.tokens.usdce.address.toLowerCase() ||
+      (request?.methodDetails?.chainId ?? 4217) !== 4217 ||
+      !isAddress(request?.recipient ?? '') ||
+      amount === 0n ||
+      amount > vendorCap
+    )
+      return refused(`The swarm pays a service directly only for a Tempo USDC.e charge of at most ${dollars(vendorCap)}.`)
+    const account = await Vault.account(this.env, row)
+    const held = await Vault.balances(this.env, row.wallet)
+    if (held.usdce < amount) {
+      const short = amount - held.usdce
+      if (held.ousd < short + (short * Vault.slippage) / 10_000n + Vault.dust) return refused("The swarm's wallet cannot cover this service.")
+      await Vault.buy(this.env, account, 'usdce', short)
+    }
+    const client = Mppx.create({ methods: [tempo.charge({ account })], polyfill: false })
+    const authorization = await client.createCredential(new Response(null, { headers: { 'www-authenticate': serialized }, status: 402 })).catch((error: unknown) => error as Error)
+    if (authorization instanceof Error) return refused(authorization.message.split('\n')[0]?.slice(0, 200) ?? 'Signing failed.')
+    this.kv.put('banked:pool', String(BigInt(this.kv.get<string>('banked:pool') ?? '0') + amount))
+    const host = (() => {
+      try {
+        return new URL(input.path ?? '').host
+      } catch {
+        return challenge.realm
+      }
+    })()
+    this.log('funds', `Paid ${host} ${dollars(amount)} in USDC.e from the swarm's wallet, because the gateway's treasury could not front it.`)
+    return { authorization }
+  }
+
   async sweep(row: Store.Row) {
     if (!(this.kv.get<Hand[]>('hands') ?? []).length) return
     const listed = await Gateway.sandboxes(this.env, row.id)
@@ -769,8 +821,9 @@ export class Swarm extends DurableObject<Cloudflare.Env> {
 
   async charge(input: Pay): Promise<Paid> {
     const row = await Store.find(this.env, this.kv.get<string>('id') ?? '')
-    if (!row || row.status === 'done') return { code: 'limit_reached', detail: 'This swarm is done and pays for nothing more.', status: 402 }
+    if (!row) return { code: 'limit_reached', detail: 'This swarm pays for nothing.', status: 402 }
     if (input.app !== undefined && input.app !== Gateway.app(row.id)) return { code: 'unauthorized', detail: 'This payer pays only for its own swarm.', status: 401 }
+    if (input.operation === 'vendor') return this.vendor(row, input)
 
     const snapshots = input.channels ?? []
     const known = [...this.kv.list<Payer.Channel>({ prefix: 'channel:' })]

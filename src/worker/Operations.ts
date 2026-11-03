@@ -795,6 +795,9 @@ export async function pay(env: Cloudflare.Env, swarm: string, authorization: str
     return { code: 'unauthorized', detail: 'Send the payer secret as a bearer token, and the challenge.', status: 401 }
   if (!(await Store.exists(env, swarm))) return { code: 'unauthorized', detail: 'No swarm has this id.', status: 401 }
   return stub(env, swarm).pay({
+    amount: typeof input['amount'] === 'string' ? input['amount'] : undefined,
+    operation: typeof input['operation'] === 'string' ? input['operation'] : undefined,
+    path: typeof input['path'] === 'string' ? input['path'].slice(0, 2048) : undefined,
     app: typeof input['app'] === 'string' ? input['app'] : undefined,
     attempt: typeof input['attempt'] === 'number' ? input['attempt'] : undefined,
     challenge: challenge as string | string[],
