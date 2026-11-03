@@ -122,12 +122,16 @@ function Timeline(props: {
 
 function Browser(props: { base: string; detail: Detail; live: boolean }) {
   const initial = useRef(query())
-  const [log, setLog] = useState<{ commits: Commit[]; cursor: string | null; error?: string }>()
+  const [seed] = useState(() => {
+    const known = Api.coded(props.detail.id)
+    return known && known.name === props.detail.code?.name ? known : undefined
+  })
+  const [log, setLog] = useState<{ commits: Commit[]; cursor: string | null; error?: string; seeded?: boolean } | undefined>(seed && { commits: seed.commits, cursor: null, seeded: true })
   const [fresh, setFresh] = useState<ReadonlySet<string>>(new Set())
   const [pinned, setPinned] = useState<string | undefined>(initial.current.ref)
   const [path, setPath] = useState<string | undefined>(initial.current.path)
   const [tab, setTab] = useState<'changes' | 'file'>(initial.current.path ? 'file' : 'changes')
-  const [tree, setTree] = useState<{ error?: string; paths?: string[]; ref?: string }>({})
+  const [tree, setTree] = useState<{ error?: string; paths?: string[]; ref?: string }>(() => (seed?.commits[0] && !initial.current.ref ? { paths: seed.files, ref: seed.commits[0].sha } : {}))
   const [diff, setDiff] = useState<{ changes?: Change[]; error?: string; ref?: string }>({})
   const known = useRef(new Set<string>())
 
@@ -141,7 +145,7 @@ function Browser(props: { base: string; detail: Detail; live: boolean }) {
         const added = known.current.size ? page.commits.filter((commit) => !known.current.has(commit.sha)).map((commit) => commit.sha) : []
         for (const commit of page.commits) known.current.add(commit.sha)
         setLog((previous) => {
-          if (!previous) return page
+          if (!previous || previous.seeded) return page
           const newer = page.commits.filter((commit) => !previous.commits.some((old) => old.sha === commit.sha))
           return { commits: [...newer, ...previous.commits], cursor: previous.cursor }
         })
@@ -171,7 +175,7 @@ function Browser(props: { base: string; detail: Detail; live: boolean }) {
   useEffect(() => {
     if (!ref) return
     let alive = true
-    read<{ files: { path: string; type: string }[] }>(`${props.base}/files?ref=${ref}`).then(
+    if (tree.ref !== ref || !tree.paths) read<{ files: { path: string; type: string }[] }>(`${props.base}/files?ref=${ref}`).then(
       (files) => alive && setTree({ paths: files.files.filter((file) => file.type !== 'tree').map((file) => file.path), ref }),
       (error: unknown) => alive && setTree({ error: message(error), ref }),
     )

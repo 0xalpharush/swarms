@@ -10,7 +10,7 @@ globalThis.__swarmsServer = { boot: () => store.getStore() }
 const listed = new Set(['/', '/join', '/new', '/about', '/docs'])
 
 export function rendered(path: string) {
-  return listed.has(path) || /^\/s\/[^/]+\/?$/.test(path)
+  return listed.has(path) || /^\/s\/[^/]+(\/code)?\/?$/.test(path)
 }
 
 let template: Promise<string> | undefined
@@ -84,7 +84,8 @@ async function gather(env: Cloudflare.Env, url: URL): Promise<{ data: Record<str
   }
   if (path === '/about') return { data, head: { ...head, title: 'About · Swarms' }, status: 200 }
   if (path === '/docs') return { data, head: { ...head, title: 'API and MCP · Swarms' }, status: 200 }
-  const id = decodeURIComponent(/^\/s\/([^/]+)$/.exec(path)?.[1] ?? '')
+  const [, raw = '', browsing] = /^\/s\/([^/]+)(\/code)?$/.exec(path) ?? []
+  const id = decodeURIComponent(raw)
   const detail = await within(Operations.detail(env, { swarm: id }), 2500)
   if (!detail) return { data, head, status: 200 }
   if (!detail.ok) {
@@ -92,12 +93,13 @@ async function gather(env: Cloudflare.Env, url: URL): Promise<{ data: Record<str
     return { data, head: { ...head, title: 'Not found · Swarms' }, status: detail.status === 404 ? 404 : 200 }
   }
   data[id] = detail.value
-  const room = await within(Operations.room(env, { swarm: id }), 800)
+  const [room, code] = await Promise.all([within(Operations.room(env, { swarm: id }), 800), browsing ? within(Operations.code(env, { swarm: id }), 800) : undefined])
   if (room?.ok) data[`room:${id}`] = room.value
+  if (code?.ok && code.value.snapshot) data[`code:${id}`] = code.value.snapshot
   const latest = detail.value.answer?.text
   return {
     data,
-    head: { description: (latest ?? detail.value.goal).replace(/\s+/g, ' ').slice(0, 200), image: head.image, player: `${url.origin}/x/s/${encodeURIComponent(id)}`, title: `${detail.value.title} · Swarms` },
+    head: { description: (latest ?? detail.value.goal).replace(/\s+/g, ' ').slice(0, 200), image: head.image, player: `${url.origin}/x/s/${encodeURIComponent(id)}`, title: `${browsing ? 'Code · ' : ''}${detail.value.title} · Swarms` },
     status: 200,
   }
 }

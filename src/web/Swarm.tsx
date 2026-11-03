@@ -18,7 +18,13 @@ import { Link } from './router.tsx'
 import { Transcript } from './Transcript.tsx'
 import { Bar, Energy, Status } from './Visual.tsx'
 
-const Code = lazy(() => import('./Code.tsx').then((module) => ({ default: module.Code })))
+let loaded: typeof import('./Code.tsx') | undefined
+
+function load() {
+  return import('./Code.tsx').then((module) => (loaded = module))
+}
+
+const Code = lazy(() => load().then((module) => ({ default: module.Code })))
 
 const trails = new Map<string, readonly Entry[]>()
 
@@ -73,6 +79,15 @@ export function Swarm(props: { config: Config | undefined; id: string }) {
   const last = useRef(0)
   const loaded = detail.data !== undefined
   const stream = useLive(props.id, running, (entry) => setEntries((previous) => merge(previous, [entry])))
+  const coded = !!detail.data?.code
+  useEffect(() => {
+    if (!coded) return
+    const timer = setTimeout(() => {
+      void load()
+      void Api.code(props.id).catch(() => undefined)
+    }, 300)
+    return () => clearTimeout(timer)
+  }, [coded, props.id])
 
   useEffect(() => {
     if (detail.data) setEntries((previous) => merge(previous, detail.data?.feed ?? []))
@@ -265,6 +280,7 @@ function Repository(props: { config: Config | undefined; swarm: Detail }) {
     return (
       <p className="machine-none">No code yet. The agent opens its repository once one backer can cover {usd(props.config?.repoAt ?? '1.04')}.</p>
     )
+  if (loaded) return <loaded.Code gateway={props.config.gateway} repo={code} swarm={props.swarm.id} updates={props.swarm.updates} />
   return (
     <Suspense fallback={<p className="empty">Loading the code…</p>}>
       <Code gateway={props.config.gateway} repo={code} swarm={props.swarm.id} updates={props.swarm.updates} />

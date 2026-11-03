@@ -1,7 +1,9 @@
+import { preloadHighlighter } from '@pierre/diffs'
 import { File, PatchDiff } from '@pierre/diffs/react'
 import { FileTree, useFileTree } from '@pierre/trees/react'
 import { useEffect, useMemo, useState } from 'react'
-import type { Code as Repo, Pushed } from '../shared/Api.ts'
+import type { Code as Repo, Pushed, Snapshot } from '../shared/Api.ts'
+import * as Api from './api.ts'
 import { ago, usd } from './format.ts'
 import { message, useMedia } from './hooks.ts'
 import { Link } from './router.tsx'
@@ -11,6 +13,8 @@ export type Commit = { author?: { email: string | null; name: string | null }; d
 export type Change = { additions: number; deletions: number; oldPath: string | null; patch: string; path: string; state: string | null }
 
 const theme = { theme: 'pierre-light' } as const
+
+void preloadHighlighter({ langs: ['markdown'], themes: ['pierre-light'] }).catch(() => undefined)
 
 export const unified = { diffStyle: 'unified', theme: 'pierre-light' } as const
 
@@ -41,11 +45,12 @@ function Tree(props: { onSelect: (path: string) => void; paths: readonly string[
   return <FileTree className="code-tree" model={model} />
 }
 
-export function Viewer(props: { base: string; path: string; sha: string }) {
-  const [state, setState] = useState<{ error?: string; source?: { size: number; text?: string } }>({})
+export function Viewer(props: { base: string; path: string; preset?: string | undefined; sha: string }) {
+  const [state, setState] = useState<{ error?: string; source?: { size: number; text?: string } }>(() => (props.preset === undefined ? {} : { source: { size: props.preset.length, text: props.preset } }))
   const narrow = useMedia('(max-width: 799px)')
 
   useEffect(() => {
+    if (props.preset !== undefined) return setState({ source: { size: props.preset.length, text: props.preset } })
     let alive = true
     setState({})
     read<{ size: number; text?: string }>(`${props.base}/read?path=${encodeURIComponent(props.path)}&ref=${props.sha}`).then(
@@ -55,7 +60,7 @@ export function Viewer(props: { base: string; path: string; sha: string }) {
     return () => {
       alive = false
     }
-  }, [props.base, props.path, props.sha])
+  }, [props.base, props.path, props.preset, props.sha])
 
   const file = useMemo(
     () => (state.source?.text === undefined ? undefined : { cacheKey: `${props.sha}:${props.path}`, contents: state.source.text, name: props.path }),
@@ -145,19 +150,28 @@ export function Clone(props: { repo: Repo }) {
 export function Code(props: { gateway: string; repo: Repo; swarm: string; updates: readonly Pushed[] }) {
   const base = `${props.gateway}/p/${props.repo.owner}/${props.repo.app}/git/${encodeURIComponent(props.repo.name)}`
   const version = String(props.updates.at(-1)?.at ?? 0)
-  const [state, setState] = useState<{ commits?: Commit[]; error?: string; files?: string[] }>({})
+  const [state, setState] = useState<{ commits?: Commit[]; error?: string; files?: string[]; readme?: { path: string; text: string } | null }>(() => {
+    const known = Api.coded(props.swarm)
+    return known && known.name === props.repo.name ? { commits: known.commits, files: known.files, readme: known.readme } : {}
+  })
   const [path, setPath] = useState<string>()
   const [open, setOpen] = useState<number>()
 
   useEffect(() => {
     let alive = true
-    Promise.all([
-      read<{ commits: Commit[] }>(`${base}/log?ref=main&limit=50&v=${encodeURIComponent(version)}`),
-      read<{ files: { path: string; type: string }[] }>(`${base}/files?ref=main&v=${encodeURIComponent(version)}`),
-    ]).then(
-      ([log, files]) => alive && setState({ commits: log.commits, files: files.files.filter((file) => file.type !== 'tree').map((file) => file.path) }),
-      (error: unknown) => alive && setState({ error: message(error) }),
-    )
+    const direct = (): Promise<Pick<Snapshot, 'commits' | 'files' | 'readme'>> =>
+      Promise.all([
+        read<{ commits: Commit[] }>(`${base}/log?ref=main&limit=50&v=${encodeURIComponent(version)}`),
+        read<{ files: { path: string; type: string }[] }>(`${base}/files?ref=main&v=${encodeURIComponent(version)}`),
+      ]).then(([log, files]) => ({ commits: log.commits, files: files.files.filter((file) => file.type !== 'tree').map((file) => file.path), readme: null }))
+    const latest = props.updates.findLast((update) => update.commits.length)?.commits[0]
+    Api.code(props.swarm, version !== '0' && Date.now() - Number(version) < 60_000)
+      .catch(() => null)
+      .then((snapshot): Pick<Snapshot, 'commits' | 'files' | 'readme'> | Promise<Pick<Snapshot, 'commits' | 'files' | 'readme'>> => (snapshot && snapshot.name === props.repo.name && (!latest || snapshot.commits.some((commit) => commit.sha === latest)) ? snapshot : direct()))
+      .then(
+        (found) => alive && setState({ commits: found.commits, files: found.files, readme: found.readme }),
+        (error: unknown) => alive && setState({ error: message(error) }),
+      )
     return () => {
       alive = false
     }
@@ -201,7 +215,7 @@ export function Code(props: { gateway: string; repo: Repo; swarm: string; update
             {shown ? (
               <>
                 <div className="code-file-bar"><span>{shown}</span><code>{head.sha.slice(0, 7)}</code><Copy text={shown} /></div>
-                <Viewer base={base} path={shown} sha={head.sha} />
+                <Viewer base={base} path={shown} preset={state.readme?.path === shown ? state.readme.text : undefined} sha={head.sha} />
               </>
             ) : (
               <p className="machine-none">No files.</p>

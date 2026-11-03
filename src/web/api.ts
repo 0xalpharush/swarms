@@ -1,4 +1,5 @@
-import type { Account, Artifact, BudgetRequested, Budgeted, Chatter, Config, Contributed, Currency, Detail, Entry, Issued, Lent, Live, Pledged, Posted, Problem, Requested, Room, Summary, Token } from '../shared/Api.ts'
+import type { Account, Artifact, BudgetRequested, Budgeted, Chatter, Config, Contributed, Currency, Detail, Entry, Issued, Lent, Live, Pledged, Posted, Problem, Requested, Room, Snapshot, Summary, Token } from '../shared/Api.ts'
+import { seeded } from './boot.ts'
 import * as Fixtures from './fixtures.ts'
 
 export const fixture = typeof location !== 'undefined' && new URLSearchParams(location.search).has('fixture')
@@ -47,6 +48,24 @@ export function swarms() {
 
 export function swarm(id: string, feed = true) {
   return fixture ? Fixtures.swarm(id) : request<Detail>(feed ? path(id) : `${path(id)}?feed=0`)
+}
+
+const snapshots = new Map<string, { at: number; read: Promise<Snapshot | null>; value?: Snapshot | null }>()
+
+export function code(id: string, fresh = false) {
+  const known = snapshots.get(id)
+  if (known && !fresh && Date.now() - known.at < 30_000) return known.read
+  const entry: { at: number; read: Promise<Snapshot | null>; value?: Snapshot | null } = {
+    at: Date.now(),
+    read: fixture ? Promise.resolve(null) : request<{ snapshot: Snapshot | null }>(`${path(id)}/code`).then((body) => (entry.value = body.snapshot)),
+  }
+  entry.read.catch(() => snapshots.delete(id))
+  snapshots.set(id, entry)
+  return entry.read
+}
+
+export function coded(id: string) {
+  return snapshots.get(id)?.value ?? seeded<Snapshot>(`code:${id}`)
 }
 
 export function feed(id: string, after: number, filter: { before?: number; who?: string } = {}) {

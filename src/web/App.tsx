@@ -10,7 +10,7 @@ import { Lost } from './Lost.tsx'
 import { page, preload } from './pages.tsx'
 import * as Wallet from './wallet.ts'
 
-const Repo = lazy(() => import('./Repo.tsx').then((module) => ({ default: module.Repo })))
+const Repo = page('repo', () => import('./Repo.tsx').then((module) => module.Repo))
 
 const New = page('new', () => import('./New.tsx').then((module) => module.New))
 
@@ -26,6 +26,11 @@ function warmSwarm() {
 
 if (typeof window !== 'undefined') {
   warmer((path) => {
+    const browsed = /^\/s\/([^/?#]+)\/code\/?(?:[?#]|$)/.exec(path)?.[1]
+    if (browsed) {
+      void import('./Repo.tsx').then((module) => preload('repo', module.Repo))
+      void Api.code(decodeURIComponent(browsed)).catch(() => undefined)
+    }
     const id = /^\/s\/([^/?#]+)\/?(?:[?#]|$)/.exec(path)?.[1]
     if (!id) return
     void warmSwarm()

@@ -3,7 +3,7 @@ import type { Account, Address, Hex } from 'viem'
 import { isAddress, keccak256, stringToHex } from 'viem'
 import { Challenge } from 'mppx'
 import { Mppx, tempo } from 'mppx/client'
-import type { Artifact, Chatter, Code, Currency, Entry, Hand, Kind, Live, Note, Said, Shown, Steer, Terms, Token, Update, Working } from '../shared/Api.ts'
+import type { Artifact, Chatter, Code, Currency, Entry, Hand, Kind, Live, Note, Said, Shown, Snapshot, Steer, Terms, Token, Update, Working } from '../shared/Api.ts'
 import { type Buffers, type Crew, clip, crew, memory, narrate, redact, subagent } from '../shared/Trail.ts'
 import * as Answer from '../shared/Answer.ts'
 import * as Memo from '../shared/Memo.ts'
@@ -136,6 +136,9 @@ const vendorCap = 1_000_000n
 const stuckTurns = 3
 const repoRetryMs = 6 * 3_600_000
 const quietMs = 600_000
+const snapshotMs = 60_000
+const snapshotFiles = 2_000
+const snapshotText = 64_000
 
 const idleSpend = 10_000n
 
@@ -1458,7 +1461,42 @@ export class Swarm extends DurableObject<Cloudflare.Env> {
     const fresh = await this.pushed(row.id, repo.name, this.kv.get<string>('seen') ?? null)
     if (!fresh[0]) return
     this.kv.put('seen', fresh[0].sha)
+    await this.snapshot(row.id, repo.name).catch((error: unknown) => console.error('Reading the repository failed', error))
     for (const commit of fresh.reverse()) this.log('status', `Pushed ${commit.sha.slice(0, 7)} to ${repo.name}: ${redact(commit.message.split('\n')[0] ?? '')}`)
+  }
+
+  code(): Snapshot | null {
+    const id = this.kv.get<string>('id')
+    const repo = this.kv.get<string>('repo')
+    const snapshot = this.kv.get<Snapshot>('snapshot')
+    if (id && repo && (!snapshot || snapshot.name !== repo || Date.now() - snapshot.at > snapshotMs) && Date.now() - (this.kv.get<number>('snapping') ?? 0) > snapshotMs) {
+      this.kv.put('snapping', Date.now())
+      this.ctx.waitUntil(this.snapshot(id, repo).catch((error: unknown) => console.error('Reading the repository failed', error)))
+    }
+    return snapshot && snapshot.name === repo ? snapshot : null
+  }
+
+  async snapshot(swarm: string, name: string) {
+    const owner = await this.owner()
+    if (!owner) return
+    const base = `/${encodeURIComponent(name)}`
+    const [log, listed] = await Promise.all([
+      Gateway.code<{ commits: Snapshot['commits'] }>(this.env, owner, swarm, `${base}/log?ref=main&limit=50&at=${Date.now()}`),
+      Gateway.code<{ files: { path: string; type: string }[] }>(this.env, owner, swarm, `${base}/files?ref=main&at=${Date.now()}`),
+    ])
+    if (!log || !listed) return
+    const files = listed.files.filter((file) => file.type !== 'tree').map((file) => file.path)
+    const head = log.commits[0]
+    const path = files.find((file) => /^readme(\.md)?$/i.test(file)) ?? files.find((file) => /readme/i.test(file)) ?? files[0]
+    const read = head && path ? await Gateway.code<{ size: number; text?: string }>(this.env, owner, swarm, `${base}/read?path=${encodeURIComponent(path)}&ref=${head.sha}`) : undefined
+    this.kv.put('snapshot', {
+      at: Date.now(),
+      commits: log.commits.map((commit) => ({ ...commit, message: redact(commit.message) })),
+      files: files.slice(0, snapshotFiles),
+      name,
+      readme: path && read?.text !== undefined && read.text.length <= snapshotText ? { path, text: redact(read.text) } : null,
+    } satisfies Snapshot)
+    this.kv.delete('snapping')
   }
 
   async commits(swarm: string, name: string, limit: number) {

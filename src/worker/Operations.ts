@@ -446,6 +446,13 @@ export async function updates(env: Cloudflare.Env, input: Input<'updates'>): Pro
   return Problem.ok({ updates: pulse.updates.slice(-parsed.value.limit), working: pulse.working })
 }
 
+export async function code(env: Cloudflare.Env, input: Input<'swarm'>): Promise<Problem.Result<{ snapshot: Snapshot | null }>> {
+  const parsed = parse(schema.swarm, input)
+  if (!parsed.ok) return parsed
+  if (!(await Store.exists(env, parsed.value.swarm))) return missing()
+  return Problem.ok({ snapshot: (await stub(env, parsed.value.swarm).code()) as Snapshot | null })
+}
+
 export async function feed(env: Cloudflare.Env, input: Input<'feed'>): Promise<Problem.Result<Page>> {
   const parsed = parse(schema.feed, input)
   if (!parsed.ok) return parsed

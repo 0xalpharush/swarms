@@ -75,6 +75,7 @@ app.post('/api/swarms', async (c) => Problem.respond(await Operations.create(c.e
 
 app.get('/api/swarms/:id', async (c) => Problem.respond(await Operations.detail(c.env, { swarm: c.req.param('id') }, c.req.query('feed') !== '0')))
 
+app.get('/api/swarms/:id/code', async (c) => Problem.respond(await Operations.code(c.env, { swarm: c.req.param('id') })))
 app.get('/api/swarms/:id/feed', async (c) =>
   Problem.respond(
     await Operations.feed(c.env, {
