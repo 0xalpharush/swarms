@@ -3,7 +3,7 @@ import type { Account, Config, Currency } from '../shared/Api.ts'
 import * as Api from './api.ts'
 import { fixture } from './api.ts'
 import { boot, type Face, faceCookie, server } from './boot.ts'
-import * as Fixtures from './fixtures.ts'
+import { pace, scene, visitor } from './stage.ts'
 
 export type Session = { address: Address; token: string }
 
@@ -29,7 +29,7 @@ const kept = 'swarms.session'
 
 function stored(): Session | undefined {
   if (server) return undefined
-  if (fixture) return Fixtures.scene.has('in') ? { address: Fixtures.visitor, token: 'fixture' } : undefined
+  if (fixture) return scene.has('in') ? { address: visitor, token: 'fixture' } : undefined
   try {
     const value = JSON.parse(localStorage.getItem(kept) ?? 'null') as Session | null
     return value?.address && value.token ? value : undefined
@@ -133,9 +133,9 @@ export function snapshot() {
 }
 
 function asked() {
-  if (Fixtures.scene.has('hang')) return new Promise<never>(() => {})
-  if (Fixtures.scene.has('deny')) return new Promise<never>((_, reject) => setTimeout(() => reject(new Error('You declined the request in Tempo Wallet.')), 900 * Fixtures.pace))
-  return new Promise((resolve) => setTimeout(resolve, 1200 * Fixtures.pace))
+  if (scene.has('hang')) return new Promise<never>(() => {})
+  if (scene.has('deny')) return new Promise<never>((_, reject) => setTimeout(() => reject(new Error('You declined the request in Tempo Wallet.')), 900 * pace))
+  return new Promise((resolve) => setTimeout(resolve, 1200 * pace))
 }
 
 export async function restore(config: Config) {
@@ -159,8 +159,8 @@ export async function restore(config: Config) {
 
 export async function connect(config: Config) {
   if (fixture) {
-    if (!state.address) set({ address: Fixtures.visitor })
-    return state.address ?? Fixtures.visitor
+    if (!state.address) set({ address: visitor })
+    return state.address ?? visitor
   }
   const provider = await wallet()
   const known = (await provider.request({ method: 'eth_accounts' }).catch(() => [] as readonly Address[]))[0]
@@ -176,8 +176,8 @@ export async function connect(config: Config) {
 export async function authorize(config: Config, authorizeAccessKey: unknown) {
   if (fixture) {
     await asked()
-    set({ address: Fixtures.visitor })
-    return { address: Fixtures.visitor, keyAuthorization: {} as unknown }
+    set({ address: visitor })
+    return { address: visitor, keyAuthorization: {} as unknown }
   }
   const result = (await (await wallet()).request({ method: 'wallet_connect', params: [{ capabilities: { authorizeAccessKey }, chainId: config.chainId }] } as never)) as {
     accounts: readonly { address: Address; capabilities?: { keyAuthorization?: unknown } }[]
@@ -192,7 +192,7 @@ export async function authorize(config: Config, authorizeAccessKey: unknown) {
 export async function signIn(config: Config) {
   if (fixture) {
     await asked()
-    const session = { address: Fixtures.visitor, token: 'fixture' } satisfies Session
+    const session = { address: visitor, token: 'fixture' } satisfies Session
     set({ address: session.address, session })
     void identify()
     return session
@@ -238,10 +238,10 @@ export function signOut() {
 
 export async function send(config: Config, input: { amount: bigint; memo: Hex; to: Address; token: Currency }) {
   if (fixture) {
-    await asked()
-    if (Fixtures.balances[input.token] < input.amount) throw Object.assign(new Error(`Your wallet holds less than this.`), { code: 'insufficient_balance' })
+    const [fixtures] = await Promise.all([import('./fixtures.ts'), asked()])
+    if (fixtures.balances[input.token] < input.amount) throw Object.assign(new Error(`Your wallet holds less than this.`), { code: 'insufficient_balance' })
     const hash = `0x${Date.now().toString(16).padStart(64, '5')}` as Hex
-    Fixtures.sent.set(hash, input.amount)
+    fixtures.sent.set(hash, input.amount)
     return hash
   }
   const address = await connect(config)
@@ -267,11 +267,11 @@ export async function send(config: Config, input: { amount: bigint; memo: Hex; t
 export async function refresh(config: Config) {
   const address = state.address
   if (!address) return undefined
-  const loaded = fixture ? undefined : await chain()
+  const [loaded, fixtures] = fixture ? [undefined, await import('./fixtures.ts')] : [await chain(), undefined]
   const client = loaded ? loaded[1].createClient({ chain: loaded[2].tempo, transport: loaded[1].http(config.rpc) }) : undefined
   const read = (token: Config['tokens'][number]) =>
     !loaded || !client
-      ? Promise.resolve(Fixtures.balances[token.id])
+      ? Promise.resolve(fixtures?.balances[token.id])
       : loaded[1].Actions.token.getBalance(client, { account: address, token: token.address }).then((balance) => balance.amount)
   const entries = await Promise.all(config.tokens.map(async (token) => [token.id, await read(token).catch(() => undefined)] as const))
   const balances = Object.fromEntries(entries.filter((entry): entry is readonly [Currency, bigint] => entry[1] !== undefined)) as Partial<Record<Currency, bigint>>

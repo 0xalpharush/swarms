@@ -153,7 +153,7 @@ export function usePoll<T>(load: () => Promise<T>, ms: number | ((data: T | unde
 
 export type Stream = { at: number; input: string; inputItem: string; text: string; textItem: string; thinking: string; thinkingItem: string }
 
-export type Live = { connected: boolean; since: number | undefined; streams: Readonly<Record<string, Stream>> }
+export type Live = { connected: boolean; pushed: boolean; since: number | undefined; streams: Readonly<Record<string, Stream>> }
 
 const blank: Stream = { at: 0, input: '', inputItem: '', text: '', textItem: '', thinking: '', thinkingItem: '' }
 
@@ -178,6 +178,7 @@ export function speaker(who: string | null) {
 
 export function useLive(id: string, active: boolean, onEntry: (entry: Entry) => void): Live {
   const [connected, setConnected] = useState(false)
+  const [pushed, setPushed] = useState(false)
   const [since, setSince] = useState<number>()
   const [streams, setStreams] = useState<Readonly<Record<string, Stream>>>({})
   const handler = useRef(onEntry)
@@ -193,10 +194,12 @@ export function useLive(id: string, active: boolean, onEntry: (entry: Entry) => 
 
   useEffect(() => {
     if (!active) return
+    setPushed(false)
     const stream = (who: string, change: (stream: Stream) => Stream) => setStreams((previous) => ({ ...previous, [who]: change(previous[who] ?? blank) }))
     return Api.live(id, (event) => {
       if (event.type === 'end' || event.type === 'idle') {
         setConnected(false)
+        setPushed(false)
         if (event.type === 'end') setStreams({})
         return
       }
@@ -204,13 +207,14 @@ export function useLive(id: string, active: boolean, onEntry: (entry: Entry) => 
       if (event.type === 'start') setSince(event.at)
       if (event.type === 'delta') stream(speaker(event.who), (current) => write(current, event.channel, event.item, event.delta, event.offset))
       if (event.type === 'entry') {
+        if (event.entry.seq > 0) setPushed(true)
         stream(speaker(event.entry.who), (current) => settle(current, event.entry))
         handler.current(event.entry)
       }
     })
   }, [active, id])
 
-  return { connected: active && connected, since, streams }
+  return { connected: active && connected, pushed: active && connected && pushed, since, streams }
 }
 
 export function useNow(ms = 1000, active = true) {

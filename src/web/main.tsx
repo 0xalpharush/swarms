@@ -20,13 +20,15 @@ document.cookie = `swarms_tz=${encodeURIComponent(Intl.DateTimeFormat().resolved
 const path = location.pathname
 const route = /^\/s\/[^/]+\/?$/.test(path)
   ? import('./Swarm.tsx').then((module) => preload('swarm', module.Swarm))
-  : path === '/new'
-    ? import('./New.tsx').then((module) => preload('new', module.New))
-    : path === '/about'
-      ? import('./About.tsx').then((module) => preload('about', module.About))
-      : path === '/docs'
-        ? import('./Docs.tsx').then((module) => preload('docs', module.Docs))
-        : undefined
+  : /^\/s\/[^/]+\/code\/?$/.test(path)
+    ? import('./Repo.tsx').then((module) => preload('repo', module.Repo))
+    : path === '/new'
+      ? import('./New.tsx').then((module) => preload('new', module.New))
+      : path === '/about'
+        ? import('./About.tsx').then((module) => preload('about', module.About))
+        : path === '/docs'
+          ? import('./Docs.tsx').then((module) => preload('docs', module.Docs))
+          : undefined
 const root = document.getElementById('root')!
 
 if (root.firstChild && globalThis.__SWARMS_BOOT__) void Promise.resolve(route).then(() => hydrateRoot(root, <App />, { onRecoverableError: (error) => console.warn('Hydration', error) }))
