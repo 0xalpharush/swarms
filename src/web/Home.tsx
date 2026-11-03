@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import type { Status as Kind, Summary } from '../shared/Api.ts'
+import type { Summary } from '../shared/Api.ts'
 import * as Api from './api.ts'
 import { ago, usd } from './format.ts'
 import { usePoll } from './hooks.ts'
@@ -13,17 +13,19 @@ const openIdeas = open
 const filters = [
   ['open', 'Open'],
   ['live', 'Live now'],
+  ['resting', 'Resting'],
   ['fuel', 'Needs fuel'],
-  ['done', 'Finished'],
 ] as const
 
 type Filter = (typeof filters)[number][0]
 
-const fits: Record<Filter, (status: Kind) => boolean> = {
-  done: (status) => status === 'done',
-  fuel: (status) => status === 'paused' || status === 'funding',
-  live: (status) => status === 'running',
-  open: (status) => status !== 'done',
+const fueled = (swarm: Summary) => Number(swarm.remaining) >= 0.05
+
+const fits: Record<Filter, (swarm: Summary) => boolean> = {
+  fuel: (swarm) => swarm.status !== 'running' && !fueled(swarm),
+  live: (swarm) => swarm.status === 'running',
+  open: (swarm) => swarm.status !== 'done',
+  resting: (swarm) => swarm.status !== 'running' && fueled(swarm),
 }
 
 function gist(text: string) {
@@ -110,8 +112,8 @@ export function Join() {
   const [filter, setFilter] = useState<Filter>('open')
   const [picked, setPicked] = useState<string>()
   const swarms = sorted(list.data?.swarms)
-  const shown = swarms.filter((swarm) => fits[filter](swarm.status))
-  const count = (key: Filter) => swarms.filter((swarm) => fits[key](swarm.status)).length
+  const shown = swarms.filter((swarm) => fits[filter](swarm))
+  const count = (key: Filter) => swarms.filter((swarm) => fits[key](swarm)).length
 
   return (
     <div className="page start">
@@ -135,7 +137,7 @@ export function Join() {
           </button>
         ) : list.data && shown.length === 0 ? (
           <Link className="world-empty" to="/new">
-            <span>{filter === 'done' ? 'Nothing finished yet.' : filter === 'live' ? 'Nothing live right now.' : 'No swarms yet.'}</span>
+            <span>{filter === 'resting' ? 'Nothing resting right now.' : filter === 'fuel' ? 'Every swarm has fuel.' : filter === 'live' ? 'Nothing live right now.' : 'No swarms yet.'}</span>
             <b>Start one →</b>
           </Link>
         ) : (
