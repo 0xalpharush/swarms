@@ -53,13 +53,13 @@ function useTab() {
 }
 
 export function Swarm(props: { config: Config | undefined; id: string }) {
-  const first = useRef(remembered(props.id) === undefined && seeded(props.id) === undefined)
+  const [entries, setEntries] = useState<readonly Entry[]>(() => trails.get(props.id) ?? remembered<Detail>(props.id)?.feed ?? seeded<Detail>(props.id)?.feed ?? [])
+  const first = useRef(entries.length === 0)
   const [detail, reload] = usePoll(() => {
     const full = first.current
     first.current = false
     return Api.swarm(props.id, full)
   }, (data) => (data?.status === 'running' ? 5000 : 10_000), props.id)
-  const [entries, setEntries] = useState<readonly Entry[]>(() => trails.get(props.id) ?? remembered<Detail>(props.id)?.feed ?? seeded<Detail>(props.id)?.feed ?? [])
   useEffect(() => {
     if (entries.length) trails.set(props.id, entries.slice(-400))
   }, [entries, props.id])
