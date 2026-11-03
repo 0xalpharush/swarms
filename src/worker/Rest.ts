@@ -73,7 +73,7 @@ app.get('/v1/swarms/:id/search', async (c) =>
 )
 
 app.get('/v1/swarms/:id/live', async (c) =>
-  stream(await Operations.live(c.env, { swarm: c.req.param('id') }, c.req.raw.signal)),
+  stream(await Operations.live(c.env, { swarm: c.req.param('id') }, c.req.raw.signal, c.req.query('after'))),
 )
 
 app.get('/v1/swarms/:id/wait', async (c) =>

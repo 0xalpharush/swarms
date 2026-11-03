@@ -166,6 +166,16 @@ export async function list(env: Cloudflare.Env, status?: Summary['status']) {
 
 const known = new Set<string>()
 
+let writes = 0
+
+export function epoch() {
+  return writes
+}
+
+function wrote() {
+  writes += 1
+}
+
 export function seen(id: string) {
   return known.has(id)
 }
@@ -205,13 +215,13 @@ export async function insert(
     'insert into swarms (id, title, goal, problem, wallet, sealed_wallet, created_at, updated_at) values (?, ?, ?, ?, ?, ?, ?, ?)',
   )
     .bind(input.id, input.title, input.goal, input.problem, input.wallet, input.sealed_wallet, now, now)
-    .run()
+    .run().finally(wrote)
 }
 
 export async function provision(env: Cloudflare.Env, id: string, input: { sealed_wallet: string; wallet: string }) {
   await env.DB.prepare('update swarms set wallet = ?, sealed_wallet = ? where id = ? and wallet is null')
     .bind(input.wallet, input.sealed_wallet, id)
-    .run()
+    .run().finally(wrote)
 }
 
 export async function update(env: Cloudflare.Env, id: string, fields: Fields) {
@@ -220,7 +230,7 @@ export async function update(env: Cloudflare.Env, id: string, fields: Fields) {
     `update swarms set ${entries.map(([name]) => name + ' = ?, ').join('')}updated_at = ? where id = ?`,
   )
     .bind(...entries.map(([, value]) => value), Date.now(), id)
-    .run()
+    .run().finally(wrote)
 }
 
 export async function spend(env: Cloudflare.Env, id: string, spent: bigint, status?: Pledge['status']) {
@@ -228,7 +238,7 @@ export async function spend(env: Cloudflare.Env, id: string, spent: bigint, stat
     'update pledges set spent = ?, status = coalesce(?, status), updated_at = ? where id = ?',
   )
     .bind(String(spent), status ?? null, Date.now(), id)
-    .run()
+    .run().finally(wrote)
 }
 
 export async function active(env: Cloudflare.Env, swarm: string) {
@@ -296,7 +306,7 @@ export async function give(env: Cloudflare.Env, input: Omit<Gift, 'created_at'>)
       input.note_id,
       Date.now(),
     )
-    .run()
+    .run().finally(wrote)
   return result.meta.changes > 0
 }
 
@@ -309,7 +319,7 @@ export async function annotate(env: Cloudflare.Env, id: string, input: { note: s
     "update contributions set note = ?, note_id = ? where id = ? and kind = 'transfer' and note is null",
   )
     .bind(input.note, input.note_id, id.toLowerCase())
-    .run()
+    .run().finally(wrote)
   return result.meta.changes > 0
 }
 
@@ -371,7 +381,7 @@ export async function allow(
       now,
       now,
     )
-    .run()
+    .run().finally(wrote)
 }
 
 export async function allowance(env: Cloudflare.Env, swarm: string, id: string) {
@@ -395,12 +405,12 @@ export async function approve(
       Date.now(),
       id,
     )
-    .run()
+    .run().finally(wrote)
   return result.meta.changes > 0
 }
 
 export async function forget(env: Cloudflare.Env, id: string) {
-  await env.DB.prepare("delete from budgets where id = ? and status = 'pending'").bind(id).run()
+  await env.DB.prepare("delete from budgets where id = ? and status = 'pending'").bind(id).run().finally(wrote)
 }
 
 export async function change(env: Cloudflare.Env, id: string, changes: Changes) {
@@ -409,7 +419,7 @@ export async function change(env: Cloudflare.Env, id: string, changes: Changes) 
     `update budgets set ${entries.map(([name]) => name + ' = ?, ').join('')}updated_at = ? where id = ?`,
   )
     .bind(...entries.map(([, value]) => value), Date.now(), id)
-    .run()
+    .run().finally(wrote)
 }
 
 export async function allowances(env: Cloudflare.Env, swarm: string) {
@@ -435,7 +445,7 @@ export async function end(env: Cloudflare.Env, swarm: string) {
     "update budgets set status = 'ended', next_at = null, updated_at = ? where swarm = ? and status = 'active'",
   )
     .bind(Date.now(), swarm)
-    .run()
+    .run().finally(wrote)
 }
 
 export function view(row: Allowance, now = Date.now()): Budget {
@@ -589,7 +599,7 @@ export async function account(env: Cloudflare.Env, address: `0x${string}`): Prom
 export async function rename(env: Cloudflare.Env, address: `0x${string}`, name: string | null) {
   const lower = address.toLowerCase()
   if (!name) {
-    await env.DB.prepare('delete from names where address = ?').bind(lower).run()
+    await env.DB.prepare('delete from names where address = ?').bind(lower).run().finally(wrote)
     return true
   }
   try {
@@ -597,7 +607,7 @@ export async function rename(env: Cloudflare.Env, address: `0x${string}`, name: 
       'insert into names (address, name, updated_at) values (?, ?, ?) on conflict (address) do update set name = excluded.name, updated_at = excluded.updated_at',
     )
       .bind(lower, name, Date.now())
-      .run()
+      .run().finally(wrote)
     return true
   } catch (error) {
     if (/unique/i.test(String(error))) return false
@@ -617,7 +627,7 @@ export async function steer(
     ) >= cast(?6 as integer)`,
   )
     .bind(input.swarm, input.contributor.toLowerCase(), input.id, input.note, input.note_id, String(input.amount), Date.now())
-    .run()
+    .run().finally(wrote)
   return result.meta.changes > 0
 }
 

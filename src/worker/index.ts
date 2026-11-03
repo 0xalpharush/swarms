@@ -1,6 +1,7 @@
 import { Hono } from 'hono'
 import * as Artifacts from './Artifacts.ts'
 import * as Code from './Code.ts'
+import * as Edge from './Edge.ts'
 import * as Operations from './Operations.ts'
 import * as Page from './Page.ts'
 import * as Problem from './Problem.ts'
@@ -76,7 +77,16 @@ app.get('/api/swarms', async (c) => Problem.respond(await Operations.list(c.env,
 
 app.post('/api/swarms', async (c) => Problem.respond(await Operations.create(c.env, await Rest.body(c.req.raw)), 201))
 
-app.get('/api/swarms/:id', async (c) => Problem.respond(await Operations.detail(c.env, { swarm: c.req.param('id') }, c.req.query('feed') !== '0')))
+app.get('/api/swarms/:id', async (c) => {
+  const id = c.req.param('id')
+  const salt = Edge.minute()
+  const first = Edge.asked(c.req.raw, 'sd') ? await Operations.stamp(c.env, id) : undefined
+  const early = first && Edge.tag('sd', c.req.raw, first.version, salt)
+  if (early && Edge.matches(c.req.raw, early)) return Edge.unchanged(early)
+  const shown = await Operations.stamped(c.env, { swarm: id }, c.req.query('feed') !== '0')
+  if (!shown.ok) return Problem.json(shown)
+  return Edge.tagged(c.json(shown.value.detail), early || (shown.value.stamp.quiet ? Edge.tag('sd', c.req.raw, shown.value.stamp.version, salt) : undefined))
+})
 
 app.get('/api/swarms/:id/git/:read', async (c) => {
   const read = c.req.param('read')
@@ -84,20 +94,21 @@ app.get('/api/swarms/:id/git/:read', async (c) => {
   return Code.proxy(c.env, c.executionCtx, c.req.raw, c.req.param('id'), read)
 })
 app.get('/api/swarms/:id/code', async (c) => Problem.respond(await Operations.code(c.env, { swarm: c.req.param('id') })))
-app.get('/api/swarms/:id/feed', async (c) =>
-  Problem.respond(
-    await Operations.feed(c.env, {
-      after: c.req.query('after'),
-      limit: c.req.query('limit'),
-      before: c.req.query('before'),
-      swarm: c.req.param('id'),
-      who: c.req.query('who'),
-    }),
-  ),
-)
+app.get('/api/swarms/:id/feed', async (c) => {
+  const paged = await Operations.paged(c.env, {
+    after: c.req.query('after'),
+    limit: c.req.query('limit'),
+    before: c.req.query('before'),
+    swarm: c.req.param('id'),
+    who: c.req.query('who'),
+  })
+  if (!paged.ok) return Problem.json(paged)
+  const tag = Edge.tag('sf', c.req.raw, String(paged.value.last))
+  return Edge.matches(c.req.raw, tag) ? Edge.unchanged(tag) : Edge.tagged(c.json(paged.value.page), tag)
+})
 
 app.get('/api/swarms/:id/live', async (c) =>
-  Rest.stream(await Operations.live(c.env, { swarm: c.req.param('id') }, c.req.raw.signal)),
+  Rest.stream(await Operations.live(c.env, { swarm: c.req.param('id') }, c.req.raw.signal, c.req.query('after'))),
 )
 
 app.post('/api/swarms/:id/contributions', async (c) =>
@@ -119,9 +130,16 @@ app.get('/api/swarms/:id/artifacts', async (c) =>
   Problem.respond(await Operations.artifacts(c.env, { swarm: c.req.param('id') }, new URL(c.req.url).origin)),
 )
 
-app.get('/api/swarms/:id/chat', async (c) =>
-  Problem.respond(await Operations.room(c.env, { ...c.req.query(), swarm: c.req.param('id') }, await Sessions.who(c.env, c.req.raw))),
-)
+app.get('/api/swarms/:id/chat', async (c) => {
+  const id = c.req.param('id')
+  const salt = `${Edge.minute()}|${c.req.header('authorization') ?? ''}`
+  const first = Edge.asked(c.req.raw, 'sc') ? await Operations.stamp(c.env, id) : undefined
+  const early = first && Edge.tag('sc', c.req.raw, first.version, salt)
+  if (early && Edge.matches(c.req.raw, early)) return Edge.unchanged(early)
+  const heard = await Operations.listened(c.env, { ...c.req.query(), swarm: id }, await Sessions.who(c.env, c.req.raw))
+  if (!heard.ok) return Problem.json(heard)
+  return Edge.tagged(c.json(heard.value.room), early || (heard.value.stamp.quiet ? Edge.tag('sc', c.req.raw, heard.value.stamp.version, salt) : undefined))
+})
 
 app.post('/api/swarms/:id/chat', async (c) =>
   Problem.respond(

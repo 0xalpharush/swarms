@@ -55,7 +55,7 @@ import * as Search from './Search.ts'
 import * as Sessions from './Sessions.ts'
 import * as Store from './Store.ts'
 import type { Snapshot } from './Payer.ts'
-import type { Paid, Swarm } from './Swarm.ts'
+import type { Paid, Stamp, Swarm } from './Swarm.ts'
 import * as Vault from './Vault.ts'
 import * as Fleet from '../shared/Fleet.ts'
 import * as Brief from '../shared/ResearchBrief.ts'
@@ -379,14 +379,23 @@ const firstFeed = 80
 
 const listSeconds = 3
 
+export async function stamp(env: Cloudflare.Env, swarm: string): Promise<Stamp | undefined> {
+  return Store.seen(swarm) ? stub(env, swarm).version() : undefined
+}
+
 export async function detail(env: Cloudflare.Env, input: Input<'swarm'>, feed = true): Promise<Problem.Result<Detail>> {
+  const shown = await stamped(env, input, feed)
+  return shown.ok ? Problem.ok(shown.value.detail) : shown
+}
+
+export async function stamped(env: Cloudflare.Env, input: Input<'swarm'>, feed = true): Promise<Problem.Result<{ detail: Detail; stamp: Stamp }>> {
   const parsed = parse(schema.swarm, input)
   if (!parsed.ok) return parsed
   const loaded = await ledgered(env, parsed.value.swarm, { feed: feed ? firstFeed : 0, texts: false })
   if (!loaded) return missing()
 
   const { ledger, row, view } = loaded
-  return Problem.ok({
+  const detail: Detail = {
     ...Store.summary(row),
     budgets: ledger.budgets,
     code: view.code,
@@ -399,7 +408,8 @@ export async function detail(env: Cloudflare.Env, input: Input<'swarm'>, feed = 
     why: view.why,
     updates: view.updates.map(({ text: _text, ...update }) => update),
     working: view.working,
-  })
+  }
+  return Problem.ok({ detail, stamp: view.stamp })
 }
 
 export async function get(env: Cloudflare.Env, input: Input<'swarm'>): Promise<Problem.Result<Overview>> {
@@ -459,21 +469,27 @@ export async function code(env: Cloudflare.Env, input: Input<'swarm'>): Promise<
 }
 
 export async function feed(env: Cloudflare.Env, input: Input<'feed'>): Promise<Problem.Result<Page>> {
+  const read = await paged(env, input)
+  return read.ok ? Problem.ok(read.value.page) : read
+}
+
+export async function paged(env: Cloudflare.Env, input: Input<'feed'>): Promise<Problem.Result<{ last: number; page: Page }>> {
   const parsed = parse(schema.feed, input)
   if (!parsed.ok) return parsed
   const query = parsed.value
   if (!(await Store.exists(env, query.swarm))) return missing()
 
-  const entries = await stub(env, query.swarm).feed(query.after, { before: query.before, kind: query.kind, limit: query.limit, who: query.who })
-  return Problem.ok({ entries, next: entries.at(-1)?.seq ?? query.after })
+  const { entries, last } = await stub(env, query.swarm).page(query.after, { before: query.before, kind: query.kind, limit: query.limit, who: query.who })
+  return Problem.ok({ last, page: { entries, next: entries.at(-1)?.seq ?? query.after } })
 }
 
-export async function live(env: Cloudflare.Env, input: Input<'swarm'>, signal: AbortSignal): Promise<Problem.Result<Response>> {
+export async function live(env: Cloudflare.Env, input: Input<'swarm'>, signal: AbortSignal, after?: string): Promise<Problem.Result<Response>> {
   const parsed = parse(schema.swarm, input)
   if (!parsed.ok) return parsed
   if (!(await Store.exists(env, parsed.value.swarm))) return missing()
 
-  return Problem.ok(await stub(env, parsed.value.swarm).fetch(new Request('https://swarm/live', { signal })))
+  const url = after !== undefined && /^\d{1,15}$/.test(after) ? `https://swarm/live?after=${after}` : 'https://swarm/live'
+  return Problem.ok(await stub(env, parsed.value.swarm).fetch(new Request(url, { signal })))
 }
 
 export async function search(env: Cloudflare.Env, input: Input<'search'>): Promise<Problem.Result<Found>> {
@@ -554,16 +570,21 @@ export async function artifacts(env: Cloudflare.Env, input: Input<'swarm'>, orig
 }
 
 export async function room(env: Cloudflare.Env, input: Input<'room'>, address?: Address): Promise<Problem.Result<Room>> {
+  const heard = await listened(env, input, address)
+  return heard.ok ? Problem.ok(heard.value.room) : heard
+}
+
+export async function listened(env: Cloudflare.Env, input: Input<'room'>, address?: Address): Promise<Problem.Result<{ room: Room; stamp: Stamp }>> {
   const parsed = parse(schema.room, input)
   if (!parsed.ok) return parsed
   const query = parsed.value
   if (!(await Store.exists(env, query.swarm))) return missing()
 
-  const [messages, members] = await Promise.all([
-    stub(env, query.swarm).messages({ after: query.after, before: query.before, limit: query.limit }),
+  const [{ messages, stamp }, members] = await Promise.all([
+    stub(env, query.swarm).chat({ after: query.after, before: query.before, limit: query.limit }),
     Store.members(env, query.swarm),
   ])
-  return Problem.ok({ me: address ? await self(env, members, address) : null, members, messages, next: messages.at(-1)?.id ?? query.after })
+  return Problem.ok({ room: { me: address ? await self(env, members, address) : null, members, messages, next: messages.at(-1)?.id ?? query.after }, stamp })
 }
 
 export async function account(env: Cloudflare.Env, address?: Address): Promise<Problem.Result<Account>> {
