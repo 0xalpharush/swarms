@@ -26,6 +26,10 @@ function warmSwarm() {
 
 if (typeof window !== 'undefined') {
   warmer((path) => {
+    const route = path.replace(/[?#].*$/, '').replace(/\/$/, '')
+    if (route === '/new') void import('./New.tsx').then((module) => preload('new', module.New))
+    if (route === '/about') void import('./About.tsx').then((module) => preload('about', module.About))
+    if (route === '/docs') void import('./Docs.tsx').then((module) => preload('docs', module.Docs))
     const browsed = /^\/s\/([^/?#]+)\/code\/?(?:[?#]|$)/.exec(path)?.[1]
     if (browsed) {
       void import('./Repo.tsx').then((module) => preload('repo', module.Repo))
