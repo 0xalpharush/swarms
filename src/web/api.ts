@@ -79,7 +79,7 @@ export function feed(id: string, after: number, filter: { before?: number; who?:
   return fixture ? staged((fixtures) => fixtures.feed(id, after, filter)) : request<{ entries: Entry[]; next: number }>(`${path(id)}/feed?${query}`)
 }
 
-export function live(id: string, listener: (event: Live) => void) {
+export function live(id: string, listener: (event: Live) => void, after?: () => number) {
   if (fixture) {
     let stop: (() => void) | undefined
     let alive = true
@@ -99,11 +99,12 @@ export function live(id: string, listener: (event: Live) => void) {
     if (alive) timer = setTimeout(open, ms)
   }
   const open = () => {
-    source = new EventSource(`${path(id)}/live`)
+    const cursor = after?.()
+    source = new EventSource(cursor === undefined ? `${path(id)}/live` : `${path(id)}/live?after=${cursor}`)
     source.onmessage = (message) => {
       const event = JSON.parse(String(message.data)) as Live
       listener(event)
-      if (event.type === 'end' || event.type === 'idle') again(event.type === 'end' ? 1500 : 4000)
+      if (cursor === undefined && (event.type === 'end' || event.type === 'idle')) again(event.type === 'end' ? 1500 : 4000)
     }
     source.onerror = () => {
       listener({ type: 'idle' })

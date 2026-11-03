@@ -89,7 +89,7 @@ export function Swarm(props: { config: Config | undefined; id: string }) {
   const phone = useMedia('(max-width: 799px)')
   const running = detail.data?.status === 'running'
   const loaded = detail.data !== undefined
-  const stream = useLive(props.id, running && visible, (entry) => setEntries((previous) => merge(previous, [entry])))
+  const stream = useLive(props.id, running && visible, (entry) => setEntries((previous) => merge(previous, [entry])), () => last.current)
   const coded = !!detail.data?.code
   useEffect(() => {
     if (!coded) return

@@ -176,15 +176,17 @@ export function speaker(who: string | null) {
   return who ?? agent
 }
 
-export function useLive(id: string, active: boolean, onEntry: (entry: Entry) => void): Live {
+export function useLive(id: string, active: boolean, onEntry: (entry: Entry) => void, after?: () => number): Live {
   const [connected, setConnected] = useState(false)
   const [pushed, setPushed] = useState(false)
   const [since, setSince] = useState<number>()
   const [streams, setStreams] = useState<Readonly<Record<string, Stream>>>({})
   const handler = useRef(onEntry)
+  const cursor = useRef(after)
 
   useEffect(() => {
     handler.current = onEntry
+    cursor.current = after
   })
 
   useEffect(() => {
@@ -198,9 +200,10 @@ export function useLive(id: string, active: boolean, onEntry: (entry: Entry) => 
     const stream = (who: string, change: (stream: Stream) => Stream) => setStreams((previous) => ({ ...previous, [who]: change(previous[who] ?? blank) }))
     return Api.live(id, (event) => {
       if (event.type === 'end' || event.type === 'idle') {
+        if (event.type === 'end') setStreams({})
+        if (cursor.current) return
         setConnected(false)
         setPushed(false)
-        if (event.type === 'end') setStreams({})
         return
       }
       setConnected(true)
@@ -211,7 +214,7 @@ export function useLive(id: string, active: boolean, onEntry: (entry: Entry) => 
         stream(speaker(event.entry.who), (current) => settle(current, event.entry))
         handler.current(event.entry)
       }
-    })
+    }, cursor.current ? () => cursor.current?.() ?? 0 : undefined)
   }, [active, id])
 
   return { connected: active && connected, pushed: active && connected && pushed, since, streams }
