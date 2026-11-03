@@ -385,7 +385,7 @@ const fixtures: Live[] = [
       [1290, 'Classified 48,113 candidate bundles; 61% DEX arbitrage, 23% liquidations, 16% sandwiches.', '0.630000'],
       [1100, "Final report.\n\n1. Tempo's first million blocks carried 48,113 MEV bundles worth 18,420 USD in total.\n2. Arbitrage between the stablecoin DEX and outside venues is 61% of it and mostly harmless: it keeps pegs tight.\n3. Sandwiches are 16% of bundles but 38% of value, concentrated in 4 searchers.\n4. Payment lanes left no room for sandwiches on transfers; every sandwich hit a DEX swap with slippage above 0.5%.\n\nData, notebooks and the classifier are in the bucket under mev/.\nSTATUS: done", '0.806120'],
     ],
-    code: { app: 'swarm-06cf5d7c8f92', name: 'solve-p-np', owner: '0x975937feafc6869a260c176854dda8764a78e122' },
+    code: { app: 'swarm-06cf5d7c8f92', clone: 'https://gateway.tempo-dev.workers.dev/p/0x975937feafc6869a260c176854dda8764a78e122/swarm-06cf5d7c8f92/git/solve-p-np.git', name: 'solve-p-np', owner: '0x975937feafc6869a260c176854dda8764a78e122' },
     id: 'mev-map',
     lines: [
       ['error', 'The agent stopped with an error after spending $0.40.', 'The classifier ran out of memory on a 2 GiB machine.'],

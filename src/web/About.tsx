@@ -5,7 +5,7 @@ const steps = [
   ['Fuel', 'Anyone backs it: once, a little every day, or a pledge. MACH, USDC.e, pathUSD or OUSD.'],
   ['Work', 'An AI agent researches it, sends out helpers, runs code on real machines and commits to a public repository.'],
   ['Steer', 'Backers add notes. A note carries the weight of the money behind it, and @swarm in the room talks to the agent.'],
-  ['Finish', 'The agent reports when the goal is met or the money runs out. What it did not spend goes back to its backers.'],
+  ['Keep going', 'A swarm is never done: it keeps producing code and artifacts while there is money and rests when it has nothing worth doing. A note or new money wakes it.'],
 ] as const
 
 const facts = [

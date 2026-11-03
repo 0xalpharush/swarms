@@ -3,7 +3,7 @@ import { FileTree, useFileTree } from '@pierre/trees/react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { Config, Detail } from '../shared/Api.ts'
 import * as Api from './api.ts'
-import { type Change, type Commit, patch, read, unified, Viewer } from './Code.tsx'
+import { type Change, Clone, type Commit, patch, read, unified, Viewer } from './Code.tsx'
 import { ago, usd } from './format.ts'
 import { message, useNow, usePoll } from './hooks.ts'
 import { Link } from './router.tsx'
@@ -305,7 +305,10 @@ export function Repo(props: { config: Config | undefined; id: string }) {
       ) : !code ? (
         <p className="empty">This swarm has no repository yet: its agent creates one first thing once one funder can pay {usd(props.config.repoAt)} at once.</p>
       ) : (
-        <Browser base={`${props.config.gateway}/p/${code.owner}/${code.app}/git/${encodeURIComponent(code.name)}`} detail={swarm} live={swarm.status !== 'done'} />
+        <>
+          <Clone repo={code} />
+          <Browser base={`${props.config.gateway}/p/${code.owner}/${code.app}/git/${encodeURIComponent(code.name)}`} detail={swarm} live={swarm.status !== 'done'} />
+        </>
       )}
     </section>
   )

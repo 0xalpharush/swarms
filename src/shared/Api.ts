@@ -92,7 +92,7 @@ export type Entry = {
 
 export type Hand = { connected: boolean; name: string }
 
-export type Code = { app: string; name: string; owner: string }
+export type Code = { app: string; clone: string; name: string; owner: string }
 
 export type Prepared = {
   amount: string | null

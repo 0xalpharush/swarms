@@ -588,7 +588,6 @@ export async function say(env: Cloudflare.Env, input: Input<'say'>, address?: Ad
   if (!steering && request.steer !== undefined) return Problem.fail(400, 'invalid_request', 'steer goes with a message that mentions @swarm.')
   let steer: { amount: string; note: string; noteId: string } | null = null
   if (steering) {
-    if (row.status === 'done') return Problem.fail(409, 'conflict', 'This swarm is done, so @swarm no longer steers it.')
     const note = Mention.idea(request.text)
     if (note.length < 3) return Problem.fail(400, 'invalid_request', 'Say what the swarm should do after @swarm.')
     if (note.length > Memo.maxNote) return Problem.fail(400, 'invalid_request', `A steer is at most ${Memo.maxNote} characters besides @swarm.`)
@@ -646,7 +645,6 @@ export async function hand(env: Cloudflare.Env, input: Input<'hand'>, contributo
   if (!parsed.ok) return parsed
   const found = await Store.find(env, parsed.value.swarm)
   if (!found) return missing()
-  if (found.status === 'done') return Problem.fail(409, 'conflict', 'This swarm is done.')
   if ((await Hands.count(env, found.id)) >= Hands.limit)
     return Problem.fail(409, 'conflict', `This swarm has ${Hands.limit} hands already.`)
   const row = await provisioned(env, found)
@@ -690,7 +688,6 @@ export async function transfer(env: Cloudflare.Env, input: Input<'transfer'>, or
   const request = parsed.value
   const found = await Store.find(env, request.swarm)
   if (!found) return missing()
-  if (found.status === 'done') return Problem.fail(409, 'conflict', 'This swarm is done.')
   const row = await provisioned(env, found)
 
   const note = request.note || null
@@ -727,7 +724,6 @@ export async function link(env: Cloudflare.Env, input: Input<'budget'>, origin: 
   const request = parsed.value
   const found = await Store.find(env, request.swarm)
   if (!found) return missing()
-  if (found.status === 'done') return Problem.fail(409, 'conflict', 'This swarm is done.')
   const row = await provisioned(env, found)
 
   const amount = Memo.decimal(units(request.amount))
@@ -759,7 +755,6 @@ export async function pledge(env: Cloudflare.Env, input: Input<'pledge'>): Promi
   const request = parsed.value
   const found = await Store.find(env, request.swarm)
   if (!found) return missing()
-  if (found.status === 'done') return Problem.fail(409, 'conflict', 'This swarm is done.')
   const row = await provisioned(env, found)
 
   const amount = units(request.amount)
@@ -820,7 +815,6 @@ export async function contribute(
   const request = parsed.value
   const found = await Store.find(env, request.swarm)
   if (!found) return missing()
-  if (found.status === 'done') return Problem.fail(409, 'conflict', 'This swarm is done.')
   const row = await provisioned(env, found)
 
   const receipt = await getTransactionReceipt(Chain.client(env), { hash: request.hash as Hex }).catch(() => undefined)
@@ -904,7 +898,6 @@ export async function budget(env: Cloudflare.Env, input: Input<'budget'>): Promi
   const request = parsed.value
   const found = await Store.find(env, request.swarm)
   if (!found) return missing()
-  if (found.status === 'done') return Problem.fail(409, 'conflict', 'This swarm is done.')
   const row = await provisioned(env, found)
 
   const amount = units(request.amount)

@@ -270,6 +270,10 @@ export class Swarm extends DurableObject<Cloudflare.Env> {
   async heal() {
     const now = Date.now()
     const id = this.kv.get<string>('id')
+    if (id && this.kv.get<boolean>('refunded')) {
+      const row = await Store.find(this.env, id)
+      if (row) await this.reopen(row)
+    }
     if (id && !this.kv.get<number>('published') && now - (this.kv.get<number>('exposing') ?? 0) > 60_000) {
       this.kv.put('exposing', now)
       const row = await Store.find(this.env, id)
@@ -297,7 +301,7 @@ export class Swarm extends DurableObject<Cloudflare.Env> {
     const owner = this.kv.get<string>('owner')
     const turns = this.turns()
     return {
-      code: id && repo && owner ? { app: Gateway.app(id), name: repo, owner } : null,
+      code: id && repo && owner ? { app: Gateway.app(id), clone: `${this.env.GATEWAY_URL}/p/${owner}/${Gateway.app(id)}/git/${repo}.git`, name: repo, owner } : null,
       feed,
       hands: this.kv.get<Hand[]>('hands') ?? [],
       left: this.kv.get<string>('left') ?? null,
@@ -408,7 +412,10 @@ export class Swarm extends DurableObject<Cloudflare.Env> {
 
     await this.upgrade(row)
     const phase = Phase.of(this.kv, row.status === 'done')
-    if (phase === 'settled') return null
+    if (phase === 'settled') return this.reopen(row).then(async () => {
+      const fresh = await Store.find(this.env, row.id)
+      return fresh ? this.advance(fresh) : null
+    })
     if (phase === 'working') return this.follow(row)
     if (phase === 'settling') return this.settle(row)
     return this.advance(row)
@@ -616,7 +623,6 @@ export class Swarm extends DurableObject<Cloudflare.Env> {
     const failures = status === 'completed' ? 0 : (this.kv.get<number>('failures') ?? 0) + 1
     this.kv.put('failures', failures)
     if (status === 'completed') this.kv.delete('wanted')
-    if (answer?.done) return this.done(row, 'The agent reports the goal is met.')
     const acted = this.ctx.storage.sql.exec<{ n: number }>("SELECT COUNT(*) AS n FROM feed WHERE at >= ? AND kind IN ('tool', 'machine')", started).one().n
     const stored = this.ctx.storage.sql.exec<{ n: number }>("SELECT COUNT(*) AS n FROM feed WHERE at >= ? AND kind = 'tool' AND ((text || coalesce(detail, '')) LIKE '%kv_set%' OR (text || coalesce(detail, '')) LIKE '%bucket_put%' OR (text || coalesce(detail, '')) LIKE '%git_create%')", started).one().n
     if (stored > 0 || !this.kv.get<number>('published')) await this.expose(row).catch((error: unknown) => console.error('Making the swarm data public failed', error))
@@ -1202,6 +1208,16 @@ export class Swarm extends DurableObject<Cloudflare.Env> {
     this.log('status', text)
   }
 
+  async reopen(row: Store.Row) {
+    this.kv.delete('refunded')
+    this.kv.delete('refundAt')
+    this.kv.put('resting', Date.now())
+    this.kv.put('paused', 'Resting: it spends nothing until a note or new money wakes it.')
+    this.kv.put('why', 'idle')
+    await Store.update(this.env, row.id, { status: 'paused' })
+    this.log('status', 'Open again: a swarm is never done, so it rests until a note or new money wakes it, and its agent carries on from where it stopped.')
+  }
+
   async done(row: Store.Row, reason: string) {
     Phase.check(Phase.of(this.kv, row.status === 'done'), 'settling')
     this.kv.delete('turn')
@@ -1771,8 +1787,6 @@ function brief(money: Money, notes: Note[], reports: string[], lent: Guest[], re
     repository(repo),
     ...(lent.length ? ['', ...lending(lent, money.left)] : []),
     ...(reports.length ? ['', 'Your latest updates before this conversation restarted:', ...reports.map((report) => clip(report, 1500))] : []),
-    '',
-    'End a reply with "STATUS: done" when the goal is met.',
   ].filter((line, index, all) => line !== '' || all[index - 1] !== '').join('\n')
 }
 

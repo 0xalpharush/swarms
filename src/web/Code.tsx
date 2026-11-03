@@ -127,9 +127,19 @@ function first(paths: readonly string[]) {
   return paths.find((path) => /^readme(\.md)?$/i.test(path)) ?? paths.find((path) => /readme/i.test(path)) ?? paths[0]
 }
 
-function Copy(props: { text: string }) {
+function Copy(props: { label?: string; text: string }) {
   const [done, setDone] = useState(false)
-  return <button className="code-copy" onClick={() => void navigator.clipboard?.writeText(props.text).then(() => { setDone(true); setTimeout(() => setDone(false), 1500) })} type="button">{done ? 'Copied' : 'Copy path'}</button>
+  return <button className="code-copy" onClick={() => void navigator.clipboard?.writeText(props.text).then(() => { setDone(true); setTimeout(() => setDone(false), 1500) })} type="button">{done ? 'Copied' : (props.label ?? 'Copy path')}</button>
+}
+
+export function Clone(props: { repo: Repo }) {
+  const command = `git clone ${props.repo.clone} ${props.repo.name}`
+  return (
+    <div className="code-clone">
+      <code title={command}>{command}</code>
+      <Copy label="Copy" text={command} />
+    </div>
+  )
 }
 
 export function Code(props: { gateway: string; repo: Repo; swarm: string; updates: readonly Pushed[] }) {
@@ -184,6 +194,7 @@ export function Code(props: { gateway: string; repo: Repo; swarm: string; update
           <span className="repo-card-meta">{commits.length === 1 ? '1 commit' : `${commits.length} commits`} · {state.files.length} files · {head.date ? ago(Date.parse(head.date)) : head.sha.slice(0, 7)}</span>
           <Link className="repo-card-open" to={browser}>Full browser →</Link>
         </header>
+        <Clone repo={props.repo} />
         <div className="code-browse">
           <Tree onSelect={setPath} paths={state.files} />
           <div className="code-file">

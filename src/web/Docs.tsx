@@ -66,7 +66,7 @@ const codes = [
   ['403', 'access_denied', 'The contributor declined the pledge in Tempo Wallet.'],
   ['403', 'not_member', "Only the swarm's backers post in its room."],
   ['404', 'not_found', 'No swarm, pledge, budget or route has this id, or Tempo has no receipt for the transaction yet.'],
-  ['409', 'conflict', 'The swarm is done, the pledge or budget is already approved, or the transaction is already counted.'],
+  ['409', 'conflict', 'The pledge or budget is already approved, or the transaction is already counted.'],
   ['409', 'insufficient_balance', "The wallet holds less of the token than the pledge, or a steer asks for more of its author's backing than is not yet behind a note."],
   ['410', 'expired', 'The Tempo Wallet link expired before anyone approved it.'],
   ['502', 'upstream_failed', 'The Tempo gateway or Tempo Wallet failed.'],
@@ -234,7 +234,7 @@ export function Docs(props: { config: Config | undefined }) {
             <p>
               Money comes three ways. A pledge is a spending key on the contributor's wallet, in MACH or a stablecoin, capped at the pledge, approved in Tempo Wallet and held by this app, and charged at once: MACH goes into a payment channel to the gateway (MACH reaches only the gateway and its escrow), a stablecoin into the swarm's wallet. What the swarm does not spend goes back when it finishes. A pledge is at least {minimum} MACH.
             </p>
-            <p>A transfer or a monthly budget puts USDC.e, pathUSD or OUSD in the swarm's own wallet. When the swarm is done, what it did not spend goes back to those contributors pro rata.</p>
+            <p>A transfer or a monthly budget puts USDC.e, pathUSD or OUSD in the swarm's own wallet. Swarms are never done, so the money stays the swarm's to spend.</p>
             <p className="fine">Without a browser, request a pledge with device: true and show the link and code to the person who approves.</p>
           </>
         }
@@ -287,7 +287,7 @@ export function Docs(props: { config: Config | undefined }) {
         <h3 className="docs-head">2. Run the CLI</h3>
         <Code>{`curl -fsSL https://nanocode.xyz/install | sh\nnc hand '<url>' --token <token> -C ~/swarm-work`}</Code>
         <p className="docs-text">
-          The hand starts in <code>-C</code>'s folder and reconnects until you stop it, or until the swarm is done.
+          The hand starts in <code>-C</code>'s folder and reconnects until you stop it.
         </p>
         <h3 className="docs-head">Or use nanocode-ts</h3>
         <Code>{Connect.install}</Code>

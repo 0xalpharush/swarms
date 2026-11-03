@@ -128,8 +128,8 @@ const schemas = {
   Budgeted: object({ budget: ref('Budget'), swarm: ref('Summary') }),
   BudgetRequested: object({ authorizeAccessKey, budget: string }),
   Code: object(
-    { app: string, name: string, owner: address },
-    'The public repository that keeps the swarm\'s code, read without a key from the gateway at /p/<owner>/<app>/git/<name>/files, read, log and diff.',
+    { app: string, clone: { description: 'A read-only git remote: git clone <clone> fetches the whole history without a key; pushes are refused.', type: 'string' }, name: string, owner: address },
+    'The public repository that keeps the swarm\'s code, cloned read-only from clone, or read without a key from the gateway at /p/<owner>/<app>/git/<name>/files, read, log and diff.',
   ),
   Config: object({
     auth: { description: "Where to sign in with Tempo Wallet: wallet_connect's capabilities.auth url.", type: 'string' },
