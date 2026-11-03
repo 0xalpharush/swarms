@@ -96,14 +96,17 @@ async function gather(env: Cloudflare.Env, url: URL): Promise<{ data: Record<str
   if (path === '/docs') return { data, head: { ...head, title: 'API and MCP · Swarms' }, status: 200 }
   const [, raw = '', browsing] = /^\/s\/([^/]+)(\/code)?$/.exec(path) ?? []
   const id = decodeURIComponent(raw)
-  const detail = await within(Operations.detail(env, { swarm: id }), 2500)
+  const [detail, room, code] = await Promise.all([
+    within(Operations.detail(env, { swarm: id }), 2500),
+    browsing ? undefined : within(Operations.room(env, { swarm: id }), 2500),
+    browsing ? within(Operations.code(env, { swarm: id }), 2500) : undefined,
+  ])
   if (!detail) return { data, head, status: 200 }
   if (!detail.ok) {
     data[`!${id}`] = detail.detail
     return { data, head: { ...head, title: 'Not found · Swarms' }, status: detail.status === 404 ? 404 : 200 }
   }
   data[id] = detail.value
-  const [room, code] = await Promise.all([browsing ? undefined : within(Operations.room(env, { swarm: id }), 800), browsing ? within(Operations.code(env, { swarm: id }), 800) : undefined])
   if (room?.ok) data[`room:${id}`] = room.value
   if (code?.ok && code.value.snapshot) data[`code:${id}`] = code.value.snapshot
   const latest = detail.value.answer?.text
