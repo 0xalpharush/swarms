@@ -134,7 +134,7 @@ const quickMs = 60_000
 const vendorCap = 1_000_000n
 
 const stuckTurns = 3
-const repoRetryMs = 3_600_000
+const repoRetryMs = 6 * 3_600_000
 const quietMs = 600_000
 
 const idleSpend = 10_000n
@@ -1857,7 +1857,7 @@ function funds(money: Money) {
 
 function repository(repo: Repo) {
   if (repo.state === 'ready') return `Its code goes in the public git repository "${repo.name}" on main; commit as you go.`
-  if (repo.state === 'blocked') return 'Its git repository cannot be paid for right now: Code Storage takes USDC.e, which this swarm\'s money cannot buy at the moment. Publish code and results with bucket_put and kv_set instead, and do not call git_create again this hour.'
+  if (repo.state === 'blocked') return 'Its git repository cannot be paid for right now: Code Storage takes USDC.e, which this swarm\'s money cannot buy at the moment. Publish code and results with bucket_put and kv_set instead, and do not call git_create again for six hours.'
   if (repo.state === 'create') return `Create its public git repository first: tools.mcp__gateway__git_create({ name: "${repo.name}", public: true }) ($1, once), then commit as you go.`
   return ''
 }
