@@ -270,7 +270,7 @@ export class Swarm extends DurableObject<Cloudflare.Env> {
   async heal() {
     const now = Date.now()
     const id = this.kv.get<string>('id')
-    if (id && !this.kv.get<number>('published') && !this.kv.get<number>('exposing')) {
+    if (id && !this.kv.get<number>('published') && now - (this.kv.get<number>('exposing') ?? 0) > 60_000) {
       this.kv.put('exposing', now)
       const row = await Store.find(this.env, id)
       if (row) await this.expose(row).catch((error: unknown) => console.error('Making the swarm data public failed', error))
@@ -665,6 +665,7 @@ export class Swarm extends DurableObject<Cloudflare.Env> {
     let shown = 0
     for (const [kind, name] of hidden) if ((await Gateway.reveal(this.env, row.id, kind, name)).ok) shown++
     this.kv.put('published', Date.now())
+    console.log(JSON.stringify({ expose: row.id, hidden: hidden.length, shown }))
     if (shown) this.log('status', `Made ${shown} private item${shown === 1 ? '' : 's'} the agent stored public, so everything the swarm produces can be read by anyone.`, hidden.map(([kind, name]) => `${kind} ${name}`).join('\n'))
   }
 
