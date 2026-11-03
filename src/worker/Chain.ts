@@ -32,6 +32,8 @@ export function token(address: string): Token | undefined {
   return ids.find((id) => tokens[id].address.toLowerCase() === address.toLowerCase())
 }
 
+const multicall: Address = '0xcA11bde05977b3631167028862bE2a173976CA11'
+
 export function client(env: Cloudflare.Env) {
-  return createClient({ chain: tempo, transport: http(env.TEMPO_RPC) })
+  return createClient({ batch: { multicall: true }, chain: { ...tempo, contracts: { ...tempo.contracts, multicall3: { address: multicall } } }, transport: http(env.TEMPO_RPC) })
 }

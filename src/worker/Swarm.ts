@@ -96,7 +96,7 @@ type Room = { amount: bigint; ended?: 'expired' | 'revoked' | 'spent'; resets: n
 
 type Money = { biggest: bigint; left: bigint; row: Store.Row }
 
-type Repo = { name: string; state: 'create' | 'later' | 'ready' }
+type Repo = { name: string; state: 'blocked' | 'create' | 'later' | 'ready' }
 
 type Guest = { label: string; name: string; terms: Terms }
 
@@ -134,6 +134,8 @@ const quickMs = 60_000
 const vendorCap = 1_000_000n
 
 const stuckTurns = 3
+const repoRetryMs = 3_600_000
+const quietMs = 600_000
 
 const idleSpend = 10_000n
 
@@ -479,7 +481,8 @@ export class Swarm extends DurableObject<Cloudflare.Env> {
       await this.pause(row, worked ? 'paused' : 'funding', costly(wanted, money.biggest), 'costly')
       return wake
     }
-    if (!this.kv.get<string>('repo') && (money.biggest < Store.repoAt || money.left < Store.launch)) {
+    const repo = await this.repo(row, money.biggest)
+    if ((repo.state === 'create' || repo.state === 'later') && (money.biggest < Store.repoAt || money.left < Store.launch)) {
       const wake = await this.wake(row.id)
       await this.pause(
         row,
@@ -497,7 +500,6 @@ export class Swarm extends DurableObject<Cloudflare.Env> {
     const resumed = !this.kv.get<number>('since')
     const notes = await this.notes(money.row)
     const lent = await this.guests(row.id)
-    const repo = await this.repo(row, money.biggest)
     const base = repo.state === 'ready' ? await this.head(row.id, repo.name) : null
     if (base) this.kv.put('seen', base)
     else this.kv.delete('seen')
@@ -819,7 +821,8 @@ export class Swarm extends DurableObject<Cloudflare.Env> {
       }
       if (Date.now() - channel.at > confirmMs) {
         Payer.forget(this.kv, source.id)
-        this.log('error', `The channel for ${source.label} never opened on Tempo, so the next payment opens another.`)
+        if (Date.now() - (this.kv.get<number>(`unopened:${source.id}`) ?? 0) > quietMs) this.log('error', `The channel for ${source.label} never opened on Tempo, so the next payment opens another.`)
+        this.kv.put(`unopened:${source.id}`, Date.now())
         return undefined
       }
       await new Promise((resolve) => setTimeout(resolve, 750))
@@ -1430,6 +1433,8 @@ export class Swarm extends DurableObject<Cloudflare.Env> {
       this.log('status', `The swarm's code now lives in its public repository ${found.name}, which its page shows.`)
       return { name: found.name, state: 'ready' }
     }
+    const refused = this.ctx.storage.sql.exec<{ at: number | null }>("SELECT max(at) AS at FROM feed WHERE kind = 'error' AND text = 'git_create failed' AND detail LIKE '%cannot cover Code Storage%'").one().at
+    if (refused && Date.now() - refused < repoRetryMs) return { name, state: 'blocked' }
     return { name, state: left >= Store.repoAt ? 'create' : 'later' }
   }
 
@@ -1838,6 +1843,7 @@ function funds(money: Money) {
 
 function repository(repo: Repo) {
   if (repo.state === 'ready') return `Its code goes in the public git repository "${repo.name}" on main; commit as you go.`
+  if (repo.state === 'blocked') return 'Its git repository cannot be paid for right now: Code Storage takes USDC.e, which this swarm\'s money cannot buy at the moment. Publish code and results with bucket_put and kv_set instead, and do not call git_create again this hour.'
   if (repo.state === 'create') return `Create its public git repository first: tools.mcp__gateway__git_create({ name: "${repo.name}", public: true }) ($1, once), then commit as you go.`
   return ''
 }
@@ -1863,7 +1869,7 @@ function next(money: Money, notes: Note[], lent: Guest[], repo: Repo, resumed: b
   return [
     `${resumed ? 'New money came in' : 'Keep going'}: ${funds(money)}.`,
     ...(notes.length ? ['', 'Notes:', listed(notes)] : []),
-    ...(repo.state === 'create' ? ['', repository(repo)] : []),
+    ...(repo.state === 'create' || repo.state === 'blocked' ? ['', repository(repo)] : []),
     ...(lent.length ? ['', ...lending(lent, money.left)] : []),
   ].join('\n')
 }
