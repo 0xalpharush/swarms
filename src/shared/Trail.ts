@@ -76,7 +76,11 @@ export function step(type: string | undefined, payload: Record<string, unknown>)
   }
   if (type === 'assistant.message') return { detail: null, kind: 'message', text: clip(String(payload['text'] ?? ''), 4000) }
   if (type === 'run.failed') return { detail: clip(JSON.stringify(payload), 2000), kind: 'error', text: 'The run failed.' }
-  if (type === 'model.call.failed') return { detail: clip(JSON.stringify(payload), 2000), kind: 'error', text: 'A model call failed.' }
+  if (type === 'model.call.failed') {
+    const said = String(payload['error'] ?? '')
+    const reason = /"message":"((?:[^"\\]|\\.)*)"/.exec(said)?.[1]?.replace(/\\"/g, '"') ?? ''
+    return { detail: clip(JSON.stringify(payload), 2000), kind: 'error', text: reason ? `A model call failed: ${clip(reason, 240)}` : 'A model call failed.' }
+  }
   return undefined
 }
 

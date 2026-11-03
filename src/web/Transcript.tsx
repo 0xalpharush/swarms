@@ -34,7 +34,7 @@ function now(stream: Stream | undefined) {
   return undefined
 }
 
-function Beat(props: { entry: Entry; head: boolean }) {
+function Beat(props: { entry: Entry; head: boolean; times?: number | undefined }) {
   const [open, setOpen] = useState(false)
   const entry = props.entry
   const who = speaker(entry.who)
@@ -51,7 +51,7 @@ function Beat(props: { entry: Entry; head: boolean }) {
       {entry.kind === 'message' ? (
         <div className="beat-say"><Markdown text={Answer.unround(entry.text)} /></div>
       ) : (
-        <p className="beat-text">{quiet && <span aria-hidden="true" className="beat-mark">›</span>}{entry.text}</p>
+        <p className="beat-text">{quiet && <span aria-hidden="true" className="beat-mark">›</span>}{entry.text}{props.times && <span className="beat-times"> ×{props.times}</span>}</p>
       )}
       {quiet && open && detail && <pre className="beat-detail">{detail}</pre>}
     </li>
@@ -231,7 +231,23 @@ export function Transcript(props: {
     for (const entry of props.entries) if (entry.who && !seen.includes(entry.who)) seen.push(entry.who)
     return seen
   }, [props.entries])
-  const shown = useMemo(() => props.entries.filter((entry) => entry.kind !== 'funds' && !(entry.kind === 'status' && /^Round \d+ /.test(entry.text)) && (who === 'all' || speaker(entry.who) === who)), [props.entries, who])
+  const [shown, repeats] = useMemo(() => {
+    const kept: Entry[] = []
+    const counts = new Map<Entry, number>()
+    let burst = new Map<string, Entry>()
+    for (const entry of props.entries) {
+      if (entry.kind === 'funds' || (entry.kind === 'status' && /^Round \d+ /.test(entry.text)) || (who !== 'all' && speaker(entry.who) !== who)) continue
+      if (entry.kind !== 'error') burst = new Map()
+      const first = entry.kind === 'error' ? burst.get(entry.text) : undefined
+      if (first) {
+        counts.set(first, (counts.get(first) ?? 1) + 1)
+        continue
+      }
+      if (entry.kind === 'error') burst.set(entry.text, entry)
+      kept.push(entry)
+    }
+    return [kept, counts] as const
+  }, [props.entries, who])
   const streaming = Object.entries(props.live.streams)
     .map(([name, stream]) => ({ name, now: now(stream), stream }))
     .filter((item) => item.now && streamed && (who === 'all' || who === item.name))
@@ -344,7 +360,7 @@ export function Transcript(props: {
             if ('said' in row) return <Voice item={row.said} onBack={swarm.status === 'done' ? undefined : props.onFund} key={`m${row.said.id}`} name={props.handles.get(row.said.author ?? '') ?? Mention.handle(row.said.author ?? '')} />
             const entry = row.entry
             const head = !before || !('entry' in before) || speaker(before.entry.who) !== speaker(entry.who) || ['status', 'funds', 'machine', 'steer'].includes(before.entry.kind)
-            return <Beat entry={entry} head={head} key={entry.event === null ? `s${entry.seq}` : `e${entry.event}${entry.kind}`} />
+            return <Beat entry={entry} head={head} times={repeats.get(entry)} key={entry.event === null ? `s${entry.seq}` : `e${entry.event}${entry.kind}`} />
           })}
           {streaming.map((item) => (
             <li className="beat beat-now" data-kind={item.now?.kind === 'text' ? 'message' : item.now?.kind === 'input' ? 'tool' : 'thinking'} key={item.name}>

@@ -58,3 +58,9 @@ test('secrets in clone URLs and JWTs are redacted', () => {
   assert.equal(redact('git clone https://user:token@code.storage/repo'), 'git clone https://***@code.storage/repo')
   assert.equal(redact('eyJhbGciOiJIUzI1.eyJzdWIiOiIxMjM0.SflKxwRJSMeKKF2QT4'), '[redacted]')
 })
+
+test('a failed model call says why', () => {
+  const error = `Responses HTTPS request was rejected with HTTP 429: {"error":{"message":"The agent's payer refused to pay (429 busy): try again shortly.","type":"api_error"}}`
+  assert.equal(step('model.call.failed', { error })?.text, "A model call failed: The agent's payer refused to pay (429 busy): try again shortly.")
+  assert.equal(step('model.call.failed', { error: 'timeout' })?.text, 'A model call failed.')
+})

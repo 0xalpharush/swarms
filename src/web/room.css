@@ -431,6 +431,7 @@ html { -webkit-text-size-adjust:100%; text-size-adjust:100%; touch-action:manipu
 .beat[data-kind='message'] + .beat { margin-top:6px; }
 .beat[data-kind='message'][data-more='true'][data-open='false'] .beat-say { max-height:12em; overflow:hidden; -webkit-mask-image:linear-gradient(#000 65%,transparent); mask-image:linear-gradient(#000 65%,transparent); }
 .beat-text { padding:1px 0; overflow-wrap:anywhere; }
+.beat-times { color:var(--grey-600); font:12px var(--mono); }
 .beat[data-kind='tool'] .beat-text,.beat[data-kind='output'] .beat-text { overflow:hidden; font:12px/1.6 var(--mono); color:var(--grey-600); white-space:nowrap; text-overflow:ellipsis; }
 .beat[data-kind='tool'][data-more='true']:hover .beat-text,.beat[data-kind='output'][data-more='true']:hover .beat-text { color:var(--black); }
 .beat-mark { margin-right:8px; color:#a5b79c; }
