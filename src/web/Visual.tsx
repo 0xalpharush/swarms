@@ -38,11 +38,10 @@ function cents(value: string) {
 export function progress(swarm: Pick<Detail, 'reason' | 'status' | 'why' | 'working'>, now: number) {
   if (swarm.status === 'done') return 'Finished'
   if (swarm.status === 'running') return swarm.working ? `Working for ${duration(now - swarm.working.since)}` : 'Starting'
-  if (swarm.status === 'funding') return swarm.why === 'repo' ? 'Charging up to start' : 'Waiting for its first funds'
+  if (swarm.status === 'funding') return 'Waiting for its first funds'
   if (swarm.why === 'idle') return 'Resting: nothing worth spending on'
   if (swarm.why === 'rest') return 'Resting after errors'
   if (swarm.why === 'costly') return 'Its next step needs a bigger top-up'
-  if (swarm.why === 'repo') return 'Charging up to open its repository'
   return 'Out of energy'
 }
 

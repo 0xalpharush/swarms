@@ -173,7 +173,6 @@ export type Config = {
   gateway: string
   mach: `0x${string}`
   minPledge: string
-  repoAt: string
   reserve: string
   rpc: string
   tokens: { address: `0x${string}`; id: Currency; pool: boolean; symbol: string }[]
@@ -195,7 +194,7 @@ export type Pending = { amount: string; device: Device | null; note: string | nu
 
 export type Brief = Omit<Update, 'text'> & { excerpt: string }
 
-export type Why = 'unfunded' | 'money' | 'costly' | 'repo' | 'rest' | 'idle'
+export type Why = 'unfunded' | 'money' | 'costly' | 'rest' | 'idle'
 
 export type Overview = Summary & {
   budgets: Budget[]

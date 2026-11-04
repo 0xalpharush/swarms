@@ -60,7 +60,6 @@ const flows: readonly Flow[] = [
       { name: 'Live', url: swarm('bench-coders') },
       { name: 'Just started', url: swarm('rust-book-el') },
       { name: 'Not started yet', url: swarm('speedrun-t4') },
-      { name: 'Needs more to open its lab', url: swarm('speedrun-t4', '&scene=repo') },
       { name: 'Paused, out of money', url: swarm('dex-guide') },
       { name: 'Next step costs more than any backer', url: swarm('dex-guide', '&scene=costly') },
       { name: 'Resting after errors', url: swarm('dex-guide', '&scene=rest') },

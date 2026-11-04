@@ -413,14 +413,12 @@ function steady<T>(value: T, ms = 160) {
 const reasons = {
   costly: "Waiting for money: the agent's next model call holds $0.2147, more than the $0.2083 any one contribution can pay at once. A contribution or budget pull that can cover it starts it again.",
   money: 'Waiting for money: $0.0038 is payable now, less than one model call holds. New money keeps it going.',
-  repo: 'Waiting for $1.19 payable, with $1.04 of it from one funder, so the swarm can open its $1 code repository and still work; $0.60 is payable now.',
   rest: 'The agent hit 3 errors in a row, so the swarm stopped to rest. New money restarts it, and so does the next budget pull at 16:37 UTC.',
 } as const
 
 function reason(swarm: Live) {
-  const picked = (['costly', 'repo', 'rest'] as const).find((key) => scene.has(key)) ?? 'money'
+  const picked = (['costly', 'rest'] as const).find((key) => scene.has(key)) ?? 'money'
   if (swarm.status === 'paused') return reasons[picked]
-  if (swarm.status === 'funding' && picked === 'repo') return reasons.repo
   return null
 }
 
@@ -464,7 +462,7 @@ function detail(swarm: Live): Detail {
     notes: swarm.notes,
     pledges: swarm.pledges,
     reason: reason(swarm),
-    why: reason(swarm) ? ((['costly', 'repo', 'rest'] as const).find((key) => scene.has(key)) ?? (swarm.status === 'funding' ? 'unfunded' : 'money')) : null,
+    why: reason(swarm) ? ((['costly', 'rest'] as const).find((key) => scene.has(key)) ?? (swarm.status === 'funding' ? 'unfunded' : 'money')) : null,
     updates: swarm.updates,
     working: swarm.since === null ? null : { since: swarm.since },
   }
@@ -478,8 +476,7 @@ export function config(): Promise<Config> {
     explorer: 'https://explore.tempo.xyz',
     gateway: 'https://gateway.tempo-dev.workers.dev',
     mach: '0x20c000000000000000000000f37de3740adec032',
-    minPledge: '2.000000',
-    repoAt: '1.040000',
+    minPledge: '0.250000',
     reserve: '0.050000',
     rpc: 'https://rpc.tempo.xyz',
     tokens: [

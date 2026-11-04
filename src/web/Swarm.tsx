@@ -307,7 +307,7 @@ function Repository(props: { config: Config | undefined; swarm: Detail }) {
   const code = props.swarm.code
   if (!code || !props.config)
     return (
-      <p className="machine-none">No code yet. The agent opens its repository once one backer can cover {usd(props.config?.repoAt ?? '1.04')}.</p>
+      <p className="machine-none">No code yet. A repository shows up here once the agent creates one.</p>
     )
   if (loaded) return <loaded.Code gateway={props.config.gateway} repo={code} swarm={props.swarm.id} updates={props.swarm.updates} />
   return (

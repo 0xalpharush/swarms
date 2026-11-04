@@ -325,7 +325,7 @@ export function Repo(props: { config: Config | undefined; id: string }) {
       ) : !swarm || !props.config ? (
         <p className="empty">Loading…</p>
       ) : !code ? (
-        <p className="empty">This swarm has no repository yet: its agent creates one first thing once one funder can pay {usd(props.config.repoAt)} at once.</p>
+        <p className="empty">This swarm has no repository yet. It shows up here once the agent creates one.</p>
       ) : (
         <>
           <Clone repo={code} />

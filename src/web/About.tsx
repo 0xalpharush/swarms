@@ -3,7 +3,7 @@ import { Link } from './router.tsx'
 const steps = [
   ['Start', 'Someone asks a question and says what evidence would answer it.'],
   ['Fuel', 'Anyone backs it: once, a little every day, or a pledge. MACH, USDC.e, pathUSD or OUSD.'],
-  ['Work', 'An AI agent researches it, sends out helpers, runs code on real machines and commits to a public repository.'],
+  ['Work', 'An AI agent researches it, sends out helpers, runs code on real machines and publishes what it makes.'],
   ['Steer', 'Backers add notes. A note carries the weight of the money behind it, and @swarm in the room talks to the agent.'],
   ['Keep going', 'A swarm is never done: it keeps producing code and artifacts while there is money and rests when it has nothing worth doing. A note or new money wakes it.'],
 ] as const

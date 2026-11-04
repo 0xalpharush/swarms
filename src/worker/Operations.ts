@@ -345,7 +345,6 @@ export function config(env: Cloudflare.Env): Config {
     gateway: env.GATEWAY_URL,
     mach: Chain.mach,
     minPledge: Memo.decimal(Store.minPledge),
-    repoAt: Memo.decimal(Store.repoAt),
     reserve: Memo.decimal(Store.reserve),
     rpc: env.TEMPO_RPC,
     tokens: Chain.pledgeable.map((id) => ({
@@ -791,7 +790,6 @@ export async function pledge(env: Cloudflare.Env, input: Input<'pledge'>): Promi
   const row = await provisioned(env, found)
 
   const amount = units(request.amount)
-  if (!row.repo && amount < Store.minPledge) return Problem.fail(400, 'invalid_request', `A swarm's first pledges are at least ${Memo.decimal(Store.minPledge)}, so it can open its repository and work.`)
   const requested = await Keys.request(env, { amount, days: pledgeDays, period: 0, recipient: row.wallet, token: request.token })
   const device = request.device ? await Devices.register(requested.authorizeAccessKey, Chain.chain.id, env.SWARMS_URL) : undefined
   if (request.device && !device) return Problem.fail(502, 'upstream_failed', 'Tempo Wallet did not register the approval request.')

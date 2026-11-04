@@ -96,19 +96,13 @@ export const reserve = 50_000n
 
 export const headroom = 100_000n
 
-export const minPledge = 2_000_000n
+export const minPledge = 250_000n
 
 export const minSteer = 100_000n
 
 export const stock = reserve + headroom * 3n
 
-export const repoCost = 1_000_000n
-
 export const perCall = 20_000n
-
-export const repoAt = repoCost + perCall
-
-export const launch = repoAt + reserve + headroom
 
 export const budget = { days: 365, max: 100_000_000n, min: minPledge, period: 2_592_000 } as const
 
