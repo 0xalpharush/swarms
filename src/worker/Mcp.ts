@@ -4,6 +4,7 @@ import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
 import * as Memo from '../shared/Memo.ts'
 import * as Operations from './Operations.ts'
 import * as Problem from './Problem.ts'
+import * as Replica from './Replica.ts'
 import * as Store from './Store.ts'
 
 function instructions(origin: string) {
@@ -22,7 +23,7 @@ export async function handle(request: Request, env: Cloudflare.Env) {
   if (request.method !== 'POST')
     return Problem.json({ code: 'invalid_request', detail: 'Use POST for MCP over streamable HTTP.', status: 405 })
 
-  const server = create(env, new URL(request.url).origin)
+  const server = create(env, Replica.read(env, request), new URL(request.url).origin)
   const transport = new WebStandardStreamableHTTPServerTransport({ enableJsonResponse: true })
   await server.connect(transport)
   return transport.handleRequest(request)
@@ -39,7 +40,7 @@ function reply<value>(result: Problem.Result<value>, shape: (value: value) => un
 
 const reading = { openWorldHint: false, readOnlyHint: true } as const
 
-function create(env: Cloudflare.Env, origin: string) {
+function create(env: Cloudflare.Env, read: Cloudflare.Env, origin: string) {
   const server = new McpServer({ name: 'swarms', version: '1.0.0' }, { instructions: instructions(origin) })
 
   server.registerTool(
@@ -50,7 +51,7 @@ function create(env: Cloudflare.Env, origin: string) {
         'List the funded swarms, most recently active first (at most 100), each with its title, goal, status, money raised, spent and remaining, monthly budgets, its wallet, machines, backers and latest answer. status filters: funding (funded, its agent has not started yet), running (its agent is working), paused (out of money; new money resumes it) or done.',
       inputSchema: Operations.schema.list.shape,
     },
-    async (input) => reply(await Operations.list(env, input)),
+    async (input) => reply(await Operations.list(read, input)),
   )
 
   server.registerTool(
@@ -61,7 +62,7 @@ function create(env: Cloudflare.Env, origin: string) {
         "One swarm: its goal, status and money, its latest answer, every update (time, what it cost and a short excerpt; read them in full with swarm_updates), whether its agent is working and since when, the steering notes ranked by the money behind them and their share of everything raised, its pledges, transfers and budget pulls, monthly budgets and the machines attached now.",
       inputSchema: Operations.schema.swarm.shape,
     },
-    async (input) => reply(await Operations.get(env, input)),
+    async (input) => reply(await Operations.get(read, input)),
   )
 
   server.registerTool(
@@ -72,7 +73,7 @@ function create(env: Cloudflare.Env, origin: string) {
         "A swarm's latest answer: its agent's newest update in full (markdown), and whether the agent is working now.",
       inputSchema: Operations.schema.swarm.shape,
     },
-    async (input) => reply(await Operations.answer(env, input)),
+    async (input) => reply(await Operations.answer(read, input)),
   )
 
   server.registerTool(
@@ -83,7 +84,7 @@ function create(env: Cloudflare.Env, origin: string) {
         "A swarm's updates, oldest first: each time its agent paused to reply, what it reported (markdown), when (ms), what it spent since the update before and the commits it pushed. limit keeps the newest.",
       inputSchema: Operations.schema.updates.shape,
     },
-    async (input) => reply(await Operations.updates(env, input)),
+    async (input) => reply(await Operations.updates(read, input)),
   )
 
   server.registerTool(
@@ -94,25 +95,25 @@ function create(env: Cloudflare.Env, origin: string) {
         "A swarm's transcript, oldest first: its agent's messages and reasoning summaries (message, thinking), tool calls, scripts, shell commands and subagents (tool), outputs (output), Modal machines (machine), money coming in and going back (funds), steering (steer), the swarm starting, pausing and posting updates (status) and failures (error), each with seq, time, text, an optional detail and who (null for the agent, else the subagent's name). Page forward with after set to the previous page's next, or back with before.",
       inputSchema: Operations.schema.feed.shape,
     },
-    async (input) => reply(await Operations.feed(env, input)),
+    async (input) => reply(await Operations.feed(read, input)),
   )
 
   server.registerTool(
     'problems_list',
     { annotations: reading, description: 'The curated idea bank on the New page: each problem with its id, short label, hint, title and full research brief, whether it is open, and the swarm working on it if one is. Pass an open problem id as problem to swarm_create.', inputSchema: {} },
-    async () => reply(await Operations.problems(env)),
+    async () => reply(await Operations.problems(read)),
   )
 
   server.registerTool(
     'swarm_machines',
     { annotations: reading, description: "Every machine a swarm used, as its Machines tab shows them: Modal sandboxes from compute_create (with their image, CPU, memory, GPU, lease and timeout), Browserbase browsers, and contributors' lent nanocode hands (label, price, what their owners were paid, requests), each with whether it is connected, when it started and stopped, and every command that ran on it with its output.", inputSchema: Operations.schema.swarm.shape },
-    async (input) => reply(await Operations.machines(env, input)),
+    async (input) => reply(await Operations.machines(read, input)),
   )
 
   server.registerTool(
     'swarm_backers',
     { annotations: reading, description: "A swarm's Ideas tab: its ideas (notes) ranked by the money behind them, with backers and share, and every backer with what they put in and how (pledge, transfer, budget, lent machine), most first.", inputSchema: Operations.schema.swarm.shape },
-    async (input) => reply(await Operations.backers(env, input)),
+    async (input) => reply(await Operations.backers(read, input)),
   )
 
   server.registerTool(
@@ -123,7 +124,7 @@ function create(env: Cloudflare.Env, origin: string) {
         "A swarm's artifacts: the dashboards, charts, tables and write-ups its agents published for contributors to follow along, each with its title, kind, summary, form (page for HTML, image, markdown, table, json or text), version and url. Read a markdown, table, json or text artifact by fetching its url; a page is an HTML dashboard for a browser.",
       inputSchema: Operations.schema.swarm.shape,
     },
-    async (input) => reply(await Operations.artifacts(env, input, origin)),
+    async (input) => reply(await Operations.artifacts(read, input, origin)),
   )
 
   server.registerTool(
@@ -134,7 +135,7 @@ function create(env: Cloudflare.Env, origin: string) {
         "A swarm's room, oldest first: its backers' messages, each with its author's wallet address (the room shows it as a handle such as @quark-1a2b), the backers it mentions, and steer when it was an @swarm message that put some of its author's backing behind an idea (amount, note, the note's weight and share, and live when it reached the working agent at once). Messages without an author mark money coming in, the agent starting and stopping, and its updates. members lists every backer with what they put in, how much of it is behind notes and how they back the swarm. By default the newest messages; page back with before, or read newer ones with after.",
       inputSchema: Operations.schema.room.shape,
     },
-    async (input) => reply(await Operations.room(env, input)),
+    async (input) => reply(await Operations.room(read, input)),
   )
 
   server.registerTool(
@@ -145,7 +146,7 @@ function create(env: Cloudflare.Env, origin: string) {
         "Full-text search over what the swarms did: every swarm's title and goal, its agent's updates and the steering notes, ranked best first with the matches marked «like this» in a snippet. With swarm set it searches only that swarm and also its feed (tool calls, shell commands, machines, messages and errors). Send keywords rather than a question; hits match any of them. Read an update hit with swarm_updates (by its at), and a feed hit with swarm_feed (after = its entry.seq - 1).",
       inputSchema: Operations.schema.search.shape,
     },
-    async (input) => reply(await Operations.search(env, input)),
+    async (input) => reply(await Operations.search(read, input)),
   )
 
   server.registerTool(
@@ -237,7 +238,7 @@ function create(env: Cloudflare.Env, origin: string) {
       description: `Wait up to timeout seconds (at most ${Operations.maxWait}) for a swarm's agent to post its next update, then return that update and the swarm. It returns at once when an update newer than after was already posted (changed: true, reason updated), or when the agent is not working and the swarm is funding, paused or done (reason idle); otherwise reason timeout. Call it again to keep waiting; the swarm itself has no time limit.`,
       inputSchema: Operations.schema.wait.shape,
     },
-    async (input, extra) => reply(await Operations.wait(env, input, extra.signal)),
+    async (input, extra) => reply(await Operations.wait(read, input, extra.signal)),
   )
 
   return server

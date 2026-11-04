@@ -1,6 +1,7 @@
 import { Handler, Kv } from 'accounts/server'
 import type { Address } from 'viem'
 import { http } from 'viem'
+import * as Replica from './Replica.ts'
 
 export const path = '/v1/auth'
 
@@ -13,17 +14,18 @@ function live<value>(row: Stored | null): value | undefined {
 }
 
 export function store(env: Cloudflare.Env) {
+  const db = Replica.primary(env).DB
   return Kv.from({
     delete: async (key: string) => {
-      await env.DB.prepare('delete from sessions where key = ?').bind(key).run()
+      await db.prepare('delete from sessions where key = ?').bind(key).run()
     },
     get: async <value>(key: string) =>
-      live<value>(await env.DB.prepare('select value, expires_at from sessions where key = ?').bind(key).first<Stored>()),
+      live<value>(await db.prepare('select value, expires_at from sessions where key = ?').bind(key).first<Stored>()),
     set: async (key: string, value: unknown, options?: { ttl?: number | undefined }) => {
       const now = Date.now()
-      await env.DB.batch([
-        env.DB.prepare('delete from sessions where expires_at < ?').bind(now),
-        env.DB.prepare('insert or replace into sessions (key, value, expires_at) values (?, ?, ?)').bind(
+      await db.batch([
+        db.prepare('delete from sessions where expires_at < ?').bind(now),
+        db.prepare('insert or replace into sessions (key, value, expires_at) values (?, ?, ?)').bind(
           key,
           JSON.stringify(value),
           options?.ttl ? now + options.ttl * 1000 : null,
@@ -31,7 +33,7 @@ export function store(env: Cloudflare.Env) {
       ])
     },
     take: async <value>(key: string) =>
-      live<value>(await env.DB.prepare('delete from sessions where key = ? returning value, expires_at').bind(key).first<Stored>()),
+      live<value>(await db.prepare('delete from sessions where key = ? returning value, expires_at').bind(key).first<Stored>()),
   })
 }
 

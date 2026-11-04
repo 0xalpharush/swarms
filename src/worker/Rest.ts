@@ -5,6 +5,7 @@ import * as Mcp from './Mcp.ts'
 import * as OpenApi from './OpenApi.ts'
 import * as Operations from './Operations.ts'
 import * as Problem from './Problem.ts'
+import * as Replica from './Replica.ts'
 import * as Sessions from './Sessions.ts'
 
 export const app = new Hono<{ Bindings: Cloudflare.Env }>()
@@ -30,7 +31,7 @@ export function settled(result: Problem.Result<Pledged | Pending>) {
   return Problem.respond(result, result.ok && result.value.status === 'pending' ? 202 : 201)
 }
 
-app.use('/v1/*', cors())
+app.use('/v1/*', cors({ exposeHeaders: [Replica.header] }))
 app.use('/openapi.json', cors())
 app.use('/mcp', cors({ exposeHeaders: ['mcp-protocol-version', 'mcp-session-id'] }))
 

@@ -1,6 +1,7 @@
 import type { Account, Answer, Budget, Contribution, Currency, Member, Note, Pledge, Summary, Way } from '../shared/Api.ts'
 import * as Memo from '../shared/Memo.ts'
 import * as Mention from '../shared/Mention.ts'
+import * as Replica from './Replica.ts'
 
 const ways = ['pledge', 'budget', 'transfer', 'machine'] as const satisfies readonly Way[]
 
@@ -176,17 +177,20 @@ export function seen(id: string) {
 
 export async function exists(env: Cloudflare.Env, id: string) {
   if (known.has(id)) return true
-  const found = (await env.DB.prepare('select 1 from swarms where id = ?').bind(id).first()) !== null
+  const found = (await fresh(env, (db) => db.prepare('select 1 from swarms where id = ?').bind(id).first())) !== null
   if (found) known.add(id)
   return found
 }
 
 export async function find(env: Cloudflare.Env, id: string) {
-  const row = await env.DB.prepare(totals + ' where s.id = ?')
-    .bind(id)
-    .first<Row>()
+  const row = await fresh(env, (db) => db.prepare(totals + ' where s.id = ?').bind(id).first<Row>())
   if (row) known.add(row.id)
   return row
+}
+
+async function fresh<T>(env: Cloudflare.Env, read: (db: D1Database) => Promise<T | null>) {
+  const value = await read(env.DB)
+  return value === null && Replica.replicated(env) ? read(Replica.primary(env).DB) : value
 }
 
 const repos = new Map<string, { at: number; repo: string }>()
@@ -194,7 +198,7 @@ const repos = new Map<string, { at: number; repo: string }>()
 export async function repo(env: Cloudflare.Env, id: string) {
   const cached = repos.get(id)
   if (cached && Date.now() - cached.at < 60_000) return cached.repo
-  const row = await env.DB.prepare('select repo from swarms where id = ?').bind(id).first<{ repo: string | null }>()
+  const row = await fresh(env, (db) => db.prepare('select repo from swarms where id = ?').bind(id).first<{ repo: string | null }>())
   if (row) known.add(id)
   if (row?.repo) repos.set(id, { at: Date.now(), repo: row.repo })
   return row?.repo ?? null
@@ -526,6 +530,10 @@ export type Ledger = {
 }
 
 export async function ledger(env: Cloudflare.Env, id: string): Promise<Ledger | undefined> {
+  return (await tally(env, id)) ?? (Replica.replicated(env) ? tally(Replica.primary(env), id) : undefined)
+}
+
+async function tally(env: Cloudflare.Env, id: string): Promise<Ledger | undefined> {
   const [found, legacy, held, weights, budgeted, given, reports] = await env.DB.batch<Record<string, unknown>>([
     env.DB.prepare(totals + ' where s.id = ?').bind(id),
     legacyPledges(env, id),

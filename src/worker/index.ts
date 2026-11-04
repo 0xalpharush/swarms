@@ -5,6 +5,7 @@ import * as Edge from './Edge.ts'
 import * as Operations from './Operations.ts'
 import * as Page from './Page.ts'
 import * as Problem from './Problem.ts'
+import * as Replica from './Replica.ts'
 import * as Rest from './Rest.ts'
 import * as Sessions from './Sessions.ts'
 import * as XFrames from './XFrames.ts'
@@ -27,6 +28,17 @@ app.use('*', async (c, next) => {
   const match = (c.req.header('if-none-match') ?? '').split(',').some((tag) => tag.trim() === etag)
   c.res = undefined
   c.res = match ? new Response(null, { headers, status: 304 }) : new Response(body, { headers, status: 200 })
+})
+
+app.use('*', async (c, next) => {
+  const path = new URL(c.req.url).pathname
+  if (Replica.readable(c.req.method, path)) c.env = Replica.read(c.env, c.req.raw)
+  await next()
+  if (!Replica.writes(c.req.method, path) || !c.res.ok) return
+  const marked = await Replica.mark(c.env, c.res).catch(() => undefined)
+  if (!marked) return
+  c.res = undefined
+  c.res = marked
 })
 
 app.get('*', async (c, next) => {
