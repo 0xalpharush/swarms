@@ -1,0 +1,17 @@
+FROM ubuntu:24.04
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update -qq && apt-get install -y -qq \
+    clang lld llvm cmake ninja-build pkg-config golang-go \
+    build-essential autoconf automake libtool git curl ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+RUN curl -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
+ENV PATH=/root/.cargo/bin:$PATH
+# nghttp2 HPACK lib built with ASan/UBSan
+RUN git clone --depth 1 https://github.com/nghttp2/nghttp2 /opt/nghttp2 \
+    && cd /opt/nghttp2 && git rev-parse HEAD > /opt/nghttp2.sha \
+    && autoreconf -i >/dev/null 2>&1 \
+    && ./configure --enable-lib-only --enable-static --disable-shared --disable-threads \
+       CC=clang CFLAGS="-g -O1 -fsanitize=address,undefined -fno-omit-frame-pointer -fno-sanitize-recover=undefined" >/tmp/cfg.log 2>&1 \
+    && make -C lib -j"$(nproc)" >/tmp/mk.log 2>&1
+ENV NGHTTP2=/opt/nghttp2
+WORKDIR /src

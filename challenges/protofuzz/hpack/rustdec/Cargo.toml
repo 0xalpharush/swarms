@@ -1,0 +1,13 @@
+[package]
+name = "rhpack"
+version = "0.0.0"
+edition = "2021"
+
+[lib]
+crate-type = ["staticlib"]
+
+[dependencies]
+hpack = "0.3"
+
+[profile.release]
+debug = true

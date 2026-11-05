@@ -1,0 +1,10 @@
+{
+  "name": "hpack",
+  "title": "HPACK: nghttp2 vs Rust",
+  "summary": "Differential + sanitizer fuzzing of nghttp2's HPACK decoder (C, the target) against a Rust HPACK decoder, over RFC 7541 representation traces that share a dynamic table. A sanitizer fault in nghttp2 or a decode disagreement is a finding; the Go x/net decoder breaks C-vs-Rust ties.",
+  "entry": "verify.sh",
+  "target": { "c": "nghttp2 lib (HPACK)", "rust": "hpack crate", "oracle": "golang.org/x/net/http2/hpack" },
+  "ops": ["hpack-decode-trace"],
+  "sanitizers": ["address", "undefined"],
+  "limits": { "input": 262144 }
+}

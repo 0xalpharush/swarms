@@ -1,0 +1,10 @@
+{
+  "name": "dnp3",
+  "title": "DNP3: opendnp3 vs dnp3-rs",
+  "summary": "Differential + sanitizer fuzzing of opendnp3 (C++, the target) against the dnp3 crate (Rust, Step Function I/O) on the DNP3 link/transport/application decode path. Stateful trace op reassembles transport segments across link frames. Both libraries are maintained by one vendor, so the Rust side is a strong oracle.",
+  "entry": "verify.sh",
+  "target": { "cpp": "opendnp3 (github.com/dnp3/opendnp3)", "rust": "dnp3 (github.com/stepfunc/dnp3)" },
+  "ops": ["dnp3-link-frame", "dnp3-app-fragment", "dnp3-transport-trace"],
+  "sanitizers": ["address", "undefined"],
+  "limits": { "input": 262144 }
+}

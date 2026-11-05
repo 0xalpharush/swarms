@@ -1,0 +1,10 @@
+{
+  "name": "modbus",
+  "title": "Modbus: libmodbus vs rodbus/tokio-modbus",
+  "summary": "Differential + sanitizer fuzzing of libmodbus (C, the target) against a Rust Modbus codec (rodbus or tokio-modbus) on the ADU/PDU decode path (RTU and TCP). Stateful trace op feeds a request then its response so response parsing is exercised against the pending request.",
+  "entry": "verify.sh",
+  "target": { "c": "libmodbus (github.com/stephane/libmodbus)", "rust": "rodbus / tokio-modbus" },
+  "ops": ["modbus-tcp-adu", "modbus-rtu-adu", "modbus-reqresp-trace"],
+  "sanitizers": ["address", "undefined"],
+  "limits": { "input": 65536 }
+}
