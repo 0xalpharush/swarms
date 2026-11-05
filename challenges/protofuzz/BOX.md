@@ -30,7 +30,7 @@ sudo apt-get install -y clang lld llvm cmake ninja-build pkg-config golang-go bu
 mkdir -p ~/pf/src && cd ~/pf/src
 git clone --depth 1 https://github.com/nghttp2/nghttp2 && cd nghttp2
 autoreconf -i && ./configure --enable-lib-only --enable-static --disable-shared --disable-threads \
-  CC=clang CFLAGS="-g -O1 -fsanitize=address,undefined -fno-omit-frame-pointer -fno-sanitize-recover=undefined"
+  CC=clang CFLAGS="-g -O1 -fsanitize=fuzzer-no-link,address,undefined -fno-omit-frame-pointer -fno-sanitize-recover=undefined"
 make -C lib -j"$(nproc)"
 ```
 

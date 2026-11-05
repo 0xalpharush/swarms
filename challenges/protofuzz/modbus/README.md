@@ -1,6 +1,6 @@
 # Modbus — libmodbus (C) vs rodbus/tokio-modbus
 
-Scaffold; not yet run. Follow `../README.md`. Smallest of the three C builds.
+Built + run on a boxctl box (static libmodbus with ASan/UBSan + coverage). socketpair modbus_receive+modbus_reply over a full-range mapping; 0 crashes in 60s. See ../README.md.
 
 ## Fuzz units (mined signature)
 - **TCP ADU**: MBAP header (txn id, proto id, length, unit id) + PDU (function

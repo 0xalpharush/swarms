@@ -1,6 +1,6 @@
 # DNP3 — opendnp3 (C++) vs dnp3-rs
 
-Scaffold; not yet run (opendnp3's C++ build needs a box). Follow `../README.md`.
+Built + run on a boxctl box (static opendnp3 with ASan/UBSan + libFuzzer coverage). 60s: 1018 edges, 5911 features, 1107 corpus, ~90k exec/s, 0 crashes. dnp3-rs differential is the next step.
 
 ## Fuzz units (mined signature)
 - **link frame**: 0x0564, len, ctrl, dst, src, header-CRC, then data blocks each

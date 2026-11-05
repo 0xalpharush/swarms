@@ -1,0 +1,5 @@
+*/build/
+*/findings/
+*/corpus/
+*/rustdec/target/
+*/oracle/go.sum

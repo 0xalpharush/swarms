@@ -24,8 +24,11 @@ sanitizer fault or an oracle-confirmed decode disagreement.
    template through the *real* C decoder and assert it is accepted. A
    constructor the target rejects is not a sound term — fix it before fuzzing.
    (This is the "mine, then verify" gate; it keeps hallucinated grammar out.)
-3. **Build differentially with sanitizers.** Compile the C/C++ target with
-   `-fsanitize=address,undefined -fno-sanitize-recover=undefined`. Expose the
+3. **Build differentially with sanitizers + coverage.** Compile the C/C++
+   target with `-fsanitize=fuzzer-no-link,address,undefined
+   -fno-sanitize-recover=undefined` — `fuzzer-no-link` gives libFuzzer edge
+   feedback *inside* the target (without it the fuzzer is coverage-blind on the
+   library and only sees the harness). Expose the
    Rust port as a `staticlib` with an `extern "C"` decode that is
    **panic-safe** (`catch_unwind` → error code; a panic across FFI is UB). Link
    both into one libFuzzer binary.
@@ -85,10 +88,10 @@ normalize known strictness differences before calling anything a bug.
 | target | pair | state |
 |---|---|---|
 | `hpack/` | nghttp2 (C) vs `fluke-hpack` (Rust), Go x/net tie-breaker | **validated + refined locally** (Docker, arm64). C-only robustness: 0 crashes on nghttp2 (`f4c8edff`). Differential: 771 raw diffs → **0 false findings** after the fluke-hpack oracle + normalization; negative control caught 951/25 s. |
-| `dnp3/` | opendnp3 (C++) vs `dnp3` crate (Step Function I/O) | scaffold + box build recipe; not yet run |
-| `modbus/` | libmodbus (C) vs `tokio-modbus`/`rodbus` | scaffold + box build recipe; not yet run |
+| `dnp3/` | opendnp3 (C++); `dnp3-rs` differential is next | **run on a boxctl box.** opendnp3 built static with ASan/UBSan + coverage; `Decoder::DecodeLPDU` drives link→transport→app; CRC-aware term mutator. 60s: **1018 edges / 5911 features / 1107 corpus @ ~90k exec/s, 0 crashes**. 30-min campaign running. |
+| `modbus/` | libmodbus (C) vs `rmodbus` (Rust) | **run on a boxctl box.** libmodbus built static with ASan/UBSan + coverage; socketpair-driven `modbus_receive`+`modbus_reply` over a full-range mapping; term mutator over MBAP+PDU. 60s: 112 edges @ 77k exec/s, **0 crashes**. |
 
-Only `hpack/` has been executed. The Rust side (`fluke-hpack`) is a differential
+`hpack/` was validated locally; `dnp3/` and `modbus/` were built and run on a boxctl box (12-core, ASan/UBSan + libFuzzer coverage). The Rust side (`fluke-hpack`) is a differential
 oracle, not a disclosure target — the disclosure target is always the
 well-supported C/C++ stack (here nghttp2).
 
