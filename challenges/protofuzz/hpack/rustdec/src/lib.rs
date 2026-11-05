@@ -1,4 +1,4 @@
-use hpack::Decoder;
+use fluke_hpack::Decoder;
 use std::slice;
 
 fn put(out: &mut [u8], pos: &mut usize, b: &[u8]) -> bool {

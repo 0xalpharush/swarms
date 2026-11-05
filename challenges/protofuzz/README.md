@@ -51,29 +51,46 @@ sanitizer fault or an oracle-confirmed decode disagreement.
 
 ## The lesson from HPACK (why raw diffs are noisy)
 
-In the first run, 617 of 771 disagreements were "Go+Rust say OK, nghttp2 says
-error." These are **not** nghttp2 bugs: nghttp2 applies HTTP/2 header
-validation (e.g. rejecting empty header names) *on top of* HPACK, while the raw
-HPACK decoders do not. A cross-layer differential is **dominated by validation
-and layering differences**, so:
+The first run (old `hpack` crate) produced 771 disagreements. None were nghttp2
+bugs:
 
-- **Memory-safety findings (stage 5) are self-evident and come first.** A
-  sanitizer trap needs no oracle.
-- **Behavioral diffs (stage 6) require the oracle *and* normalization** of
-  known-legitimate differences before anything is called a finding. Pin the
-  comparison to one protocol layer, or encode the validation rules explicitly.
+- Most were **truncation strictness**. nghttp2 strictly errors
+  (`NGHTTP2_ERR_HEADER_COMP`) on a trailing *partial* representation; the old
+  crate accepted it. (A quick probe settled it: nghttp2 *accepts* an empty
+  header name — `{00 00 00}` decodes to `""=""`, `rc=0` — so this was never an
+  empty-name validation difference; `{00}` fails only because the name length
+  byte is missing.)
+- The rest were bugs/panics in the unmaintained crate itself.
+
+Two fixes turned noise into signal:
+
+1. **A maintained oracle.** Swapping to `fluke-hpack` removed the crate's own
+   bugs and panics. It agrees with nghttp2 on every fully-consumed input.
+2. **Normalization.** A finding is defined as *both decoders accept and fully
+   consume the input but emit different header lists*. Accept/reject boundaries
+   (truncation strictness) are counted, not flagged (restore them with
+   `PF_STRICT=1` for offline oracle triage). Memory-safety faults are a separate,
+   self-evident signal from the C-only run.
+
+Result: **771 raw disagreements → 0 false findings**, while a negative control
+(a deliberately corrupted Rust output) was caught **951 times in 25 s** — the
+differential is live and discriminating, not silently passing.
+
+The general rule: lead with sanitizer findings (self-evident); for behavioral
+diffs, pin the comparison to one layer (here: full-consume + decoded list) and
+normalize known strictness differences before calling anything a bug.
 
 ## Status
 
 | target | pair | state |
 |---|---|---|
-| `hpack/` | nghttp2 (C) vs `hpack` crate, Go x/net oracle | **validated end-to-end locally** (Docker, arm64). Build + term mutator + C-only robustness (0 crashes on hardened nghttp2) + differential + 3-way oracle triage all working. nghttp2 pinned `f4c8edff`. |
+| `hpack/` | nghttp2 (C) vs `fluke-hpack` (Rust), Go x/net tie-breaker | **validated + refined locally** (Docker, arm64). C-only robustness: 0 crashes on nghttp2 (`f4c8edff`). Differential: 771 raw diffs → **0 false findings** after the fluke-hpack oracle + normalization; negative control caught 951/25 s. |
 | `dnp3/` | opendnp3 (C++) vs `dnp3` crate (Step Function I/O) | scaffold + box build recipe; not yet run |
 | `modbus/` | libmodbus (C) vs `tokio-modbus`/`rodbus` | scaffold + box build recipe; not yet run |
 
-Only `hpack/` has been executed. The `hpack` crate (Rust side) is old and
-panics on malformed input; it serves as a differential oracle, not a disclosure
-target. The disclosure target is always the well-supported C/C++ stack.
+Only `hpack/` has been executed. The Rust side (`fluke-hpack`) is a differential
+oracle, not a disclosure target — the disclosure target is always the
+well-supported C/C++ stack (here nghttp2).
 
 ## Run it
 
