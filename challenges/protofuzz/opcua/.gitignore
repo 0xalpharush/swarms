@@ -1,0 +1,4 @@
+build/
+corpus/
+findings/
+rustdec/target/
