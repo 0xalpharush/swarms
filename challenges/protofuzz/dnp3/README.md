@@ -1,6 +1,19 @@
-# DNP3 — opendnp3 (C++) vs dnp3-rs
+# DNP3 — opendnp3 (C++), sanitizer + BMC
 
-Built + run on a boxctl box (static opendnp3 with ASan/UBSan + libFuzzer coverage). 60s: 1018 edges, 5911 features, 1107 corpus, ~90k exec/s, 0 crashes. dnp3-rs differential is the next step.
+Built + run on a boxctl box (static opendnp3 with ASan/UBSan + libFuzzer coverage).
+30-min campaign: **6598 edges / 6739 features @ ~90k exec/s, 0 crashes** (CRC-correct
+term frames drive link→transport→app). opendnp3 is OSS-Fuzz-hardened, so 0 is expected.
+
+**A field-level differential for DNP3 is infeasible on both sides (determined 2026-11-06),
+so DNP3 is a sanitizer + BMC target, not a differential one:**
+- opendnp3's public `Decoder` emits parsed fields only as *log strings* — its
+  `IDecoderCallbacks` interface is empty (just `PushIndent`/`PopIndent`), so there is no
+  structured field oracle to compare against.
+- The Rust `dnp3` crate (Step Function I/O) is session/tokio-oriented with **no public
+  standalone decode API**, and ships under a **non-commercial, no-redistribution license** —
+  unusable as a bundled differential oracle.
+
+The sanitizer campaign (above) and the BMC drivers (`../bmc/`) are the DNP3 signal.
 
 ## Fuzz units (mined signature)
 - **link frame**: 0x0564, len, ctrl, dst, src, header-CRC, then data blocks each
@@ -13,13 +26,11 @@ Built + run on a boxctl box (static opendnp3 with ASan/UBSan + libFuzzer coverag
   that reassemble into one application fragment — the DNP3 analogue of HPACK's
   shared dynamic table. Replay bugs live here.
 
-## Differential
-- C++: opendnp3 parsers (`LinkLayerParser`, `APDUParser`, `TransportRx`). Build
-  with ASan/UBSan via its CMake (`-DCMAKE_CXX_FLAGS=-fsanitize=address,undefined`).
-- Rust: `dnp3` crate internal parsers, exposed as a `staticlib` with a
-  panic-safe `extern "C"` that decodes to the same canonical form.
-- Oracle/tie-break: a strict spec decoder, or Wireshark's DNP3 dissector run
-  headless, for contested fragments.
+## Why sanitizer-only (not differential)
+See the note above: neither opendnp3 (log-string output, empty callbacks) nor the
+Rust `dnp3` crate (no public decode API, restrictive license) exposes a field oracle.
+The deep CRC-aware term mutator still exercises the full link→transport→app parse chain
+under ASan/UBSan, which is where opendnp3's memory-safety bugs would surface.
 
 ## Build recipe (box)
 ```

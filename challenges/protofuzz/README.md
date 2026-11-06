@@ -88,12 +88,23 @@ normalize known strictness differences before calling anything a bug.
 | target | pair | state |
 |---|---|---|
 | `hpack/` | nghttp2 (C) vs `fluke-hpack` (Rust), Go x/net tie-breaker | **validated + refined locally** (Docker, arm64). C-only robustness: 0 crashes on nghttp2 (`f4c8edff`). Differential: 771 raw diffs → **0 false findings** after the fluke-hpack oracle + normalization; negative control caught 951/25 s. |
-| `dnp3/` | opendnp3 (C++); `dnp3-rs` differential is next | **run on a boxctl box.** opendnp3 built static with ASan/UBSan + coverage; `Decoder::DecodeLPDU` drives link→transport→app; CRC-aware term mutator. 60s: **1018 edges / 5911 features / 1107 corpus @ ~90k exec/s, 0 crashes**. 30-min campaign running. |
-| `modbus/` | libmodbus (C) vs `rmodbus` (Rust) | **run on a boxctl box.** libmodbus built static with ASan/UBSan + coverage; socketpair-driven `modbus_receive`+`modbus_reply` over a full-range mapping; term mutator over MBAP+PDU. 60s: 112 edges @ 77k exec/s, **0 crashes**. |
+| `dnp3/` | opendnp3 (C++) — **sanitizer + BMC** | **run on a boxctl box.** opendnp3 built static with ASan/UBSan + coverage; `Decoder::DecodeLPDU` drives link→transport→app; CRC-aware term mutator. 30-min: **6598 edges / 6739 features @ ~90k exec/s, 0 crashes**. A differential is infeasible here (opendnp3 emits fields as log strings; Rust `dnp3` has no public decode API + a restrictive license) — see `dnp3/README.md`. |
+| `modbus/` | libmodbus (C) vs `rmodbus` (Rust) | **run on a boxctl box.** libmodbus built static with ASan/UBSan + coverage; socketpair-driven `modbus_receive`+`modbus_reply` over a full-range mapping; term mutator over MBAP+PDU. Upgraded to a **field-level exception-code differential** (compare the Modbus exception each stack raises, not just accept/reject — the earlier accept/reject diffs were semantic noise). **0 crashes.** |
+| `opcua/` | open62541 (C) vs `async-opcua` (Rust) | **4th target, run on a boxctl box.** The less-hardened industrial/SCADA stack. **Field-level round-trip differential**: decode a `Variant` with each stack, re-encode, compare canonical bytes (OPC-UA binary is canonical, so same value ⇒ same bytes — no cross-impl type mapping). open62541 with ASan/UBSan + coverage. C-only: **512 edges @ 200k exec/s, 0 memory-safety crashes.** |
+| `bmc/` | CBMC on real parsing arithmetic | **validated.** Real nghttp2 HPACK integer decoder → **VERIFIED** safe; a planted-guard-removed copy → **FAILED** (positive control proves the checker discriminates); Modbus byte-count invariant → VERIFIED. The complement to fuzzing — proves bounded absence of overflow/OOB/UB, the Oath grid-bugs article's biggest-yield technique. |
 
-`hpack/` was validated locally; `dnp3/` and `modbus/` were built and run on a boxctl box (12-core, ASan/UBSan + libFuzzer coverage). The Rust side (`fluke-hpack`) is a differential
-oracle, not a disclosure target — the disclosure target is always the
-well-supported C/C++ stack (here nghttp2).
+`hpack/` was validated locally; `dnp3/`, `modbus/` and `opcua/` were built and run on a
+boxctl box (ASan/UBSan + libFuzzer coverage); `bmc/` runs anywhere CBMC installs. The Rust
+side is always a differential oracle, never a disclosure target — the disclosure target is
+the well-supported C/C++ stack.
+
+**Honest result so far: no confirmed memory-safety bugs** across nghttp2, opendnp3, libmodbus
+(all OSS-Fuzz-hardened — 0 is the expected outcome) and open62541 on short campaigns. Every
+candidate the harnesses surfaced was triaged *out* as noise, not reported: HPACK's 771 raw
+diffs, Modbus's accept/reject diffs, and open62541's `-fsanitize=function` report on its
+benign decode-dispatch idiom. Correctly rejecting false positives is the discipline the method
+lives or dies on. The remaining bug-yield levers are longer campaigns on `opcua/` (the least
+hardened), the field-level differentials, and extracting real less-hardened functions for `bmc/`.
 
 ## Run it
 
