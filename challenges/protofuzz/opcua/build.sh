@@ -23,8 +23,14 @@ GEN="$(find "$O62/build" -name 'types_generated.h' | head -1)"
 [ -n "$GEN" ] && INCS+=("-I$(dirname "$(dirname "$GEN")")")
 
 echo "[build] libFuzzer harness (ASan+UBSan+fuzzer)"
+# -fno-sanitize=function: open62541's decoder dispatches every per-type decode
+# through one generic function-pointer type (a table of casts). UBSan's `function`
+# check flags that idiom as UB on EVERY decode, well-formed inputs included; it is
+# benign type-punning, not a memory-safety bug, and open62541's own OSS-Fuzz build
+# disables it. Suppressing it keeps the signal (bounds/overflow/shift/alignment).
 clang++ -g -O1 -fno-omit-frame-pointer -fuse-ld=lld \
-  -fsanitize=fuzzer,address,undefined -fno-sanitize-recover=undefined \
+  -fsanitize=fuzzer,address,undefined -fno-sanitize=function \
+  -fno-sanitize-recover=undefined \
   "${INCS[@]}" "$HERE/harness.cc" "$RLIB" "$UALIB" \
   -pthread -ldl -lm -o "$OUT/opcua-fuzz"
 echo "[build] ok -> $OUT/opcua-fuzz"
