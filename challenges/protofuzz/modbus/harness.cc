@@ -35,11 +35,9 @@ static int c_parse(const uint8_t *data, size_t size) {
     uint8_t req[MODBUS_TCP_MAX_ADU_LENGTH];
     rv = modbus_receive(ctx, req);
     if (rv >= 0) {
-      modbus_mapping_t *map = modbus_mapping_new(0x10000, 0x10000, 0x10000, 0x10000);
-      if (map) {
-        modbus_reply(ctx, req, rv, map);  // exercises per-function data paths
-        modbus_mapping_free(map);
-      }
+      static modbus_mapping_t *map =
+          modbus_mapping_new(0x10000, 0x10000, 0x10000, 0x10000);  // once
+      if (map) modbus_reply(ctx, req, rv, map);  // per-function data paths
     }
     modbus_free(ctx);
   }

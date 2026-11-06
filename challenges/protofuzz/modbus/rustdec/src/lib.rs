@@ -11,9 +11,13 @@ pub extern "C" fn rmodbus_parse_tcp(inp: *const u8, inlen: usize) -> i32 {
         return -2;
     }
     let input = unsafe { slice::from_raw_parts(inp, inlen) };
+    // address the frame to its own unit id (TCP MBAP unit = byte 6); otherwise
+    // rmodbus silently ignores frames not addressed to the configured unit and
+    // returns Ok, which is not the same as "accepted a valid request".
+    let unit = if input.len() > 6 { input[6] } else { 1 };
     let r = std::panic::catch_unwind(|| {
         let mut response: Vec<u8> = Vec::new();
-        let mut frame = ModbusFrame::new(1, input, ModbusProto::TcpUdp, &mut response);
+        let mut frame = ModbusFrame::new(unit, input, ModbusProto::TcpUdp, &mut response);
         match frame.parse() {
             Ok(()) => 0i32,
             Err(_) => -1i32,

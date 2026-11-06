@@ -27,3 +27,31 @@ git clone --depth1 https://github.com/stephane/libmodbus && cd libmodbus
   CFLAGS="-g -O1 -fsanitize=address,undefined -fno-omit-frame-pointer -fno-sanitize-recover=undefined"
 make -j
 ```
+
+
+## Differential result (honest)
+
+The libmodbus-vs-rmodbus accept/reject differential is **noise-dominated and
+not a useful bug signal**, for the same reason HPACK's raw diff was: the two
+libraries draw the frame boundary differently.
+
+- rmodbus silently **ignores frames not addressed to its unit id** and returns
+  `Ok` (not "valid request"). The harness now addresses each frame to its own
+  MBAP unit to remove this artifact (427 -> 361 divergences), but the rest are
+  still semantic:
+- rmodbus **early-returns `Ok` on broadcast** (unit 0) before any length check;
+  libmodbus validates the full declared length.
+- libmodbus **ignores trailing bytes** past the MBAP length and defers
+  **unknown function codes** to the reply layer (exception response), while
+  rmodbus surfaces them at parse time.
+- rmodbus's parse API does not expose the decoded fields (function, address,
+  quantity), so a decode-level comparison (the only high-signal differential)
+  is not available without patching the crate.
+
+Conclusion: for Modbus the **C-only sanitizer run is the signal** (libmodbus
+under ASan/UBSan via `modbus_receive`+`modbus_reply` over a full-range mapping;
+0 crashes). A meaningful differential would need field-level comparison and
+matched framing semantics (completeness, broadcast, exception layer). Known
+harness limitation: `modbus_reply` writes into an undrained socketpair, so
+throughput is low (~3-4 exec/s); drain the peer or set the socket non-blocking
+before a long campaign.
