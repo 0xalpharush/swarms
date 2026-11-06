@@ -23,7 +23,7 @@ GEN="$(find "$O62/build" -name 'types_generated.h' | head -1)"
 [ -n "$GEN" ] && INCS+=("-I$(dirname "$(dirname "$GEN")")")
 
 echo "[build] libFuzzer harness (ASan+UBSan+fuzzer)"
-clang++ -g -O1 -fno-omit-frame-pointer \
+clang++ -g -O1 -fno-omit-frame-pointer -fuse-ld=lld \
   -fsanitize=fuzzer,address,undefined -fno-sanitize-recover=undefined \
   "${INCS[@]}" "$HERE/harness.cc" "$RLIB" "$UALIB" \
   -pthread -ldl -lm -o "$OUT/opcua-fuzz"
