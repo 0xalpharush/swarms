@@ -49,4 +49,31 @@ self-evident finding regardless of the differential.
   impose caps. A limit mismatch shows up as accept/reject divergence on large
   arrays/strings and is config noise, not a bug — a triage axis, not a finding.
 
+## Result of the first differential campaign (2026-11-06, 20 min)
+
+**0 memory-safety faults, 0 Rust panics** over the sampled artifacts (confirmed by a
+separate C-only ASan/UBSan campaign). The differential is very much *live* — it produced
+~114k divergence reproducers — but every one is a **systematic semantic difference**, not a
+decoder vulnerability. Characterized by type:
+
+- **Value-normalization** (both accept, re-encode to the same length but different bytes):
+  `DateTime` scalars/arrays and `Boolean` arrays. One stack canonicalizes (DateTime clamped
+  to the OPC-UA range; Boolean forced to 0/1) while the other preserves the raw value. Output
+  normalization, not a parse bug.
+- **Decode strictness** (open62541 accepts, async-opcua rejects): `String`, `XmlElement`,
+  `LocalizedText`, `QualifiedName` — async-opcua applies UTF-8 / length validation open62541
+  does not. Arguably async-opcua is the stricter-but-more-correct side.
+- **Variant nesting** (open62541 rejects, async-opcua accepts): a `Variant` whose value is
+  itself a `Variant`. The one genuinely interesting compliance divergence — a maintainer note,
+  not a security finding.
+- **Array length-edge** handling on truncated/overlong length prefixes.
+
+This is the HPACK lesson again (771 raw diffs → 0 real findings): a field-level differential on
+two independently-correct, actively-maintained stacks is dominated by normalization and
+strictness differences that must be classified out before anything is called a bug. The method
+works and discriminates; the honest outcome on these inputs is **no vulnerability**. The bug
+yield would come from longer campaigns (open62541 is the least-hardened target here) and from
+pushing deeper structures (ExtensionObject, nested DataValue, NodeId variants) past the Variant
+top level.
+
 See `../BOX.md` for the campaign recipe.
