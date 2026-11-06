@@ -49,3 +49,31 @@ SECS=7200 JOBS=12 OUT=~/pf/build bash ~/pf/hpack/run.sh
 
 Fuzz jobs are long; each occupies the box's serial job queue, so use a
 dedicated box. Pull `~/pf/<target>/findings/` back for triage.
+
+## OPC-UA (4th target): open62541 vs async-opcua
+
+open62541 must be built with the function-type UBSan check made *recoverable*
+(its decoder dispatches every per-type decode through one generic function
+pointer — benign type-punning that `-fsanitize=function` flags on every decode):
+
+```
+SAN="-g -O1 -fsanitize=fuzzer-no-link,address,undefined -fno-omit-frame-pointer \
+  -fno-sanitize-recover=undefined -fsanitize-recover=function"
+cd ~/pf/src/open62541 && rm -rf build && mkdir build && cd build
+cmake -GNinja -DBUILD_SHARED_LIBS=OFF -DUA_ENABLE_AMALGAMATION=OFF \
+  -DCMAKE_BUILD_TYPE=Debug -DUA_LOGLEVEL=600 \
+  -DCMAKE_C_COMPILER=clang -DCMAKE_C_FLAGS="$SAN" .. && ninja
+```
+
+Real UBSan checks (bounds/overflow/shift/alignment) and ASan stay fatal; the
+function check logs once and continues. The box's clang emits LLVM bitcode, so
+the harness links the archive with `-fuse-ld=lld`.
+
+```
+O62=~/pf/src/open62541 OUT=~/pf/build/opcua bash ~/pf-repo/challenges/protofuzz/opcua/build.sh
+# differential campaign (every divergence saved as a reproducer):
+UBSAN_OPTIONS=halt_on_error=0:print_stacktrace=1 \
+  PF_STRICT=1 SECS=1200 OUT=~/pf/build/opcua bash ~/pf-repo/challenges/protofuzz/opcua/run.sh
+# memory-safety campaign:
+PF_CONLY=1 SECS=36000 OUT=~/pf/build/opcua bash ~/pf-repo/challenges/protofuzz/opcua/run.sh
+```
